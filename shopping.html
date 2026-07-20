@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Compras">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<title>Listas de compras</title>
+<!--
+  Data-free shell for the shopping-list module. Same pattern as index.html
+  (the daily-summary checklist): hosted on public GitHub Pages, holds NO
+  keys and NO data, asks for the shared passphrase, then talks only to the
+  gated Supabase Edge Function (checklist-api) via its shopping_* actions.
+-->
+<style>
+  :root{
+    --bg:#f7f7f8; --card:#ffffff; --text:#1a1a1a; --muted:#6b7280;
+    --border:#e5e7eb; --border-strong:#d1d5db; --accent:#2563eb;
+    --accent-text:#ffffff; --danger:#dc2626;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --muted:#94a3b8;
+      --border:#334155; --border-strong:#475569; --accent:#3b82f6;
+      --accent-text:#ffffff; --danger:#f87171;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding:max(16px,env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom));
+  }
+  .wrap{max-width:640px;margin:0 auto}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 16px}
+  h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
+  .nav{display:flex;align-items:center;gap:6px;flex:none}
+  .link{background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;text-decoration:none;display:inline-block}
+  .icon-btn{background:none;border:none;color:var(--muted);font-size:16px;padding:6px;cursor:pointer;flex:none;line-height:1}
+  .icon-btn.danger{color:var(--danger)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+  .row{display:flex;align-items:center;gap:8px;padding:14px;border-bottom:1px solid var(--border)}
+  .row:last-child{border-bottom:none}
+  .row label{flex:1;min-width:0;display:flex;align-items:center;gap:12px;cursor:pointer}
+  input[type=checkbox]{width:24px;height:24px;margin:0;flex:none;accent-color:var(--accent)}
+  .badge{font-size:20px;line-height:1.2;flex:none;width:26px;text-align:center}
+  .body{min-width:0;flex:1}
+  .body .txt{font-size:15px;line-height:1.35;margin:0;word-wrap:break-word}
+  .body .txt.done{text-decoration:line-through;color:var(--muted)}
+  .body .meta{font-size:12px;color:var(--muted);margin:3px 0 0}
+  .price-input{
+    width:84px;flex:none;font:inherit;font-size:14px;padding:8px;border-radius:8px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);text-align:right;
+  }
+  .msg{padding:28px 8px;text-align:center;color:var(--muted);font-size:15px}
+  .msg.err{color:var(--danger)}
+  .login{max-width:360px;margin:12vh auto 0;text-align:center}
+  .login h2{font-size:18px;margin:0 0 4px}
+  .login p{color:var(--muted);font-size:14px;margin:0 0 20px}
+  input[type=password]{
+    width:100%;font:inherit;font-size:16px;padding:14px;border-radius:12px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:12px;
+  }
+  button.primary{
+    font:inherit;font-weight:600;font-size:16px;border:none;border-radius:14px;
+    padding:15px 20px;min-height:52px;cursor:pointer;width:100%;max-width:640px;
+    background:var(--accent);color:var(--accent-text);
+    display:flex;align-items:center;justify-content:center;gap:8px;
+  }
+  button.primary:disabled{opacity:.5}
+  button.primary.small{min-height:44px;padding:10px 16px;font-size:14px;width:auto;flex:none}
+  .loginerr{color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px}
+  .addrow{display:flex;gap:8px;margin-top:14px}
+  .addrow input[type=text]{
+    flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+  }
+  .addrow input.price{width:84px;flex:none;text-align:right}
+  .total-bar{padding:12px 4px 0;text-align:right;color:var(--muted);font-size:13px}
+  .total-bar strong{color:var(--text);font-size:14px}
+</style>
+</head>
+<body>
+<div id="root" class="wrap"><p class="msg">Carregando…</p></div>
+
+<script>
+const API = "https://opehbckfmfschpvbhxvo.supabase.co/functions/v1/checklist-api";
+const PASS_KEY = "checklist_pass";
+
+const root = document.getElementById("root");
+let currentList = null; // set when viewing a single list's items
+
+function getPass(){ return localStorage.getItem(PASS_KEY) || ""; }
+
+async function api(action, extra){
+  const r = await fetch(API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-checklist-pass": getPass() },
+    body: JSON.stringify(Object.assign({ action }, extra || {}))
+  });
+  if(r.status === 401){ const e = new Error("unauthorized"); e.unauthorized = true; throw e; }
+  if(!r.ok) throw new Error("http " + r.status);
+  return await r.json();
+}
+
+function esc(s){
+  return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+function fmtMoney(v){
+  return new Intl.NumberFormat("pt-BR", { style:"currency", currency:"BRL" }).format(Number(v) || 0);
+}
+
+function showLogin(errText){
+  root.innerHTML =
+    '<div class="login">' +
+      '<h2>Listas de compras</h2>' +
+      '<p>Digite a senha para acessar.</p>' +
+      '<div class="loginerr">' + (errText ? esc(errText) : "") + '</div>' +
+      '<input type="password" id="pw" autocomplete="current-password" placeholder="Senha" />' +
+      '<button class="primary" id="enter">Entrar</button>' +
+    '</div>';
+  const pw = document.getElementById("pw");
+  const go = () => {
+    const v = pw.value.trim();
+    if(!v) return;
+    localStorage.setItem(PASS_KEY, v);
+    loadLists();
+  };
+  document.getElementById("enter").addEventListener("click", go);
+  pw.addEventListener("keydown", e => { if(e.key === "Enter") go(); });
+  pw.focus();
+}
+
+function handleAuthError(e, retry){
+  if(e.unauthorized){
+    localStorage.removeItem(PASS_KEY);
+    showLogin("Sessão expirada, entre novamente.");
+  }else{
+    root.innerHTML = '<p class="msg err">Não foi possível carregar agora.</p>' +
+      '<p class="msg"><button class="link" onclick="(' + retry.toString() + ')()">Tentar novamente</button></p>';
+  }
+}
+
+function navHeader(title, backAction){
+  const back = backAction
+    ? '<button class="link" id="back">← Listas</button>'
+    : '';
+  return '<header>' +
+    (backAction ? back : '') +
+    '<h1' + (backAction ? '' : ' style="flex:1"') + '>' + esc(title) + '</h1>' +
+    '<div class="nav">' +
+      (backAction ? '' : '<a class="link" href="index.html">✓ Ações</a>') +
+      '<button class="link" id="logout">Sair</button>' +
+    '</div>' +
+  '</header>';
+}
+
+function wireNav(backAction){
+  document.getElementById("logout").addEventListener("click", () => {
+    localStorage.removeItem(PASS_KEY); showLogin();
+  });
+  if(backAction) document.getElementById("back").addEventListener("click", backAction);
+}
+
+// ---- lists screen ----
+
+async function loadLists(){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  currentList = null;
+  if(!getPass()){ showLogin(); return; }
+  try{
+    const data = await api("shopping_lists");
+    renderLists(data.lists || []);
+  }catch(e){ handleAuthError(e, loadLists); }
+}
+
+function renderLists(lists){
+  const rowsHtml = lists.length === 0
+    ? '<p class="msg">Nenhuma lista ainda. Crie uma abaixo.</p>'
+    : '<div class="card">' + lists.map(l => {
+        const emoji = l.emoji || "🛒";
+        return '<div class="row" data-id="' + esc(l.id) + '">' +
+          '<span class="badge">' + emoji + '</span>' +
+          '<span class="body list-open" style="cursor:pointer">' +
+            '<p class="txt">' + esc(l.name) + '</p>' +
+            '<p class="meta">' + l.pending_count + '/' + l.item_count + ' itens · ' + fmtMoney(l.total_pending) + ' pendente</p>' +
+          '</span>' +
+          '<button class="icon-btn" data-action="rename" title="Renomear">✎</button>' +
+          '<button class="icon-btn danger" data-action="delete" title="Excluir">🗑</button>' +
+        '</div>';
+      }).join("") + '</div>';
+
+  root.innerHTML = navHeader("Listas de compras", null) + rowsHtml +
+    '<div class="addrow">' +
+      '<input type="text" id="new-list-name" placeholder="Nova lista (ex: Farmácia)">' +
+      '<button class="primary small" id="add-list-btn">+ Lista</button>' +
+    '</div>';
+
+  wireNav(null);
+
+  root.querySelectorAll(".row").forEach(row => {
+    const id = row.dataset.id;
+    row.querySelector(".list-open").addEventListener("click", () => openList(id));
+    row.querySelector('[data-action="rename"]').addEventListener("click", async () => {
+      const l = lists.find(x => x.id === id);
+      const name = prompt("Novo nome da lista:", l.name);
+      if(!name || !name.trim() || name.trim() === l.name) return;
+      try{ await api("shopping_list_rename", { id, name: name.trim() }); loadLists(); }
+      catch(e){ handleAuthError(e, loadLists); }
+    });
+    row.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+      const l = lists.find(x => x.id === id);
+      if(!confirm('Excluir a lista "' + l.name + '" e todos os seus itens?')) return;
+      try{ await api("shopping_list_delete", { id }); loadLists(); }
+      catch(e){ handleAuthError(e, loadLists); }
+    });
+  });
+
+  const addBtn = document.getElementById("add-list-btn");
+  const nameInput = document.getElementById("new-list-name");
+  const addList = async () => {
+    const name = nameInput.value.trim();
+    if(!name) return;
+    addBtn.disabled = true;
+    try{ await api("shopping_list_create", { name }); loadLists(); }
+    catch(e){ addBtn.disabled = false; handleAuthError(e, loadLists); }
+  };
+  addBtn.addEventListener("click", addList);
+  nameInput.addEventListener("keydown", e => { if(e.key === "Enter") addList(); });
+}
+
+// ---- items screen ----
+
+async function openList(id){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  try{
+    const [listsData, itemsData] = await Promise.all([
+      api("shopping_lists"),
+      api("shopping_items", { list_id: id })
+    ]);
+    const list = (listsData.lists || []).find(l => l.id === id);
+    if(!list){ loadLists(); return; }
+    currentList = list;
+    renderItems(list, itemsData.items || []);
+  }catch(e){ handleAuthError(e, loadLists); }
+}
+
+function renderItems(list, items){
+  const emoji = list.emoji || "🛒";
+  const rowsHtml = items.length === 0
+    ? '<p class="msg">Nenhum item nesta lista ainda.</p>'
+    : '<div class="card">' + items.map(it => {
+        return '<div class="row" data-id="' + esc(it.id) + '">' +
+          '<label>' +
+            '<input type="checkbox" data-purchase' + (it.purchased ? ' checked' : '') + '>' +
+            '<span class="body"><p class="txt' + (it.purchased ? ' done' : '') + '">' + esc(it.name) + '</p></span>' +
+          '</label>' +
+          '<input class="price-input" type="number" step="0.01" min="0" placeholder="R$" value="' + (it.price != null ? it.price : '') + '">' +
+          '<button class="icon-btn" data-action="rename-item" title="Renomear">✎</button>' +
+          '<button class="icon-btn danger" data-action="delete-item" title="Remover">✕</button>' +
+        '</div>';
+      }).join("") + '</div>';
+
+  root.innerHTML = navHeader(emoji + " " + list.name, loadLists) + rowsHtml +
+    '<div class="addrow">' +
+      '<input type="text" id="new-item-name" placeholder="Novo item">' +
+      '<input type="number" step="0.01" min="0" class="price" id="new-item-price" placeholder="R$">' +
+      '<button class="primary small" id="add-item-btn">+</button>' +
+    '</div>' +
+    '<div class="total-bar">Total geral: <strong>' + fmtMoney(list.total_all) + '</strong> · Pendente: <strong>' + fmtMoney(list.total_pending) + '</strong></div>';
+
+  wireNav(loadLists);
+
+  items.forEach(it => {
+    const row = root.querySelector('.row[data-id="' + it.id + '"]');
+    row.querySelector("[data-purchase]").addEventListener("change", async (e) => {
+      try{ await api("shopping_item_update", { id: it.id, purchased: e.target.checked }); openList(list.id); }
+      catch(err){ handleAuthError(err, loadLists); }
+    });
+    row.querySelector(".price-input").addEventListener("change", async (e) => {
+      const v = e.target.value.trim();
+      try{ await api("shopping_item_update", { id: it.id, price: v === "" ? null : v }); openList(list.id); }
+      catch(err){ handleAuthError(err, loadLists); }
+    });
+    row.querySelector('[data-action="rename-item"]').addEventListener("click", async () => {
+      const name = prompt("Novo nome do item:", it.name);
+      if(!name || !name.trim() || name.trim() === it.name) return;
+      try{ await api("shopping_item_rename", { id: it.id, name: name.trim() }); openList(list.id); }
+      catch(err){ handleAuthError(err, loadLists); }
+    });
+    row.querySelector('[data-action="delete-item"]').addEventListener("click", async () => {
+      if(!confirm('Remover "' + it.name + '"?')) return;
+      try{ await api("shopping_item_delete", { id: it.id }); openList(list.id); }
+      catch(err){ handleAuthError(err, loadLists); }
+    });
+  });
+
+  const addBtn = document.getElementById("add-item-btn");
+  const nameInput = document.getElementById("new-item-name");
+  const priceInput = document.getElementById("new-item-price");
+  const addItem = async () => {
+    const name = nameInput.value.trim();
+    if(!name) return;
+    addBtn.disabled = true;
+    const price = priceInput.value.trim();
+    try{ await api("shopping_item_add", { list_id: list.id, name, price: price === "" ? null : price }); openList(list.id); }
+    catch(err){ addBtn.disabled = false; handleAuthError(err, loadLists); }
+  };
+  addBtn.addEventListener("click", addItem);
+  nameInput.addEventListener("keydown", e => { if(e.key === "Enter") addItem(); });
+  priceInput.addEventListener("keydown", e => { if(e.key === "Enter") addItem(); });
+}
+
+loadLists();
+</script>
+</body>
+</html>

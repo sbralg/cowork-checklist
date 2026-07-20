@@ -39,7 +39,8 @@
   .wrap{max-width:640px;margin:0 auto}
   header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 16px}
   h1{font-size:20px;font-weight:650;margin:0}
-  .link{background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer}
+  .link{background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;text-decoration:none;display:inline-block}
+  .nav{display:flex;align-items:center;gap:6px;flex:none}
   .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
   .row{display:flex;align-items:flex-start;gap:12px;padding:16px 14px;border-bottom:1px solid var(--border)}
   .row:last-child{border-bottom:none}
@@ -152,16 +153,17 @@ function updateBar(){
 }
 
 function render(rows){
+  const header = '<header><h1>Ações pendentes</h1><div class="nav">' +
+    '<a class="link" href="shopping.html">🛒 Compras</a>' +
+    '<button class="link" id="logout">Sair</button></div></header>';
   if(rows.length === 0){
-    root.innerHTML =
-      '<header><h1>Ações pendentes</h1><button class="link" id="logout">Sair</button></header>' +
+    root.innerHTML = header +
       '<p class="msg">🎉 Nenhuma ação pendente.</p>';
     bar.style.display = "none";
     wireHeader();
     return;
   }
-  root.innerHTML =
-    '<header><h1>Ações pendentes</h1><button class="link" id="logout">Sair</button></header>' +
+  root.innerHTML = header +
     '<div class="card">' + rows.map(it => {
       const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
       return '<div class="row"><label>' +
