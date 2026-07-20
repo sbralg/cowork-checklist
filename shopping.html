@@ -80,6 +80,8 @@
     border:1px solid var(--border-strong);background:var(--card);color:var(--text);
   }
   .addrow input.price{width:84px;flex:none;text-align:right}
+  .addrow input.emoji{width:52px;flex:none;text-align:center;font-size:18px;padding:10px 6px}
+  .badge-btn{background:none;border:none;padding:0;cursor:pointer}
   .total-bar{padding:12px 4px 0;text-align:right;color:var(--muted);font-size:13px}
   .total-bar strong{color:var(--text);font-size:14px}
 </style>
@@ -184,7 +186,7 @@ function renderLists(lists){
     : '<div class="card">' + lists.map(l => {
         const emoji = l.emoji || "🛒";
         return '<div class="row" data-id="' + esc(l.id) + '">' +
-          '<span class="badge">' + emoji + '</span>' +
+          '<button class="badge badge-btn" data-action="emoji" title="Alterar ícone">' + emoji + '</button>' +
           '<span class="body list-open" style="cursor:pointer">' +
             '<p class="txt">' + esc(l.name) + '</p>' +
             '<p class="meta">' + l.pending_count + '/' + l.item_count + ' itens · ' + fmtMoney(l.total_cart) + ' no carrinho</p>' +
@@ -196,6 +198,7 @@ function renderLists(lists){
 
   root.innerHTML = navHeader("Listas de compras", null) + rowsHtml +
     '<div class="addrow">' +
+      '<input type="text" id="new-list-emoji" class="emoji" placeholder="🛒" maxlength="16">' +
       '<input type="text" id="new-list-name" placeholder="Nova lista (ex: Farmácia)">' +
       '<button class="primary small" id="add-list-btn">+ Lista</button>' +
     '</div>';
@@ -205,6 +208,14 @@ function renderLists(lists){
   root.querySelectorAll(".row").forEach(row => {
     const id = row.dataset.id;
     row.querySelector(".list-open").addEventListener("click", () => openList(id));
+    row.querySelector('[data-action="emoji"]').addEventListener("click", async () => {
+      const l = lists.find(x => x.id === id);
+      const emoji = prompt("Ícone da lista (emoji):", l.emoji || "🛒");
+      if(emoji === null) return;
+      const trimmed = emoji.trim();
+      try{ await api("shopping_list_set_emoji", { id, emoji: trimmed || null }); loadLists(); }
+      catch(e){ handleAuthError(e, loadLists); }
+    });
     row.querySelector('[data-action="rename"]').addEventListener("click", async () => {
       const l = lists.find(x => x.id === id);
       const name = prompt("Novo nome da lista:", l.name);
@@ -222,15 +233,18 @@ function renderLists(lists){
 
   const addBtn = document.getElementById("add-list-btn");
   const nameInput = document.getElementById("new-list-name");
+  const emojiInput = document.getElementById("new-list-emoji");
   const addList = async () => {
     const name = nameInput.value.trim();
     if(!name) return;
     addBtn.disabled = true;
-    try{ await api("shopping_list_create", { name }); loadLists(); }
+    const emoji = emojiInput.value.trim();
+    try{ await api("shopping_list_create", { name, emoji: emoji || undefined }); loadLists(); }
     catch(e){ addBtn.disabled = false; handleAuthError(e, loadLists); }
   };
   addBtn.addEventListener("click", addList);
   nameInput.addEventListener("keydown", e => { if(e.key === "Enter") addList(); });
+  emojiInput.addEventListener("keydown", e => { if(e.key === "Enter") addList(); });
 }
 
 // ---- items screen ----
