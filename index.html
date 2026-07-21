@@ -46,9 +46,9 @@
   .row:last-child{border-bottom:none}
   .row label{flex:1;min-width:0;display:flex;align-items:flex-start;gap:12px;cursor:pointer}
   input[type=checkbox]{width:24px;height:24px;margin:1px 0 0;flex:none;accent-color:var(--accent)}
-  .badge{font-size:20px;line-height:1.2;flex:none;width:26px;text-align:center}
+  .badge{font-size:20px;line-height:1.2;flex:none;width:26px;text-align:center;cursor:pointer}
   .body{min-width:0}
-  .body .txt{font-size:15px;line-height:1.35;margin:0;word-wrap:break-word}
+  .body .txt{font-size:15px;line-height:1.35;margin:0;word-wrap:break-word;cursor:pointer}
   .body .meta{font-size:12px;color:var(--muted);margin:3px 0 0}
   .msg{padding:28px 8px;text-align:center;color:var(--muted);font-size:15px}
   .msg.err{color:var(--danger)}
@@ -191,8 +191,8 @@ function render(rows){
       return '<div class="row">' +
         '<label>' +
         '<input type="checkbox" data-id="' + esc(it.id) + '">' +
-        '<span class="badge">' + m.emoji + '</span>' +
-        '<span class="body"><p class="txt">' + esc(it.text) + '</p>' +
+        '<span class="badge" data-cat-id="' + esc(it.id) + '" data-cat-value="' + esc(it.source || "") + '" title="Editar categoria">' + m.emoji + '</span>' +
+        '<span class="body"><p class="txt" data-edit-id="' + esc(it.id) + '" data-text-value="' + esc(it.text) + '" title="Editar texto">' + esc(it.text) + '</p>' +
         '<p class="meta">' + m.label + ' · desde ' + fmtDate(it.first_seen) + '</p></span>' +
         '</label>' +
         '<button class="del-btn" data-del-id="' + esc(it.id) + '" title="Excluir" aria-label="Excluir">🗑</button>' +
@@ -203,6 +203,7 @@ function render(rows){
   wireHeader();
   wireAddForm();
   wireDeleteButtons();
+  wireEditControls();
   updateBar();
 }
 
@@ -245,6 +246,43 @@ function wireDeleteButtons(){
         if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
         else { btn.disabled = false; }
       }
+    });
+  });
+}
+
+async function saveEdit(id, patch){
+  try{
+    await api("action_edit", Object.assign({ id }, patch));
+    await load();
+  }catch(e){
+    if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
+    else alert("Não foi possível salvar.");
+  }
+}
+
+function wireEditControls(){
+  const categories = Object.keys(SOURCE_META);
+  root.querySelectorAll("[data-cat-id]").forEach(el => {
+    el.addEventListener("click", e => {
+      e.preventDefault(); e.stopPropagation();
+      const current = el.dataset.catValue;
+      const next = prompt("Categoria (" + categories.join(", ") + "):", current);
+      if(next === null) return;
+      const source = next.trim();
+      if(!source || source === current) return;
+      if(!categories.includes(source)){ alert("Categoria inválida."); return; }
+      saveEdit(el.dataset.catId, { source });
+    });
+  });
+  root.querySelectorAll("[data-edit-id]").forEach(el => {
+    el.addEventListener("click", e => {
+      e.preventDefault(); e.stopPropagation();
+      const current = el.dataset.textValue;
+      const next = prompt("Editar ação:", current);
+      if(next === null) return;
+      const text = next.trim();
+      if(!text || text === current) return;
+      saveEdit(el.dataset.editId, { text });
     });
   });
 }
