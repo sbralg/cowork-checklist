@@ -73,6 +73,17 @@
   }
   button.primary:disabled{opacity:.5}
   .loginerr{color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px}
+  .addrow{display:flex;gap:8px;padding:14px}
+  .addrow input{
+    flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+  }
+  .addrow button{
+    flex:none;font:inherit;font-weight:600;font-size:14px;padding:10px 14px;border-radius:10px;
+    border:none;background:var(--accent);color:var(--accent-text);cursor:pointer;
+  }
+  .addrow button:disabled{opacity:.5}
+  .addcard{margin-bottom:12px}
 </style>
 </head>
 <body>
@@ -120,7 +131,8 @@ const SOURCE_META = {
   calendar:         { emoji:"📅", label:"Agenda" },
   self_instruction: { emoji:"🔔", label:"Instrução" },
   work:             { emoji:"💼", label:"Trabalho" },
-  system:           { emoji:"⚙️", label:"Sistema" }
+  system:           { emoji:"⚙️", label:"Sistema" },
+  manual:           { emoji:"📝", label:"Manual" }
 };
 
 function showLogin(errText){
@@ -156,14 +168,19 @@ function render(rows){
   const header = '<header><h1>Ações pendentes</h1><div class="nav">' +
     '<a class="link" href="shopping.html">🛒 Compras</a>' +
     '<button class="link" id="logout">Sair</button></div></header>';
+  const addForm = '<div class="card addcard"><div class="addrow">' +
+    '<input type="text" id="new-text" placeholder="Nova ação..." />' +
+    '<button id="add-btn">Adicionar</button>' +
+    '</div></div>';
   if(rows.length === 0){
-    root.innerHTML = header +
+    root.innerHTML = header + addForm +
       '<p class="msg">🎉 Nenhuma ação pendente.</p>';
     bar.style.display = "none";
     wireHeader();
+    wireAddForm();
     return;
   }
-  root.innerHTML = header +
+  root.innerHTML = header + addForm +
     '<div class="card">' + rows.map(it => {
       const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
       return '<div class="row"><label>' +
@@ -176,12 +193,34 @@ function render(rows){
   bar.style.display = "flex";
   root.querySelectorAll("input[type=checkbox]").forEach(cb => cb.addEventListener("change", updateBar));
   wireHeader();
+  wireAddForm();
   updateBar();
 }
 
 function wireHeader(){
   const lo = document.getElementById("logout");
   if(lo) lo.addEventListener("click", () => { localStorage.removeItem(PASS_KEY); showLogin(); });
+}
+
+function wireAddForm(){
+  const btn = document.getElementById("add-btn");
+  const input = document.getElementById("new-text");
+  if(!btn || !input) return;
+  const submit = async () => {
+    const text = input.value.trim();
+    if(!text) return;
+    btn.disabled = true;
+    btn.textContent = "Salvando…";
+    try{
+      await api("action_create", { text });
+      await load();
+    }catch(e){
+      if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
+      else { btn.textContent = "Erro — tente de novo"; btn.disabled = false; }
+    }
+  };
+  btn.addEventListener("click", submit);
+  input.addEventListener("keydown", e => { if(e.key === "Enter") submit(); });
 }
 
 async function load(){
