@@ -84,6 +84,11 @@
   }
   .addrow button:disabled{opacity:.5}
   .addcard{margin-bottom:12px}
+  .del-btn{
+    background:none;border:none;color:var(--muted);font-size:18px;line-height:1;
+    padding:6px;flex:none;cursor:pointer;align-self:flex-start;
+  }
+  .del-btn:hover{color:var(--danger)}
 </style>
 </head>
 <body>
@@ -183,17 +188,21 @@ function render(rows){
   root.innerHTML = header + addForm +
     '<div class="card">' + rows.map(it => {
       const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
-      return '<div class="row"><label>' +
+      return '<div class="row">' +
+        '<label>' +
         '<input type="checkbox" data-id="' + esc(it.id) + '">' +
         '<span class="badge">' + m.emoji + '</span>' +
         '<span class="body"><p class="txt">' + esc(it.text) + '</p>' +
         '<p class="meta">' + m.label + ' · desde ' + fmtDate(it.first_seen) + '</p></span>' +
-        '</label></div>';
+        '</label>' +
+        '<button class="del-btn" data-del-id="' + esc(it.id) + '" title="Excluir" aria-label="Excluir">🗑</button>' +
+        '</div>';
     }).join("") + '</div>';
   bar.style.display = "flex";
   root.querySelectorAll("input[type=checkbox]").forEach(cb => cb.addEventListener("change", updateBar));
   wireHeader();
   wireAddForm();
+  wireDeleteButtons();
   updateBar();
 }
 
@@ -221,6 +230,23 @@ function wireAddForm(){
   };
   btn.addEventListener("click", submit);
   input.addEventListener("keydown", e => { if(e.key === "Enter") submit(); });
+}
+
+function wireDeleteButtons(){
+  root.querySelectorAll("[data-del-id]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if(!confirm("Excluir esta ação?")) return;
+      const id = btn.dataset.delId;
+      btn.disabled = true;
+      try{
+        await api("action_delete", { ids: [id] });
+        await load();
+      }catch(e){
+        if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
+        else { btn.disabled = false; }
+      }
+    });
+  });
 }
 
 async function load(){
