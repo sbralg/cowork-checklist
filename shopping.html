@@ -90,7 +90,13 @@
     display:flex;align-items:center;justify-content:center;padding:16px;
   }
   .modal-card{background:var(--card);border-radius:16px;padding:20px;width:100%;max-width:400px}
+  .modal-card h3{margin:0 0 14px;font-size:16px}
   .modal-card p{font-size:15px;line-height:1.4;margin:0 0 18px}
+  .modal-card label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
+  .modal-card input[type=text]{
+    width:100%;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:14px;
+  }
   .modal-actions{display:flex;gap:8px;justify-content:flex-end}
   .modal-actions button{
     font:inherit;font-weight:600;font-size:14px;padding:10px 16px;border-radius:10px;
@@ -154,6 +160,41 @@ function confirmModal(message, confirmLabel){
     backdrop.addEventListener("click", e => { if(e.target === backdrop) close(false); });
     document.getElementById("confirm-cancel").addEventListener("click", () => close(false));
     document.getElementById("confirm-ok").addEventListener("click", () => close(true));
+  });
+}
+
+function promptModal(title, label, currentValue){
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>' + esc(title) + '</h3>' +
+        '<label for="prompt-input">' + esc(label) + '</label>' +
+        '<input type="text" id="prompt-input" value="' + esc(currentValue || "") + '">' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="prompt-cancel">Cancelar</button>' +
+          '<button class="save" id="prompt-ok">Salvar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    const ok = () => close(input.value);
+    function onKey(e){
+      if(e.key === "Escape") close(null);
+      if(e.key === "Enter"){ e.preventDefault(); ok(); }
+    }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    document.getElementById("prompt-cancel").addEventListener("click", () => close(null));
+    document.getElementById("prompt-ok").addEventListener("click", ok);
+    const input = document.getElementById("prompt-input");
+    input.focus();
+    input.select();
   });
 }
 
@@ -257,7 +298,7 @@ function renderLists(lists){
     row.querySelector(".list-open").addEventListener("click", () => openList(id));
     row.querySelector('[data-action="emoji"]').addEventListener("click", async () => {
       const l = lists.find(x => x.id === id);
-      const emoji = prompt("Ícone da lista (emoji):", l.emoji || "🛒");
+      const emoji = await promptModal("Alterar ícone", "Ícone da lista (emoji):", l.emoji || "🛒");
       if(emoji === null) return;
       const trimmed = emoji.trim();
       try{ await api("shopping_list_set_emoji", { id, emoji: trimmed || null }); loadLists(); }
@@ -265,9 +306,11 @@ function renderLists(lists){
     });
     row.querySelector('[data-action="rename"]').addEventListener("click", async () => {
       const l = lists.find(x => x.id === id);
-      const name = prompt("Novo nome da lista:", l.name);
-      if(!name || !name.trim() || name.trim() === l.name) return;
-      try{ await api("shopping_list_rename", { id, name: name.trim() }); loadLists(); }
+      const name = await promptModal("Renomear lista", "Novo nome da lista:", l.name);
+      if(name === null) return;
+      const trimmed = name.trim();
+      if(!trimmed || trimmed === l.name) return;
+      try{ await api("shopping_list_rename", { id, name: trimmed }); loadLists(); }
       catch(e){ handleAuthError(e, loadLists); }
     });
     row.querySelector('[data-action="delete"]').addEventListener("click", async () => {
@@ -336,7 +379,7 @@ function renderItems(list, items){
 
   wireNav(loadLists);
   document.getElementById("header-emoji").addEventListener("click", async () => {
-    const newEmoji = prompt("Ícone da lista (emoji):", list.emoji || "🛒");
+    const newEmoji = await promptModal("Alterar ícone", "Ícone da lista (emoji):", list.emoji || "🛒");
     if(newEmoji === null) return;
     const trimmed = newEmoji.trim();
     try{ await api("shopping_list_set_emoji", { id: list.id, emoji: trimmed || null }); openList(list.id); }
@@ -355,9 +398,11 @@ function renderItems(list, items){
       catch(err){ handleAuthError(err, loadLists); }
     });
     row.querySelector('[data-action="rename-item"]').addEventListener("click", async () => {
-      const name = prompt("Novo nome do item:", it.name);
-      if(!name || !name.trim() || name.trim() === it.name) return;
-      try{ await api("shopping_item_rename", { id: it.id, name: name.trim() }); openList(list.id); }
+      const name = await promptModal("Renomear item", "Novo nome do item:", it.name);
+      if(name === null) return;
+      const trimmed = name.trim();
+      if(!trimmed || trimmed === it.name) return;
+      try{ await api("shopping_item_rename", { id: it.id, name: trimmed }); openList(list.id); }
       catch(err){ handleAuthError(err, loadLists); }
     });
     row.querySelector('[data-action="delete-item"]').addEventListener("click", async () => {
