@@ -85,6 +85,20 @@
   .badge-btn{background:none;border:none;padding:0;cursor:pointer}
   .total-bar{padding:12px 4px 0;text-align:right;color:var(--muted);font-size:13px}
   .total-bar strong{color:var(--text);font-size:14px}
+  .modal-backdrop{
+    position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;
+    display:flex;align-items:center;justify-content:center;padding:16px;
+  }
+  .modal-card{background:var(--card);border-radius:16px;padding:20px;width:100%;max-width:400px}
+  .modal-card p{font-size:15px;line-height:1.4;margin:0 0 18px}
+  .modal-actions{display:flex;gap:8px;justify-content:flex-end}
+  .modal-actions button{
+    font:inherit;font-weight:600;font-size:14px;padding:10px 16px;border-radius:10px;
+    border:none;cursor:pointer;
+  }
+  .modal-actions .cancel{background:none;color:var(--muted)}
+  .modal-actions .save{background:var(--accent);color:var(--accent-text)}
+  .modal-actions .save.danger{background:var(--danger)}
 </style>
 </head>
 <body>
@@ -115,6 +129,32 @@ function esc(s){
 }
 function fmtMoney(v){
   return new Intl.NumberFormat("pt-BR", { style:"currency", currency:"BRL" }).format(Number(v) || 0);
+}
+
+function confirmModal(message, confirmLabel){
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<p>' + esc(message) + '</p>' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="confirm-cancel">Cancelar</button>' +
+          '<button class="save danger" id="confirm-ok">' + esc(confirmLabel || "Excluir") + '</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    function onKey(e){ if(e.key === "Escape") close(false); }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(false); });
+    document.getElementById("confirm-cancel").addEventListener("click", () => close(false));
+    document.getElementById("confirm-ok").addEventListener("click", () => close(true));
+  });
 }
 
 function showLogin(errText){
@@ -232,7 +272,7 @@ function renderLists(lists){
     });
     row.querySelector('[data-action="delete"]').addEventListener("click", async () => {
       const l = lists.find(x => x.id === id);
-      if(!confirm('Excluir a lista "' + l.name + '" e todos os seus itens?')) return;
+      if(!(await confirmModal('Excluir a lista "' + l.name + '" e todos os seus itens?'))) return;
       try{ await api("shopping_list_delete", { id }); loadLists(); }
       catch(e){ handleAuthError(e, loadLists); }
     });
@@ -321,7 +361,7 @@ function renderItems(list, items){
       catch(err){ handleAuthError(err, loadLists); }
     });
     row.querySelector('[data-action="delete-item"]').addEventListener("click", async () => {
-      if(!confirm('Remover "' + it.name + '"?')) return;
+      if(!(await confirmModal('Remover "' + it.name + '"?'))) return;
       try{ await api("shopping_item_delete", { id: it.id }); openList(list.id); }
       catch(err){ handleAuthError(err, loadLists); }
     });

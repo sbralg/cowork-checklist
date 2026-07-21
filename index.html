@@ -104,6 +104,8 @@
   }
   .modal-actions .cancel{background:none;color:var(--muted)}
   .modal-actions .save{background:var(--accent);color:var(--accent-text)}
+  .modal-actions .save.danger{background:var(--danger)}
+  .modal-card p{font-size:15px;line-height:1.4;margin:0 0 18px}
 </style>
 </head>
 <body>
@@ -249,10 +251,36 @@ function wireAddForm(){
   input.addEventListener("keydown", e => { if(e.key === "Enter") submit(); });
 }
 
+function confirmModal(message, confirmLabel){
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<p>' + esc(message) + '</p>' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="confirm-cancel">Cancelar</button>' +
+          '<button class="save danger" id="confirm-ok">' + esc(confirmLabel || "Excluir") + '</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    function onKey(e){ if(e.key === "Escape") close(false); }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(false); });
+    document.getElementById("confirm-cancel").addEventListener("click", () => close(false));
+    document.getElementById("confirm-ok").addEventListener("click", () => close(true));
+  });
+}
+
 function wireDeleteButtons(){
   root.querySelectorAll("[data-del-id]").forEach(btn => {
     btn.addEventListener("click", async () => {
-      if(!confirm("Excluir esta ação?")) return;
+      if(!(await confirmModal("Excluir esta ação?"))) return;
       const id = btn.dataset.delId;
       btn.disabled = true;
       try{
