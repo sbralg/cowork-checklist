@@ -128,12 +128,6 @@
   }
   .addrow input.price{width:84px;flex:none;text-align:right}
   .addrow input.emoji{width:52px;flex:none;text-align:center;font-size:18px;padding:10px 6px}
-  .badge-btn{
-    background:none;border:none;padding:0;cursor:pointer;
-    transition:opacity .15s ease,transform .1s ease;
-  }
-  .badge-btn:hover{opacity:.75}
-  .badge-btn:active{transform:scale(.9)}
   .total-bar{padding:12px 4px 0;text-align:right;color:var(--muted);font-size:13px}
   .total-bar strong{color:var(--text);font-size:14px}
   .modal-backdrop{
@@ -307,6 +301,51 @@ function promptModal(title, label, currentValue){
   });
 }
 
+function openListEditModal(list, onSaved){
+  const currentEmoji = list.emoji || "🛒";
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-card">' +
+      '<h3>Editar lista</h3>' +
+      '<label for="edit-list-emoji">Ícone (emoji)</label>' +
+      '<input type="text" id="edit-list-emoji" value="' + esc(currentEmoji) + '" maxlength="16">' +
+      '<label for="edit-list-name">Nome</label>' +
+      '<input type="text" id="edit-list-name" value="' + esc(list.name) + '">' +
+      '<div class="modal-actions">' +
+        '<button class="cancel" id="edit-list-cancel">Cancelar</button>' +
+        '<button class="save" id="edit-list-save">Salvar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  function onKey(e){ if(e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
+  document.getElementById("edit-list-cancel").addEventListener("click", close);
+
+  const nameInput = document.getElementById("edit-list-name");
+  nameInput.focus();
+  nameInput.select();
+
+  document.getElementById("edit-list-save").addEventListener("click", async () => {
+    const name = nameInput.value.trim();
+    const emoji = document.getElementById("edit-list-emoji").value.trim();
+    if(!name){ alert("O nome não pode ficar vazio."); return; }
+    close();
+    const tasks = [];
+    if(name !== list.name) tasks.push(api("shopping_list_rename", { id: list.id, name }));
+    if(emoji !== currentEmoji) tasks.push(api("shopping_list_set_emoji", { id: list.id, emoji: emoji || null }));
+    if(tasks.length === 0) return;
+    try{ await Promise.all(tasks); onSaved(); }
+    catch(e){ handleAuthError(e, onSaved); }
+  });
+}
+
 function showLogin(errText){
   root.innerHTML =
     '<div class="login">' +
@@ -349,9 +388,7 @@ function navHeader(title, backAction, emoji){
 
   // Items view: the list itself becomes a subtitle row below -- "← Listas"
   // on the left, the list's icon + name grouped on the right.
-  const emojiBtn = emoji
-    ? '<button class="badge badge-btn" id="header-emoji" title="Alterar ícone">' + emoji + '</button>'
-    : '';
+  const emojiBtn = emoji ? '<span class="badge">' + emoji + '</span>' : '';
   const subRow = '<div class="subheader">' +
     '<button class="link" id="back">← Listas</button>' +
     '<span class="list-title">' + emojiBtn + '<h2>' + esc(title) + '</h2></span>' +
@@ -382,12 +419,12 @@ function renderLists(lists){
     : '<div class="card">' + lists.map(l => {
         const emoji = l.emoji || "🛒";
         return '<div class="row" data-id="' + esc(l.id) + '">' +
-          '<button class="badge badge-btn" data-action="emoji" title="Alterar ícone">' + emoji + '</button>' +
+          '<span class="badge">' + emoji + '</span>' +
           '<span class="body list-open" style="cursor:pointer">' +
             '<p class="txt">' + esc(l.name) + '</p>' +
             '<p class="meta">' + l.pending_count + '/' + l.item_count + ' itens · ' + fmtMoney(l.total_cart) + ' no carrinho</p>' +
           '</span>' +
-          '<button class="icon-btn" data-action="rename" title="Renomear">✎</button>' +
+          '<button class="icon-btn" data-action="edit" title="Editar">✎</button>' +
           '<button class="icon-btn danger" data-action="delete" title="Excluir">🗑</button>' +
         '</div>';
       }).join("") + '</div>';
@@ -404,22 +441,9 @@ function renderLists(lists){
   root.querySelectorAll(".row").forEach(row => {
     const id = row.dataset.id;
     row.querySelector(".list-open").addEventListener("click", () => openList(id));
-    row.querySelector('[data-action="emoji"]').addEventListener("click", async () => {
+    row.querySelector('[data-action="edit"]').addEventListener("click", () => {
       const l = lists.find(x => x.id === id);
-      const emoji = await promptModal("Alterar ícone", "Ícone da lista (emoji):", l.emoji || "🛒");
-      if(emoji === null) return;
-      const trimmed = emoji.trim();
-      try{ await api("shopping_list_set_emoji", { id, emoji: trimmed || null }); loadLists(); }
-      catch(e){ handleAuthError(e, loadLists); }
-    });
-    row.querySelector('[data-action="rename"]').addEventListener("click", async () => {
-      const l = lists.find(x => x.id === id);
-      const name = await promptModal("Renomear lista", "Novo nome da lista:", l.name);
-      if(name === null) return;
-      const trimmed = name.trim();
-      if(!trimmed || trimmed === l.name) return;
-      try{ await api("shopping_list_rename", { id, name: trimmed }); loadLists(); }
-      catch(e){ handleAuthError(e, loadLists); }
+      openListEditModal(l, loadLists);
     });
     row.querySelector('[data-action="delete"]').addEventListener("click", async () => {
       const l = lists.find(x => x.id === id);
@@ -486,13 +510,6 @@ function renderItems(list, items){
     '<div class="total-bar">Total lista: <strong>' + fmtMoney(list.total_all) + '</strong> · No carrinho: <strong>' + fmtMoney(list.total_cart) + '</strong></div>';
 
   wireNav(loadLists);
-  document.getElementById("header-emoji").addEventListener("click", async () => {
-    const newEmoji = await promptModal("Alterar ícone", "Ícone da lista (emoji):", list.emoji || "🛒");
-    if(newEmoji === null) return;
-    const trimmed = newEmoji.trim();
-    try{ await api("shopping_list_set_emoji", { id: list.id, emoji: trimmed || null }); openList(list.id); }
-    catch(e){ handleAuthError(e, loadLists); }
-  });
 
   items.forEach(it => {
     const row = root.querySelector('.row[data-id="' + it.id + '"]');
