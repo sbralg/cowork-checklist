@@ -39,10 +39,16 @@
   .wrap{max-width:640px;margin:0 auto}
   header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 16px}
   h1{font-size:20px;font-weight:650;margin:0}
-  .link{background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;text-decoration:none;display:inline-block}
+  .link{
+    background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;
+    text-decoration:none;display:inline-block;transition:color .15s ease,opacity .1s ease;
+  }
+  .link:hover{color:var(--text);text-decoration:underline}
+  .link:active{opacity:.6}
   .nav{display:flex;align-items:center;gap:6px;flex:none}
   .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
-  .row{display:flex;align-items:flex-start;gap:12px;padding:16px 14px;border-bottom:1px solid var(--border)}
+  .row{display:flex;align-items:flex-start;gap:12px;padding:16px 14px;border-bottom:1px solid var(--border);transition:background-color .15s ease}
+  .row:hover{background:rgba(127,127,127,.06)}
   .row:last-child{border-bottom:none}
   .row label{flex:1;min-width:0;display:flex;align-items:flex-start;gap:12px;cursor:pointer}
   input[type=checkbox]{width:24px;height:24px;margin:1px 0 0;flex:none;accent-color:var(--accent)}
@@ -70,7 +76,10 @@
     padding:15px 20px;min-height:52px;cursor:pointer;width:100%;max-width:640px;
     background:var(--accent);color:var(--accent-text);
     display:flex;align-items:center;justify-content:center;gap:8px;
+    transition:filter .15s ease,transform .1s ease;
   }
+  button.primary:hover:not(:disabled){filter:brightness(1.1)}
+  button.primary:active:not(:disabled){transform:scale(.98)}
   button.primary:disabled{opacity:.5}
   .loginerr{color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px}
   .addrow{display:flex;gap:8px;padding:14px}
@@ -81,16 +90,36 @@
   .addrow button{
     flex:none;font:inherit;font-weight:600;font-size:14px;padding:10px 14px;border-radius:10px;
     border:none;background:var(--accent);color:var(--accent-text);cursor:pointer;
+    transition:filter .15s ease,transform .1s ease;
   }
+  .addrow button:hover:not(:disabled){filter:brightness(1.1)}
+  .addrow button:active:not(:disabled){transform:scale(.97)}
   .addrow button:disabled{opacity:.5}
   .addcard{margin-bottom:12px}
-  .icon-btn{background:none;border:none;color:var(--muted);font-size:16px;padding:6px;cursor:pointer;flex:none;line-height:1;align-self:flex-start}
+  .icon-btn{
+    background:none;border:none;color:var(--muted);font-size:16px;padding:6px;cursor:pointer;
+    flex:none;line-height:1;align-self:flex-start;border-radius:8px;
+    transition:background-color .15s ease,color .15s ease,transform .1s ease;
+  }
+  .icon-btn:hover{background:rgba(127,127,127,.15);color:var(--text)}
+  .icon-btn:active{transform:scale(.9)}
   .icon-btn.danger{color:var(--danger)}
+  .icon-btn.danger:hover{background:rgba(220,38,38,.15);color:var(--danger)}
+  .icon-btn.lg{font-size:23px;padding:7px}
   .modal-backdrop{
     position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;
     display:flex;align-items:center;justify-content:center;padding:16px;
+    animation:modalFadeIn .15s ease;
   }
-  .modal-card{background:var(--card);border-radius:16px;padding:20px;width:100%;max-width:400px}
+  .modal-card{
+    background:var(--card);border-radius:16px;padding:20px;width:100%;max-width:400px;
+    animation:modalPopIn .18s cubic-bezier(.2,.8,.2,1);
+  }
+  @keyframes modalFadeIn{from{opacity:0} to{opacity:1}}
+  @keyframes modalPopIn{
+    from{opacity:0;transform:scale(.95) translateY(6px)}
+    to{opacity:1;transform:scale(1) translateY(0)}
+  }
   .modal-card h3{margin:0 0 14px;font-size:16px}
   .modal-card label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
   .modal-card input[type=text], .modal-card select{
@@ -100,13 +129,21 @@
   .modal-actions{display:flex;gap:8px;justify-content:flex-end}
   .modal-actions button{
     font:inherit;font-weight:600;font-size:14px;padding:10px 16px;border-radius:10px;
-    border:none;cursor:pointer;
+    border:none;cursor:pointer;transition:filter .15s ease,transform .1s ease,background-color .15s ease;
   }
+  .modal-actions button:active{transform:scale(.97)}
   .modal-actions .cancel{background:none;color:var(--muted)}
+  .modal-actions .cancel:hover{background:rgba(127,127,127,.12);color:var(--text)}
   .modal-actions .save{background:var(--accent);color:var(--accent-text)}
   .modal-actions .save.danger{background:var(--danger)}
+  .modal-actions .save:hover{filter:brightness(1.1)}
   .modal-card p{font-size:15px;line-height:1.4;margin:0 0 18px}
   #done-wrap{margin-top:16px}
+  #done-list{
+    max-height:0;opacity:0;overflow:hidden;
+    transition:max-height .3s ease,opacity .25s ease;
+  }
+  #done-list.open{max-height:2000px;opacity:1}
   .done-card{margin-bottom:8px}
   .body .txt.done{text-decoration:line-through;color:var(--muted)}
 </style>
@@ -215,7 +252,7 @@ function render(rows){
     '</div></div>';
   const doneWrap = '<div id="done-wrap">' +
     '<button class="link" id="toggle-done">Ver ações concluídas</button>' +
-    '<div id="done-list" style="display:none"></div>' +
+    '<div id="done-list"></div>' +
     '</div>';
   if(rows.length === 0){
     root.innerHTML = header + addForm +
@@ -394,7 +431,7 @@ function wireDoneToggle(){
     doneExpanded = !doneExpanded;
     btn.textContent = doneExpanded ? "Ocultar ações concluídas" : "Ver ações concluídas";
     const list = document.getElementById("done-list");
-    if(list) list.style.display = doneExpanded ? "" : "none";
+    if(list) list.classList.toggle("open", doneExpanded);
     if(doneExpanded && doneItems.length === 0) loadDoneTasks(true);
   });
 }
@@ -420,7 +457,7 @@ async function loadDoneTasks(reset){
 function renderDoneSection(){
   const list = document.getElementById("done-list");
   if(!list) return;
-  list.style.display = doneExpanded ? "" : "none";
+  list.classList.toggle("open", doneExpanded);
   if(doneObserver){ doneObserver.disconnect(); doneObserver = null; }
 
   if(doneItems.length === 0){
@@ -432,27 +469,24 @@ function renderDoneSection(){
     '<div class="card done-card">' + doneItems.map(it => {
       const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
       return '<div class="row">' +
-        '<label>' +
-        '<input type="checkbox" checked data-undo-id="' + esc(it.id) + '" title="Desmarcar para desfazer">' +
         '<span class="badge">' + m.emoji + '</span>' +
         '<span class="body"><p class="txt done">' + esc(it.text) + '</p>' +
         '<p class="meta">Concluído em ' + fmtDate(it.done_at) + '</p></span>' +
-        '</label>' +
+        '<button class="icon-btn lg" data-undo-id="' + esc(it.id) + '" title="Desfazer" aria-label="Desfazer">↩</button>' +
         '</div>';
     }).join("") + '</div>' +
     (doneHasMore ? '<p class="msg"><button class="link" id="load-more-done">Carregar mais</button></p>' : '') +
     '<div id="done-sentinel"></div>';
 
-  list.querySelectorAll("[data-undo-id]").forEach(cb => {
-    cb.addEventListener("change", async () => {
-      if(cb.checked) return;
-      cb.disabled = true;
+  list.querySelectorAll("[data-undo-id]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
       try{
-        await api("undo_done", { ids: [cb.dataset.undoId] });
+        await api("undo_done", { ids: [btn.dataset.undoId] });
         await load();
       }catch(e){
         if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
-        else { cb.checked = true; cb.disabled = false; }
+        else { btn.disabled = false; }
       }
     });
   });
