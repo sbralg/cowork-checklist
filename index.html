@@ -106,6 +106,9 @@
   .modal-actions .save{background:var(--accent);color:var(--accent-text)}
   .modal-actions .save.danger{background:var(--danger)}
   .modal-card p{font-size:15px;line-height:1.4;margin:0 0 18px}
+  #done-wrap{margin-top:16px}
+  .done-card{margin-bottom:8px}
+  .body .txt.done{text-decoration:line-through;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -157,6 +160,13 @@ const SOURCE_META = {
   manual:           { emoji:"📝", label:"Manual" }
 };
 
+const DONE_PAGE_SIZE = 5;
+let doneItems = [];
+let doneOffset = 0;
+let doneHasMore = false;
+let doneLoading = false;
+let doneObserver = null;
+
 function showLogin(errText){
   bar.style.display = "none";
   root.innerHTML =
@@ -187,6 +197,13 @@ function updateBar(){
 }
 
 function render(rows){
+  // The done-tasks section always starts collapsed on a fresh render
+  // (login, initial load, or after any create/edit/delete/done action).
+  if(doneObserver){ doneObserver.disconnect(); doneObserver = null; }
+  doneItems = [];
+  doneOffset = 0;
+  doneHasMore = false;
+
   const header = '<header><h1>Ações pendentes</h1><div class="nav">' +
     '<a class="link" href="shopping.html">🛒 Compras</a>' +
     '<button class="link" id="logout">Sair</button></div></header>';
@@ -194,12 +211,14 @@ function render(rows){
     '<input type="text" id="new-text" placeholder="Nova ação..." />' +
     '<button id="add-btn">Adicionar</button>' +
     '</div></div>';
+  const doneWrap = '<div id="done-wrap"><button class="link" id="show-done">Ver ações concluídas</button></div>';
   if(rows.length === 0){
     root.innerHTML = header + addForm +
-      '<p class="msg">🎉 Nenhuma ação pendente.</p>';
+      '<p class="msg">🎉 Nenhuma ação pendente.</p>' + doneWrap;
     bar.style.display = "none";
     wireHeader();
     wireAddForm();
+    wireDoneToggle();
     return;
   }
   root.innerHTML = header + addForm +
@@ -215,13 +234,14 @@ function render(rows){
         '<button class="icon-btn" data-edit-id="' + esc(it.id) + '" title="Editar">✎</button>' +
         '<button class="icon-btn danger" data-del-id="' + esc(it.id) + '" title="Excluir" aria-label="Excluir">🗑</button>' +
         '</div>';
-    }).join("") + '</div>';
+    }).join("") + '</div>' + doneWrap;
   bar.style.display = "flex";
   root.querySelectorAll("input[type=checkbox]").forEach(cb => cb.addEventListener("change", updateBar));
   wireHeader();
   wireAddForm();
   wireDeleteButtons();
   wireEditControls(rows);
+  wireDoneToggle();
   updateBar();
 }
 
@@ -360,6 +380,81 @@ function wireEditControls(rows){
       if(it) openEditModal(it);
     });
   });
+}
+
+function wireDoneToggle(){
+  const btn = document.getElementById("show-done");
+  if(!btn) return;
+  btn.addEventListener("click", () => {
+    btn.remove();
+    loadDoneTasks(true);
+  });
+}
+
+async function loadDoneTasks(reset){
+  if(doneLoading) return;
+  if(reset){ doneItems = []; doneOffset = 0; doneHasMore = false; }
+  doneLoading = true;
+  try{
+    const data = await api("list_done", { offset: doneOffset, limit: DONE_PAGE_SIZE });
+    const rows = data.actions || [];
+    doneItems = doneItems.concat(rows);
+    doneOffset += rows.length;
+    doneHasMore = !!data.has_more;
+    renderDoneSection();
+  }catch(e){
+    if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
+  }finally{
+    doneLoading = false;
+  }
+}
+
+function renderDoneSection(){
+  const wrap = document.getElementById("done-wrap");
+  if(!wrap) return;
+  if(doneObserver){ doneObserver.disconnect(); doneObserver = null; }
+
+  if(doneItems.length === 0){
+    wrap.innerHTML = '<p class="msg">Nenhuma ação concluída ainda.</p>';
+    return;
+  }
+
+  wrap.innerHTML =
+    '<div class="card done-card">' + doneItems.map(it => {
+      const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
+      return '<div class="row">' +
+        '<span class="badge">' + m.emoji + '</span>' +
+        '<span class="body"><p class="txt done">' + esc(it.text) + '</p>' +
+        '<p class="meta">Concluído em ' + fmtDate(it.done_at) + '</p></span>' +
+        '<button class="icon-btn" data-undo-id="' + esc(it.id) + '" title="Desfazer">↩</button>' +
+        '</div>';
+    }).join("") + '</div>' +
+    (doneHasMore ? '<p class="msg"><button class="link" id="load-more-done">Carregar mais</button></p>' : '') +
+    '<div id="done-sentinel"></div>';
+
+  wrap.querySelectorAll("[data-undo-id]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try{
+        await api("undo_done", { ids: [btn.dataset.undoId] });
+        await load();
+      }catch(e){
+        if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
+        else { btn.disabled = false; }
+      }
+    });
+  });
+
+  const loadMoreBtn = document.getElementById("load-more-done");
+  if(loadMoreBtn) loadMoreBtn.addEventListener("click", () => loadDoneTasks(false));
+
+  if(doneHasMore){
+    const sentinel = document.getElementById("done-sentinel");
+    doneObserver = new IntersectionObserver(entries => {
+      if(entries[0].isIntersecting) loadDoneTasks(false);
+    });
+    doneObserver.observe(sentinel);
+  }
 }
 
 async function load(){
