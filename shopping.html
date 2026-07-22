@@ -38,8 +38,10 @@
   .wrap{max-width:640px;margin:0 auto}
   header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 8px}
   .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
-  .subheader{display:flex;align-items:baseline;gap:10px;min-width:0;margin:0 0 16px}
+  .subheader{display:flex;align-items:baseline;justify-content:space-between;gap:10px;min-width:0;margin:0 0 16px}
+  .list-title{display:flex;align-items:baseline;gap:8px;min-width:0}
   h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
+  h2{font-size:17px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
   .link{
     background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;
     text-decoration:none;display:inline-block;transition:color .15s ease,opacity .1s ease;
@@ -337,25 +339,22 @@ function handleAuthError(e, retry){
 }
 
 function navHeader(title, backAction, emoji){
-  if(!backAction){
-    return '<header><div class="hleft">' +
-      '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
-      '<h1 style="flex:1">' + esc(title) + '</h1>' +
-      '</div></header>';
-  }
-  // Items view: title on the left, menu button on the right (header's own
-  // justify-content:space-between pushes them to opposite ends).
-  const topRow = '<header>' +
-    '<h1 style="flex:1">' + esc(title) + '</h1>' +
+  // Top row is always the same: menu button, then the page title right
+  // after it -- regardless of screen.
+  const topRow = '<header><div class="hleft">' +
     '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
-    '</header>';
+    '<h1 style="flex:1">' + (backAction ? 'Listas de compras' : esc(title)) + '</h1>' +
+    '</div></header>';
+  if(!backAction) return topRow;
 
+  // Items view: the list itself becomes a subtitle row below -- "← Listas"
+  // on the left, the list's icon + name grouped on the right.
   const emojiBtn = emoji
     ? '<button class="badge badge-btn" id="header-emoji" title="Alterar ícone">' + emoji + '</button>'
     : '';
   const subRow = '<div class="subheader">' +
     '<button class="link" id="back">← Listas</button>' +
-    emojiBtn +
+    '<span class="list-title">' + emojiBtn + '<h2>' + esc(title) + '</h2></span>' +
   '</div>';
   return topRow + subRow;
 }
