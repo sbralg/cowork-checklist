@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Ações">
+<meta name="apple-mobile-web-app-title" content="Tarefas">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<title>Ações pendentes</title>
+<title>Tarefas pendentes</title>
 <!--
   Data-free shell for the daily-summary checklist. Hosted on public GitHub
   Pages. It contains NO keys and NO data: it asks for a passphrase and then
@@ -227,7 +227,7 @@ const SOURCE_META = {
 
 const CURRENT_PAGE = "index";
 const MENU_ITEMS = [
-  { page: "index", href: "index.html", emoji: "✓", label: "Ações" },
+  { page: "index", href: "index.html", emoji: "✓", label: "Tarefas" },
   { page: "shopping", href: "shopping.html", emoji: "🛒", label: "Compras" },
 ];
 
@@ -243,7 +243,7 @@ function showLogin(errText){
   bar.style.display = "none";
   root.innerHTML =
     '<div class="login">' +
-      '<h2>Ações pendentes</h2>' +
+      '<h2>Tarefas pendentes</h2>' +
       '<p>Digite a senha para acessar seu checklist.</p>' +
       '<div class="loginerr">' + (errText ? esc(errText) : "") + '</div>' +
       '<input type="password" id="pw" autocomplete="current-password" placeholder="Senha" />' +
@@ -279,7 +279,7 @@ function render(rows){
 
   const header = '<header><div class="hleft">' +
     '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
-    '<h1>Ações pendentes</h1>' +
+    '<h1>Tarefas pendentes</h1>' +
     '</div></header>';
   const addForm = '<div class="card addcard"><div class="addrow">' +
     '<input type="text" id="new-text" placeholder="Nova ação..." />' +
