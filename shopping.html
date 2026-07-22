@@ -194,6 +194,29 @@ function fmtMoney(v){
   return new Intl.NumberFormat("pt-BR", { style:"currency", currency:"BRL" }).format(Number(v) || 0);
 }
 
+// Returns just the first grapheme cluster of a string -- unlike a raw
+// character/length check, this correctly treats a compound emoji (skin
+// tone modifiers, ZWJ sequences, flags) as a single "character" instead
+// of cutting it apart mid-sequence.
+function firstGrapheme(str){
+  if(!str) return "";
+  if(typeof Intl !== "undefined" && Intl.Segmenter){
+    const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    const first = seg.segment(str)[Symbol.iterator]().next();
+    return first.done ? "" : first.value.segment;
+  }
+  return Array.from(str)[0] || "";
+}
+
+// Live-truncates an emoji <input> to a single grapheme as the user types
+// or pastes, instead of just capping length at submit time.
+function limitToOneEmoji(input){
+  input.addEventListener("input", () => {
+    const limited = firstGrapheme(input.value);
+    if(input.value !== limited) input.value = limited;
+  });
+}
+
 const CURRENT_PAGE = "shopping";
 const MENU_ITEMS = [
   { page: "index", href: "index.html", emoji: "✓", label: "Ações" },
@@ -309,7 +332,7 @@ function openListEditModal(list, onSaved){
     '<div class="modal-card">' +
       '<h3>Editar lista</h3>' +
       '<label for="edit-list-emoji">Ícone (emoji)</label>' +
-      '<input type="text" id="edit-list-emoji" value="' + esc(currentEmoji) + '" maxlength="16">' +
+      '<input type="text" id="edit-list-emoji" value="' + esc(currentEmoji) + '">' +
       '<label for="edit-list-name">Nome</label>' +
       '<input type="text" id="edit-list-name" value="' + esc(list.name) + '">' +
       '<div class="modal-actions">' +
@@ -329,6 +352,7 @@ function openListEditModal(list, onSaved){
   document.getElementById("edit-list-cancel").addEventListener("click", close);
 
   const nameInput = document.getElementById("edit-list-name");
+  limitToOneEmoji(document.getElementById("edit-list-emoji"));
   nameInput.focus();
   nameInput.select();
 
@@ -431,7 +455,7 @@ function renderLists(lists){
 
   root.innerHTML = navHeader("Listas de compras", null) + rowsHtml +
     '<div class="addrow">' +
-      '<input type="text" id="new-list-emoji" class="emoji" placeholder="🛒" maxlength="16">' +
+      '<input type="text" id="new-list-emoji" class="emoji" placeholder="🛒">' +
       '<input type="text" id="new-list-name" placeholder="Nova lista (ex: Farmácia)">' +
       '<button class="primary small" id="add-list-btn">+ Lista</button>' +
     '</div>';
@@ -456,6 +480,7 @@ function renderLists(lists){
   const addBtn = document.getElementById("add-list-btn");
   const nameInput = document.getElementById("new-list-name");
   const emojiInput = document.getElementById("new-list-emoji");
+  limitToOneEmoji(emojiInput);
   const addList = async () => {
     const name = nameInput.value.trim();
     if(!name) return;
