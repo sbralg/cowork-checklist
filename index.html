@@ -81,7 +81,7 @@
   .row label{flex:1;min-width:0;display:flex;align-items:flex-start;gap:12px;cursor:pointer}
   input[type=checkbox]{width:24px;height:24px;margin:1px 0 0;flex:none;accent-color:var(--accent)}
   .badge{font-size:20px;line-height:1.2;flex:none;width:26px;text-align:center}
-  .body{min-width:0}
+  .body{min-width:0;flex:1}
   .body .txt{font-size:15px;line-height:1.35;margin:0;word-wrap:break-word}
   .body .meta{font-size:12px;color:var(--muted);margin:3px 0 0}
   .msg{padding:28px 8px;text-align:center;color:var(--muted);font-size:15px}
@@ -171,7 +171,7 @@
     max-height:0;opacity:0;overflow:hidden;
     transition:max-height .3s ease,opacity .25s ease;
   }
-  #done-list.open{max-height:2000px;opacity:1}
+  #done-list.open{opacity:1}
   .done-card{margin-bottom:8px}
   .body .txt.done{text-decoration:line-through;color:var(--muted)}
 </style>
@@ -506,8 +506,19 @@ function wireDoneToggle(){
     btn.textContent = doneExpanded ? "Ocultar ações concluídas" : "Ver ações concluídas";
     const list = document.getElementById("done-list");
     if(list) list.classList.toggle("open", doneExpanded);
+    updateDoneListHeight();
     if(doneExpanded && doneItems.length === 0) loadDoneTasks(true);
   });
+}
+
+// max-height is set from the content's actual scrollHeight rather than a
+// fixed CSS value, since more items can be appended after the section is
+// already open (infinite scroll) -- a static cap would eventually clip the
+// list once loaded content grew past it.
+function updateDoneListHeight(){
+  const list = document.getElementById("done-list");
+  if(!list) return;
+  list.style.maxHeight = doneExpanded ? (list.scrollHeight + "px") : "0px";
 }
 
 async function loadDoneTasks(reset){
@@ -536,6 +547,7 @@ function renderDoneSection(){
 
   if(doneItems.length === 0){
     list.innerHTML = '<p class="msg">Nenhuma ação concluída ainda.</p>';
+    updateDoneListHeight();
     return;
   }
 
@@ -575,6 +587,8 @@ function renderDoneSection(){
     });
     doneObserver.observe(sentinel);
   }
+
+  updateDoneListHeight();
 }
 
 async function load(){
