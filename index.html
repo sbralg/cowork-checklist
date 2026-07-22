@@ -166,6 +166,7 @@ let doneOffset = 0;
 let doneHasMore = false;
 let doneLoading = false;
 let doneObserver = null;
+let doneExpanded = false;
 
 function showLogin(errText){
   bar.style.display = "none";
@@ -190,7 +191,7 @@ function showLogin(errText){
 }
 
 function updateBar(){
-  const n = document.querySelectorAll("#root input:checked").length;
+  const n = document.querySelectorAll("#root input[data-id]:checked").length;
   doneBtn.disabled = n === 0;
   btnLabel.textContent = n === 0 ? "Concluir selecionados"
     : (n === 1 ? "Concluir 1 item" : "Concluir " + n + " itens");
@@ -203,6 +204,7 @@ function render(rows){
   doneItems = [];
   doneOffset = 0;
   doneHasMore = false;
+  doneExpanded = false;
 
   const header = '<header><h1>Ações pendentes</h1><div class="nav">' +
     '<a class="link" href="shopping.html">🛒 Compras</a>' +
@@ -211,7 +213,10 @@ function render(rows){
     '<input type="text" id="new-text" placeholder="Nova ação..." />' +
     '<button id="add-btn">Adicionar</button>' +
     '</div></div>';
-  const doneWrap = '<div id="done-wrap"><button class="link" id="show-done">Ver ações concluídas</button></div>';
+  const doneWrap = '<div id="done-wrap">' +
+    '<button class="link" id="toggle-done">Ver ações concluídas</button>' +
+    '<div id="done-list" style="display:none"></div>' +
+    '</div>';
   if(rows.length === 0){
     root.innerHTML = header + addForm +
       '<p class="msg">🎉 Nenhuma ação pendente.</p>' + doneWrap;
@@ -236,7 +241,7 @@ function render(rows){
         '</div>';
     }).join("") + '</div>' + doneWrap;
   bar.style.display = "flex";
-  root.querySelectorAll("input[type=checkbox]").forEach(cb => cb.addEventListener("change", updateBar));
+  root.querySelectorAll("input[data-id]").forEach(cb => cb.addEventListener("change", updateBar));
   wireHeader();
   wireAddForm();
   wireDeleteButtons();
@@ -383,11 +388,14 @@ function wireEditControls(rows){
 }
 
 function wireDoneToggle(){
-  const btn = document.getElementById("show-done");
+  const btn = document.getElementById("toggle-done");
   if(!btn) return;
   btn.addEventListener("click", () => {
-    btn.remove();
-    loadDoneTasks(true);
+    doneExpanded = !doneExpanded;
+    btn.textContent = doneExpanded ? "Ocultar ações concluídas" : "Ver ações concluídas";
+    const list = document.getElementById("done-list");
+    if(list) list.style.display = doneExpanded ? "" : "none";
+    if(doneExpanded && doneItems.length === 0) loadDoneTasks(true);
   });
 }
 
@@ -410,37 +418,41 @@ async function loadDoneTasks(reset){
 }
 
 function renderDoneSection(){
-  const wrap = document.getElementById("done-wrap");
-  if(!wrap) return;
+  const list = document.getElementById("done-list");
+  if(!list) return;
+  list.style.display = doneExpanded ? "" : "none";
   if(doneObserver){ doneObserver.disconnect(); doneObserver = null; }
 
   if(doneItems.length === 0){
-    wrap.innerHTML = '<p class="msg">Nenhuma ação concluída ainda.</p>';
+    list.innerHTML = '<p class="msg">Nenhuma ação concluída ainda.</p>';
     return;
   }
 
-  wrap.innerHTML =
+  list.innerHTML =
     '<div class="card done-card">' + doneItems.map(it => {
       const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
       return '<div class="row">' +
+        '<label>' +
+        '<input type="checkbox" checked data-undo-id="' + esc(it.id) + '" title="Desmarcar para desfazer">' +
         '<span class="badge">' + m.emoji + '</span>' +
         '<span class="body"><p class="txt done">' + esc(it.text) + '</p>' +
         '<p class="meta">Concluído em ' + fmtDate(it.done_at) + '</p></span>' +
-        '<button class="icon-btn" data-undo-id="' + esc(it.id) + '" title="Desfazer">↩</button>' +
+        '</label>' +
         '</div>';
     }).join("") + '</div>' +
     (doneHasMore ? '<p class="msg"><button class="link" id="load-more-done">Carregar mais</button></p>' : '') +
     '<div id="done-sentinel"></div>';
 
-  wrap.querySelectorAll("[data-undo-id]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
+  list.querySelectorAll("[data-undo-id]").forEach(cb => {
+    cb.addEventListener("change", async () => {
+      if(cb.checked) return;
+      cb.disabled = true;
       try{
-        await api("undo_done", { ids: [btn.dataset.undoId] });
+        await api("undo_done", { ids: [cb.dataset.undoId] });
         await load();
       }catch(e){
         if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
-        else { btn.disabled = false; }
+        else { cb.checked = true; cb.disabled = false; }
       }
     });
   });
@@ -476,7 +488,7 @@ async function load(){
 }
 
 doneBtn.addEventListener("click", async () => {
-  const ids = Array.from(document.querySelectorAll("#root input:checked")).map(cb => cb.dataset.id);
+  const ids = Array.from(document.querySelectorAll("#root input[data-id]:checked")).map(cb => cb.dataset.id);
   if(ids.length === 0) return;
   doneBtn.disabled = true;
   btnLabel.textContent = "Salvando…";
