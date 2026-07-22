@@ -39,13 +39,40 @@
   header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 16px}
   .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
   h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
-  .nav{display:flex;align-items:center;gap:6px;flex:none}
   .link{
     background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;
     text-decoration:none;display:inline-block;transition:color .15s ease,opacity .1s ease;
   }
   .link:hover{color:var(--text);text-decoration:underline}
   .link:active{opacity:.6}
+  .menu-btn{
+    background:none;border:none;color:var(--text);font-size:22px;padding:2px 8px 2px 0;
+    cursor:pointer;line-height:1;flex:none;align-self:center;
+    transition:opacity .15s ease,transform .1s ease;
+  }
+  .menu-btn:hover{opacity:.7}
+  .menu-btn:active{transform:scale(.9)}
+  .menu-backdrop{
+    position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;
+    animation:modalFadeIn .15s ease;
+  }
+  .menu-panel{
+    position:fixed;top:0;left:0;bottom:0;width:min(280px,80vw);
+    background:var(--card);box-shadow:2px 0 24px rgba(0,0,0,.3);
+    display:flex;flex-direction:column;
+    padding:max(16px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-bottom));
+    transform:translateX(-100%);transition:transform .25s cubic-bezier(.2,.8,.2,1);
+  }
+  .menu-panel.open{transform:translateX(0)}
+  .menu-item{
+    display:flex;align-items:center;gap:12px;padding:14px 20px;font-size:15px;
+    color:var(--text);text-decoration:none;background:none;border:none;width:100%;
+    text-align:left;cursor:pointer;transition:background-color .15s ease;
+  }
+  .menu-item:hover{background:rgba(127,127,127,.08)}
+  .menu-item.active{color:var(--accent);font-weight:600}
+  .menu-spacer{flex:1}
+  .menu-item.logout{border-top:1px solid var(--border);color:var(--danger)}
   .icon-btn{
     background:none;border:none;color:var(--muted);font-size:16px;padding:6px;cursor:pointer;
     flex:none;line-height:1;border-radius:8px;
@@ -170,6 +197,52 @@ function fmtMoney(v){
   return new Intl.NumberFormat("pt-BR", { style:"currency", currency:"BRL" }).format(Number(v) || 0);
 }
 
+const CURRENT_PAGE = "shopping";
+const MENU_ITEMS = [
+  { page: "index", href: "index.html", emoji: "✓", label: "Ações" },
+  { page: "shopping", href: "shopping.html", emoji: "🛒", label: "Compras" },
+];
+
+function wireMenuButton(){
+  const btn = document.getElementById("menu-btn");
+  if(btn) btn.addEventListener("click", openMenu);
+}
+
+function openMenu(){
+  const itemsHtml = MENU_ITEMS.map(item => {
+    if(item.page === CURRENT_PAGE){
+      return '<span class="menu-item active">' + item.emoji + ' ' + item.label + '</span>';
+    }
+    return '<a class="menu-item" href="' + item.href + '">' + item.emoji + ' ' + item.label + '</a>';
+  }).join("");
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "menu-backdrop";
+  backdrop.innerHTML =
+    '<div class="menu-panel" id="menu-panel">' +
+      itemsHtml +
+      '<div class="menu-spacer"></div>' +
+      '<button class="menu-item logout" id="menu-logout">🚪 Sair</button>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+  const panel = document.getElementById("menu-panel");
+  requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.add("open")));
+
+  const close = () => {
+    panel.classList.remove("open");
+    document.removeEventListener("keydown", onKey);
+    setTimeout(() => backdrop.remove(), 250);
+  };
+  function onKey(e){ if(e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
+  document.getElementById("menu-logout").addEventListener("click", () => {
+    localStorage.removeItem(PASS_KEY);
+    close();
+    showLogin();
+  });
+}
+
 function confirmModal(message, confirmLabel){
   return new Promise(resolve => {
     const backdrop = document.createElement("div");
@@ -271,21 +344,16 @@ function navHeader(title, backAction, emoji){
     : '';
   return '<header>' +
     '<div class="hleft">' +
+      '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
       (backAction ? back : '') +
       emojiBtn +
       '<h1' + (backAction ? '' : ' style="flex:1"') + '>' + esc(title) + '</h1>' +
-    '</div>' +
-    '<div class="nav">' +
-      (backAction ? '' : '<a class="link" href="index.html">✓ Ações</a>') +
-      '<button class="link" id="logout">Sair</button>' +
     '</div>' +
   '</header>';
 }
 
 function wireNav(backAction){
-  document.getElementById("logout").addEventListener("click", () => {
-    localStorage.removeItem(PASS_KEY); showLogin();
-  });
+  wireMenuButton();
   if(backAction) document.getElementById("back").addEventListener("click", backAction);
 }
 
