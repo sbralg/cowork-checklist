@@ -38,14 +38,42 @@
   }
   .wrap{max-width:640px;margin:0 auto}
   header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 16px}
-  h1{font-size:20px;font-weight:650;margin:0}
+  .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
+  h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
   .link{
     background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;
     text-decoration:none;display:inline-block;transition:color .15s ease,opacity .1s ease;
   }
   .link:hover{color:var(--text);text-decoration:underline}
   .link:active{opacity:.6}
-  .nav{display:flex;align-items:center;gap:6px;flex:none}
+  .menu-btn{
+    background:none;border:none;color:var(--text);font-size:22px;padding:2px 8px 2px 0;
+    cursor:pointer;line-height:1;flex:none;align-self:center;
+    transition:opacity .15s ease,transform .1s ease;
+  }
+  .menu-btn:hover{opacity:.7}
+  .menu-btn:active{transform:scale(.9)}
+  .menu-backdrop{
+    position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;
+    animation:modalFadeIn .15s ease;
+  }
+  .menu-panel{
+    position:fixed;top:0;left:0;bottom:0;width:min(280px,80vw);
+    background:var(--card);box-shadow:2px 0 24px rgba(0,0,0,.3);
+    display:flex;flex-direction:column;
+    padding:max(16px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-bottom));
+    transform:translateX(-100%);transition:transform .25s cubic-bezier(.2,.8,.2,1);
+  }
+  .menu-panel.open{transform:translateX(0)}
+  .menu-item{
+    display:flex;align-items:center;gap:12px;padding:14px 20px;font-size:15px;
+    color:var(--text);text-decoration:none;background:none;border:none;width:100%;
+    text-align:left;cursor:pointer;transition:background-color .15s ease;
+  }
+  .menu-item:hover{background:rgba(127,127,127,.08)}
+  .menu-item.active{color:var(--accent);font-weight:600}
+  .menu-spacer{flex:1}
+  .menu-item.logout{border-top:1px solid var(--border);color:var(--danger)}
   .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
   .row{display:flex;align-items:flex-start;gap:12px;padding:16px 14px;border-bottom:1px solid var(--border);transition:background-color .15s ease}
   .row:hover{background:rgba(127,127,127,.06)}
@@ -197,6 +225,12 @@ const SOURCE_META = {
   manual:           { emoji:"📝", label:"Manual" }
 };
 
+const CURRENT_PAGE = "index";
+const MENU_ITEMS = [
+  { page: "index", href: "index.html", emoji: "✓", label: "Ações" },
+  { page: "shopping", href: "shopping.html", emoji: "🛒", label: "Compras" },
+];
+
 const DONE_PAGE_SIZE = 5;
 let doneItems = [];
 let doneOffset = 0;
@@ -243,9 +277,10 @@ function render(rows){
   doneHasMore = false;
   doneExpanded = false;
 
-  const header = '<header><h1>Ações pendentes</h1><div class="nav">' +
-    '<a class="link" href="shopping.html">🛒 Compras</a>' +
-    '<button class="link" id="logout">Sair</button></div></header>';
+  const header = '<header><div class="hleft">' +
+    '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
+    '<h1>Ações pendentes</h1>' +
+    '</div></header>';
   const addForm = '<div class="card addcard"><div class="addrow">' +
     '<input type="text" id="new-text" placeholder="Nova ação..." />' +
     '<button id="add-btn">Adicionar</button>' +
@@ -288,8 +323,47 @@ function render(rows){
 }
 
 function wireHeader(){
-  const lo = document.getElementById("logout");
-  if(lo) lo.addEventListener("click", () => { localStorage.removeItem(PASS_KEY); showLogin(); });
+  wireMenuButton();
+}
+
+function wireMenuButton(){
+  const btn = document.getElementById("menu-btn");
+  if(btn) btn.addEventListener("click", openMenu);
+}
+
+function openMenu(){
+  const itemsHtml = MENU_ITEMS.map(item => {
+    if(item.page === CURRENT_PAGE){
+      return '<span class="menu-item active">' + item.emoji + ' ' + item.label + '</span>';
+    }
+    return '<a class="menu-item" href="' + item.href + '">' + item.emoji + ' ' + item.label + '</a>';
+  }).join("");
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "menu-backdrop";
+  backdrop.innerHTML =
+    '<div class="menu-panel" id="menu-panel">' +
+      itemsHtml +
+      '<div class="menu-spacer"></div>' +
+      '<button class="menu-item logout" id="menu-logout">🚪 Sair</button>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+  const panel = document.getElementById("menu-panel");
+  requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.add("open")));
+
+  const close = () => {
+    panel.classList.remove("open");
+    document.removeEventListener("keydown", onKey);
+    setTimeout(() => backdrop.remove(), 250);
+  };
+  function onKey(e){ if(e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
+  document.getElementById("menu-logout").addEventListener("click", () => {
+    localStorage.removeItem(PASS_KEY);
+    close();
+    showLogin();
+  });
 }
 
 function wireAddForm(){
