@@ -39,7 +39,6 @@
   header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 8px}
   .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
   .subheader{display:flex;align-items:baseline;gap:10px;min-width:0;margin:0 0 16px}
-  .subheader h1{flex:1}
   h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
   .link{
     background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;
@@ -338,11 +337,18 @@ function handleAuthError(e, retry){
 }
 
 function navHeader(title, backAction, emoji){
-  const topRow = '<header><div class="hleft">' +
+  if(!backAction){
+    return '<header><div class="hleft">' +
+      '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
+      '<h1 style="flex:1">' + esc(title) + '</h1>' +
+      '</div></header>';
+  }
+  // Items view: title on the left, menu button on the right (header's own
+  // justify-content:space-between pushes them to opposite ends).
+  const topRow = '<header>' +
+    '<h1 style="flex:1">' + esc(title) + '</h1>' +
     '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
-    (backAction ? '' : '<h1 style="flex:1">' + esc(title) + '</h1>') +
-    '</div></header>';
-  if(!backAction) return topRow;
+    '</header>';
 
   const emojiBtn = emoji
     ? '<button class="badge badge-btn" id="header-emoji" title="Alterar ícone">' + emoji + '</button>'
@@ -350,7 +356,6 @@ function navHeader(title, backAction, emoji){
   const subRow = '<div class="subheader">' +
     '<button class="link" id="back">← Listas</button>' +
     emojiBtn +
-    '<h1>' + esc(title) + '</h1>' +
   '</div>';
   return topRow + subRow;
 }
