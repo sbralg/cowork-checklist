@@ -510,21 +510,23 @@ async function openList(id){
   }catch(e){ handleAuthError(e, loadLists); }
 }
 
+function itemRowHtml(it){
+  return '<div class="row" data-id="' + esc(it.id) + '">' +
+    '<label>' +
+      '<input type="checkbox" data-purchase' + (it.purchased ? ' checked' : '') + '>' +
+      '<span class="body"><p class="txt' + (it.purchased ? ' done' : '') + '">' + esc(it.name) + '</p></span>' +
+    '</label>' +
+    '<input class="price-input" type="number" step="0.01" min="0" placeholder="R$" value="' + (it.price != null ? it.price : '') + '">' +
+    '<button class="icon-btn" data-action="rename-item" title="Renomear">✎</button>' +
+    '<button class="icon-btn danger" data-action="delete-item" title="Remover">✕</button>' +
+  '</div>';
+}
+
 function renderItems(list, items){
   const emoji = list.emoji || "🛒";
   const rowsHtml = items.length === 0
-    ? '<p class="msg">Nenhum item nesta lista ainda.</p>'
-    : '<div class="card">' + items.map(it => {
-        return '<div class="row" data-id="' + esc(it.id) + '">' +
-          '<label>' +
-            '<input type="checkbox" data-purchase' + (it.purchased ? ' checked' : '') + '>' +
-            '<span class="body"><p class="txt' + (it.purchased ? ' done' : '') + '">' + esc(it.name) + '</p></span>' +
-          '</label>' +
-          '<input class="price-input" type="number" step="0.01" min="0" placeholder="R$" value="' + (it.price != null ? it.price : '') + '">' +
-          '<button class="icon-btn" data-action="rename-item" title="Renomear">✎</button>' +
-          '<button class="icon-btn danger" data-action="delete-item" title="Remover">✕</button>' +
-        '</div>';
-      }).join("") + '</div>';
+    ? '<p class="msg" id="items-empty">Nenhum item nesta lista ainda.</p>'
+    : '<div class="card" id="items-card">' + items.map(itemRowHtml).join("") + '</div>';
 
   root.innerHTML = navHeader(list.name, loadLists, emoji) + rowsHtml +
     '<div class="addrow">' +
@@ -536,9 +538,9 @@ function renderItems(list, items){
 
   wireNav(loadLists);
 
-  // Recomputed client-side from the already-loaded items, so toggling a
-  // checkbox or editing a price can update the totals in place instead of
-  // refetching the list (which was reloading the whole screen on every tap).
+  // Recomputed client-side from the already-loaded items, so any item
+  // change can update the totals in place instead of refetching the list
+  // (which used to reload the whole screen on every tap).
   function recomputeTotals(){
     const totalAllEl = document.getElementById("total-all");
     const totalCartEl = document.getElementById("total-cart");
@@ -548,8 +550,9 @@ function renderItems(list, items){
     totalCartEl.textContent = fmtMoney(sum(i => i.purchased));
   }
 
-  items.forEach(it => {
+  function wireItemRow(it){
     const row = root.querySelector('.row[data-id="' + it.id + '"]');
+    if(!row) return;
     row.querySelector("[data-purchase]").addEventListener("change", async (e) => {
       const checked = e.target.checked;
       const prevPurchased = it.purchased;
@@ -588,15 +591,50 @@ function renderItems(list, items){
       if(name === null) return;
       const trimmed = name.trim();
       if(!trimmed || trimmed === it.name) return;
-      try{ await api("shopping_item_rename", { id: it.id, name: trimmed }); openList(list.id); }
-      catch(err){ handleAuthError(err, loadLists); }
+      const prevName = it.name;
+      it.name = trimmed;
+      row.querySelector(".txt").textContent = trimmed;
+      try{
+        await api("shopping_item_rename", { id: it.id, name: trimmed });
+      }catch(err){
+        if(err.unauthorized){ handleAuthError(err, loadLists); return; }
+        it.name = prevName;
+        row.querySelector(".txt").textContent = prevName;
+        alert("Não foi possível salvar. Tente novamente.");
+      }
     });
     row.querySelector('[data-action="delete-item"]').addEventListener("click", async () => {
       if(!(await confirmModal('Remover "' + it.name + '"?'))) return;
-      try{ await api("shopping_item_delete", { id: it.id }); openList(list.id); }
-      catch(err){ handleAuthError(err, loadLists); }
+      const idx = items.indexOf(it);
+      const parent = row.parentNode;
+      const nextSibling = row.nextElementSibling;
+      if(idx !== -1) items.splice(idx, 1);
+      row.remove();
+      recomputeTotals();
+
+      let emptyMsg = null;
+      if(items.length === 0 && parent){
+        emptyMsg = document.createElement("p");
+        emptyMsg.className = "msg";
+        emptyMsg.id = "items-empty";
+        emptyMsg.textContent = "Nenhum item nesta lista ainda.";
+        parent.replaceWith(emptyMsg);
+      }
+
+      try{
+        await api("shopping_item_delete", { id: it.id });
+      }catch(err){
+        if(err.unauthorized){ handleAuthError(err, loadLists); return; }
+        if(idx !== -1) items.splice(idx, 0, it);
+        if(emptyMsg) emptyMsg.replaceWith(parent);
+        parent.insertBefore(row, nextSibling);
+        recomputeTotals();
+        alert("Não foi possível remover. Tente novamente.");
+      }
     });
-  });
+  }
+
+  items.forEach(wireItemRow);
 
   const addBtn = document.getElementById("add-item-btn");
   const nameInput = document.getElementById("new-item-name");
@@ -606,8 +644,31 @@ function renderItems(list, items){
     if(!name) return;
     addBtn.disabled = true;
     const price = priceInput.value.trim();
-    try{ await api("shopping_item_add", { list_id: list.id, name, price: price === "" ? null : price }); openList(list.id); }
-    catch(err){ addBtn.disabled = false; handleAuthError(err, loadLists); }
+    try{
+      const data = await api("shopping_item_add", { list_id: list.id, name, price: price === "" ? null : price });
+      items.push(data.item);
+      nameInput.value = "";
+      priceInput.value = "";
+
+      let card = document.getElementById("items-card");
+      if(!card){
+        card = document.createElement("div");
+        card.className = "card";
+        card.id = "items-card";
+        const emptyMsg = document.getElementById("items-empty");
+        if(emptyMsg) emptyMsg.replaceWith(card);
+      }
+      const wrapper = document.createElement("div");
+      wrapper.innerHTML = itemRowHtml(data.item);
+      card.appendChild(wrapper.firstElementChild);
+      wireItemRow(data.item);
+      recomputeTotals();
+    }catch(err){
+      if(err.unauthorized){ handleAuthError(err, loadLists); }
+      else alert("Não foi possível adicionar. Tente novamente.");
+    }finally{
+      addBtn.disabled = false;
+    }
   };
   addBtn.addEventListener("click", addItem);
   nameInput.addEventListener("keydown", e => { if(e.key === "Enter") addItem(); });
