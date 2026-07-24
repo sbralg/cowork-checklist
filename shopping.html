@@ -532,20 +532,56 @@ function renderItems(list, items){
       '<input type="number" step="0.01" min="0" class="price" id="new-item-price" placeholder="R$">' +
       '<button class="primary small" id="add-item-btn">+</button>' +
     '</div>' +
-    '<div class="total-bar">Total lista: <strong>' + fmtMoney(list.total_all) + '</strong> · No carrinho: <strong>' + fmtMoney(list.total_cart) + '</strong></div>';
+    '<div class="total-bar">Total lista: <strong id="total-all">' + fmtMoney(list.total_all) + '</strong> · No carrinho: <strong id="total-cart">' + fmtMoney(list.total_cart) + '</strong></div>';
 
   wireNav(loadLists);
+
+  // Recomputed client-side from the already-loaded items, so toggling a
+  // checkbox or editing a price can update the totals in place instead of
+  // refetching the list (which was reloading the whole screen on every tap).
+  function recomputeTotals(){
+    const totalAllEl = document.getElementById("total-all");
+    const totalCartEl = document.getElementById("total-cart");
+    if(!totalAllEl || !totalCartEl) return;
+    const sum = pred => items.filter(pred).reduce((acc, i) => acc + (Number(i.price) || 0), 0);
+    totalAllEl.textContent = fmtMoney(sum(() => true));
+    totalCartEl.textContent = fmtMoney(sum(i => i.purchased));
+  }
 
   items.forEach(it => {
     const row = root.querySelector('.row[data-id="' + it.id + '"]');
     row.querySelector("[data-purchase]").addEventListener("change", async (e) => {
-      try{ await api("shopping_item_update", { id: it.id, purchased: e.target.checked }); openList(list.id); }
-      catch(err){ handleAuthError(err, loadLists); }
+      const checked = e.target.checked;
+      const prevPurchased = it.purchased;
+      it.purchased = checked;
+      row.querySelector(".txt").classList.toggle("done", checked);
+      recomputeTotals();
+      try{
+        await api("shopping_item_update", { id: it.id, purchased: checked });
+      }catch(err){
+        if(err.unauthorized){ handleAuthError(err, loadLists); return; }
+        it.purchased = prevPurchased;
+        e.target.checked = prevPurchased;
+        row.querySelector(".txt").classList.toggle("done", prevPurchased);
+        recomputeTotals();
+        alert("Não foi possível salvar. Tente novamente.");
+      }
     });
     row.querySelector(".price-input").addEventListener("change", async (e) => {
       const v = e.target.value.trim();
-      try{ await api("shopping_item_update", { id: it.id, price: v === "" ? null : v }); openList(list.id); }
-      catch(err){ handleAuthError(err, loadLists); }
+      const newPrice = v === "" ? null : v;
+      const prevPrice = it.price;
+      it.price = newPrice === null ? null : Number(newPrice);
+      recomputeTotals();
+      try{
+        await api("shopping_item_update", { id: it.id, price: newPrice });
+      }catch(err){
+        if(err.unauthorized){ handleAuthError(err, loadLists); return; }
+        it.price = prevPrice;
+        e.target.value = prevPrice != null ? prevPrice : "";
+        recomputeTotals();
+        alert("Não foi possível salvar. Tente novamente.");
+      }
     });
     row.querySelector('[data-action="rename-item"]').addEventListener("click", async () => {
       const name = await promptModal("Renomear item", "Novo nome do item:", it.name);
