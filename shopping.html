@@ -446,7 +446,7 @@ function renderLists(lists){
           '<span class="badge">' + emoji + '</span>' +
           '<span class="body list-open" style="cursor:pointer">' +
             '<p class="txt">' + esc(l.name) + '</p>' +
-            '<p class="meta">' + l.pending_count + '/' + l.item_count + ' itens · ' + fmtMoney(l.total_cart) + ' no carrinho</p>' +
+            '<p class="meta">' + l.purchased_count + '/' + l.item_count + ' itens · ' + fmtMoney(l.total_cart) + ' no carrinho</p>' +
           '</span>' +
           '<button class="icon-btn" data-action="edit" title="Editar">✎</button>' +
           '<button class="icon-btn danger" data-action="delete" title="Excluir">🗑</button>' +
