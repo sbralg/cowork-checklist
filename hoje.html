@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Hoje">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<title>Hoje — resumo do dia</title>
+<!--
+  Data-free shell for the daily summary ("Hoje"). Hosted on public GitHub
+  Pages. It contains NO keys and NO data: it asks for a passphrase and then
+  talks only to the gated Supabase Edge Function (checklist-api), which holds
+  the service-role key and enforces the passphrase server-side.
+
+  The report itself is written every morning by the Cowork scheduled task
+  into public.daily_reports (one row per date: report_date, generated_at,
+  payload jsonb). This page only READS it, via the `daily_report` action —
+  same content as the daily e-mail, rendered for the browser. The payload
+  shape it expects is documented in the scheduled task's step 9; every field
+  is treated as optional here, so a partial payload degrades to a shorter
+  page instead of a broken one.
+-->
+<style>
+  :root{
+    --bg:#f7f7f8; --card:#ffffff; --text:#1a1a1a; --muted:#6b7280;
+    --border:#e5e7eb; --border-strong:#d1d5db; --accent:#2563eb;
+    --accent-text:#ffffff; --danger:#dc2626;
+    --warn:#b45309; --lead:#2563eb; --incident:#be185d;
+    --tint:rgba(127,127,127,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --muted:#94a3b8;
+      --border:#334155; --border-strong:#475569; --accent:#3b82f6;
+      --accent-text:#ffffff; --danger:#f87171;
+      --warn:#fbbf24; --lead:#60a5fa; --incident:#f472b6;
+      --tint:rgba(255,255,255,.05);
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
+  .wrap{
+    flex:1 0 auto;max-width:640px;margin:0 auto;width:100%;
+    padding:max(16px,env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+  }
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 16px}
+  .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
+  h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
+  .link{
+    background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;
+    text-decoration:none;display:inline-block;transition:color .15s ease,opacity .1s ease;
+  }
+  .link:hover{color:var(--text);text-decoration:underline}
+  .link:active{opacity:.6}
+  .menu-btn{
+    background:none;border:none;color:var(--text);font-size:22px;padding:2px 8px 2px 0;
+    cursor:pointer;line-height:1;flex:none;align-self:center;
+    transition:opacity .15s ease,transform .1s ease;
+  }
+  .menu-btn:hover{opacity:.7}
+  .menu-btn:active{transform:scale(.9)}
+  .menu-backdrop{
+    position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;
+    animation:modalFadeIn .15s ease;
+  }
+  .menu-panel{
+    position:fixed;top:0;left:0;bottom:0;width:min(280px,80vw);
+    background:var(--card);box-shadow:2px 0 24px rgba(0,0,0,.3);
+    display:flex;flex-direction:column;
+    padding:max(16px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-bottom));
+    transform:translateX(-100%);transition:transform .25s cubic-bezier(.2,.8,.2,1);
+  }
+  .menu-panel.open{transform:translateX(0)}
+  .menu-item{
+    display:flex;align-items:center;gap:12px;padding:14px 20px;font-size:15px;
+    color:var(--text);text-decoration:none;background:none;border:none;width:100%;
+    text-align:left;cursor:pointer;transition:background-color .15s ease;
+  }
+  .menu-item:hover{background:rgba(127,127,127,.08)}
+  .menu-item.active{color:var(--accent);font-weight:600}
+  .menu-spacer{flex:1}
+  .menu-item.logout{border-top:1px solid var(--border);color:var(--danger)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+  .msg{padding:28px 8px;text-align:center;color:var(--muted);font-size:15px}
+  .msg.err{color:var(--danger)}
+  .login{max-width:360px;margin:12vh auto 0;text-align:center}
+  .login h2{font-size:18px;margin:0 0 4px}
+  .login p{color:var(--muted);font-size:14px;margin:0 0 20px}
+  input[type=password]{
+    width:100%;font:inherit;font-size:16px;padding:14px;border-radius:12px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:12px;
+  }
+  button.primary{
+    font:inherit;font-weight:600;font-size:16px;border:none;border-radius:14px;
+    padding:15px 20px;min-height:52px;cursor:pointer;width:100%;max-width:640px;
+    background:var(--accent);color:var(--accent-text);
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    transition:filter .15s ease,transform .1s ease;
+  }
+  button.primary:hover:not(:disabled){filter:brightness(1.1)}
+  button.primary:active:not(:disabled){transform:scale(.98)}
+  button.primary:disabled{opacity:.5}
+  .loginerr{color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px}
+  @keyframes modalFadeIn{from{opacity:0} to{opacity:1}}
+
+  /* ---- report ---- */
+  .datebar{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    margin-bottom:12px;
+  }
+  .datebar .day{font-size:15px;font-weight:600;text-align:center;flex:1;min-width:0}
+  .datebar .day .sub{display:block;font-size:12px;font-weight:400;color:var(--muted);margin-top:2px}
+  .navbtn{
+    background:none;border:1px solid var(--border);border-radius:10px;color:var(--text);
+    font-size:17px;line-height:1;padding:8px 12px;cursor:pointer;flex:none;
+    transition:background-color .15s ease,opacity .15s ease,transform .1s ease;
+  }
+  .navbtn:hover:not(:disabled){background:var(--tint)}
+  .navbtn:active:not(:disabled){transform:scale(.94)}
+  .navbtn:disabled{opacity:.3;cursor:default}
+  .pills{display:flex;flex-wrap:wrap;gap:8px;padding:14px 14px 4px}
+  .pill{
+    background:var(--accent);color:var(--accent-text);border-radius:999px;
+    padding:4px 12px;font-size:13px;font-weight:600;
+  }
+  .headmeta{padding:10px 14px 14px;font-size:13px;color:var(--muted);line-height:1.5}
+  .headmeta b{color:var(--text);font-weight:600}
+  .sect{margin-top:20px}
+  .sect > h2{
+    font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 8px 4px;
+  }
+  .entry{
+    display:flex;gap:12px;padding:14px;border-bottom:1px solid var(--border);
+    border-left:3px solid transparent;
+  }
+  .entry:last-child{border-bottom:none}
+  .entry .when{
+    flex:none;width:56px;font-size:13px;font-weight:600;color:var(--muted);
+    padding-top:1px;
+  }
+  .entry .badge{flex:none;width:26px;font-size:19px;line-height:1.2;text-align:center}
+  .entry .body{min-width:0;flex:1}
+  .entry .body .txt{font-size:15px;line-height:1.4;margin:0;overflow-wrap:break-word}
+  .entry .body .meta{font-size:12.5px;color:var(--muted);margin:4px 0 0;line-height:1.4;overflow-wrap:break-word}
+  /* Same highlight vocabulary as the e-mail template's row classes, as a
+     left rule + tint instead of a full-row background (reads better on a
+     narrow screen and survives dark mode). */
+  .entry.urgent{border-left-color:var(--danger);background:var(--tint)}
+  .entry.urgent .when, .entry.urgent .tagname{color:var(--danger)}
+  .entry.conflict{border-left-color:var(--warn);background:var(--tint)}
+  .entry.conflict .tagname{color:var(--warn)}
+  .entry.lead{border-left-color:var(--lead);background:var(--tint)}
+  .entry.incident{border-left-color:var(--incident);background:var(--tint)}
+  .tagname{font-weight:600}
+  .num{
+    flex:none;width:26px;font-size:13px;font-weight:700;color:var(--muted);
+    text-align:center;padding-top:2px;
+  }
+  .note{font-size:12.5px;color:var(--muted);margin:8px 4px 0;line-height:1.5}
+  .note a{color:var(--accent)}
+  .empty{padding:16px 14px;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<div class="page">
+  <div id="root" class="wrap"><p class="msg">Carregando…</p></div>
+</div>
+
+<script>
+const API = "https://opehbckfmfschpvbhxvo.supabase.co/functions/v1/checklist-api";
+const PASS_KEY = "checklist_pass";
+
+const root = document.getElementById("root");
+
+function getPass(){ return localStorage.getItem(PASS_KEY) || ""; }
+
+async function api(action, extra){
+  const r = await fetch(API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-checklist-pass": getPass() },
+    body: JSON.stringify(Object.assign({ action }, extra || {}))
+  });
+  if(r.status === 401){ const e = new Error("unauthorized"); e.unauthorized = true; throw e; }
+  if(!r.ok) throw new Error("http " + r.status);
+  return await r.json();
+}
+
+function esc(s){
+  return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+function fmtStamp(iso){
+  if(!iso) return "";
+  try{
+    const d = new Date(iso);
+    return d.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}) + " " +
+           d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+  }catch(e){ return ""; }
+}
+// report_date is a bare YYYY-MM-DD: parse it as local time (not UTC, which
+// `new Date("2026-07-29")` would do and could shift the label a day back).
+function fmtDay(ymd){
+  if(!ymd) return "";
+  const p = String(ymd).split("-");
+  if(p.length !== 3) return String(ymd);
+  return p[2] + "/" + p[1] + "/" + p[0];
+}
+const SOURCE_META = {
+  email:            { emoji:"📧", label:"E-mail" },
+  whatsapp:         { emoji:"💬", label:"WhatsApp" },
+  calendar:         { emoji:"📅", label:"Agenda" },
+  self_instruction: { emoji:"🔔", label:"Instrução" },
+  work:             { emoji:"💼", label:"Trabalho" },
+  system:           { emoji:"⚙️", label:"Sistema" },
+  manual:           { emoji:"📝", label:"Manual" }
+};
+const CLASSES = ["urgent", "conflict", "lead", "incident"];
+
+const CURRENT_PAGE = "hoje";
+const MENU_ITEMS = [
+  { page: "hoje", href: "hoje.html", emoji: "☀️", label: "Hoje" },
+  { page: "index", href: "index.html", emoji: "✓", label: "Tarefas" },
+  { page: "shopping", href: "shopping.html", emoji: "🛒", label: "Compras" },
+];
+
+// null = "whatever the newest report is"; a YYYY-MM-DD pins one day.
+let currentDate = null;
+
+function showLogin(errText){
+  root.innerHTML =
+    '<div class="login">' +
+      '<h2>Resumo do dia</h2>' +
+      '<p>Digite a senha para acessar seu resumo.</p>' +
+      '<div class="loginerr">' + (errText ? esc(errText) : "") + '</div>' +
+      '<input type="password" id="pw" autocomplete="current-password" placeholder="Senha" />' +
+      '<button class="primary" id="enter">Entrar</button>' +
+    '</div>';
+  const pw = document.getElementById("pw");
+  const go = () => {
+    const v = pw.value.trim();
+    if(!v) return;
+    localStorage.setItem(PASS_KEY, v);
+    load();
+  };
+  document.getElementById("enter").addEventListener("click", go);
+  pw.addEventListener("keydown", e => { if(e.key === "Enter") go(); });
+  pw.focus();
+}
+
+function wireMenuButton(){
+  const btn = document.getElementById("menu-btn");
+  if(btn) btn.addEventListener("click", openMenu);
+}
+
+function openMenu(){
+  const itemsHtml = MENU_ITEMS.map(item => {
+    if(item.page === CURRENT_PAGE){
+      return '<span class="menu-item active">' + item.emoji + ' ' + item.label + '</span>';
+    }
+    return '<a class="menu-item" href="' + item.href + '">' + item.emoji + ' ' + item.label + '</a>';
+  }).join("");
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "menu-backdrop";
+  backdrop.innerHTML =
+    '<div class="menu-panel" id="menu-panel">' +
+      itemsHtml +
+      '<div class="menu-spacer"></div>' +
+      '<button class="menu-item logout" id="menu-logout">🚪 Sair</button>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+  const panel = document.getElementById("menu-panel");
+  requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.add("open")));
+
+  const close = () => {
+    panel.classList.remove("open");
+    document.removeEventListener("keydown", onKey);
+    setTimeout(() => backdrop.remove(), 250);
+  };
+  function onKey(e){ if(e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
+  document.getElementById("menu-logout").addEventListener("click", () => {
+    localStorage.removeItem(PASS_KEY);
+    close();
+    showLogin();
+  });
+}
+
+function headerHtml(){
+  return '<header><div class="hleft">' +
+    '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
+    '<h1>Resumo do dia</h1>' +
+    '</div></header>';
+}
+
+// Only ever emit a class we control, never whatever string the payload
+// happens to carry.
+function classOf(item){
+  return CLASSES.includes(item && item.classe) ? " " + item.classe : "";
+}
+function section(title, inner){
+  return '<div class="sect"><h2>' + esc(title) + '</h2><div class="card">' + inner + '</div></div>';
+}
+function emptyRow(text){
+  return '<p class="empty">' + esc(text) + '</p>';
+}
+function asArray(v){ return Array.isArray(v) ? v : []; }
+
+function dateBarHtml(report, prevDate, nextDate){
+  const p = report.payload || {};
+  const dow = p.dia_semana ? esc(p.dia_semana) : "";
+  const dia = esc(p.data || fmtDay(report.report_date));
+  const gerado = fmtStamp(report.generated_at);
+  return '<div class="datebar">' +
+    '<button class="navbtn" id="prev-day"' + (prevDate ? '' : ' disabled') +
+      ' aria-label="Dia anterior">‹</button>' +
+    '<div class="day">' + (dow ? dow + ", " : "") + dia +
+      (gerado ? '<span class="sub">gerado em ' + esc(gerado) + '</span>' : '') +
+    '</div>' +
+    '<button class="navbtn" id="next-day"' + (nextDate ? '' : ' disabled') +
+      ' aria-label="Próximo dia">›</button>' +
+    '</div>';
+}
+
+function summaryCardHtml(p){
+  const email = p.email || {};
+  const wpp = p.whatsapp || {};
+  const acoes = asArray(p.acoes);
+  const n = (v) => (v === 0 || v ? v : "—");
+  const pills =
+    '<div class="pills">' +
+      '<span class="pill">' + esc(n(email.total)) + ' e-mails</span>' +
+      '<span class="pill">' + esc(n(wpp.total)) + ' WhatsApp</span>' +
+      '<span class="pill">' + acoes.length + ' ações</span>' +
+    '</div>';
+  const lines = [];
+  if(p.janela_inicio || p.janela_fim){
+    lines.push('<b>Janela:</b> ' + esc(p.janela_inicio || "—") + ' → ' + esc(p.janela_fim || "—") +
+      (p.janela_nota ? ' <i>(' + esc(p.janela_nota) + ')</i>' : ''));
+  }
+  if(p.resumo_triagem) lines.push(esc(p.resumo_triagem));
+  if(p.status_trabalho) lines.push(esc(p.status_trabalho));
+  return '<div class="card">' + pills +
+    (lines.length ? '<div class="headmeta">' + lines.join("<br>") + '</div>' : '<div style="height:10px"></div>') +
+    '</div>';
+}
+
+function agendaHtml(p){
+  const rows = asArray(p.agenda);
+  if(rows.length === 0) return section("Agenda de hoje", emptyRow("Nada na agenda de hoje."));
+  const inner = rows.map(ev => {
+    const meta = [ev.calendario, ev.nota].filter(Boolean).map(esc).join(" · ");
+    return '<div class="entry' + classOf(ev) + '">' +
+      '<span class="when">' + esc(ev.hora || "dia") + '</span>' +
+      '<span class="body"><p class="txt">' + esc(ev.evento || "") + '</p>' +
+      (meta ? '<p class="meta">' + meta + '</p>' : '') +
+      '</span></div>';
+  }).join("");
+  return section("Agenda de hoje", inner) +
+    (p.observacao ? '<p class="note">' + esc(p.observacao) + '</p>' : '');
+}
+
+function acoesHtml(p){
+  const rows = asArray(p.acoes);
+  if(rows.length === 0){
+    return section("Ações para hoje", emptyRow("Nenhuma ação para hoje. 🎉"));
+  }
+  const inner = rows.map((a, i) => {
+    const m = SOURCE_META[a.origem] || { emoji:"•", label: a.origem || "" };
+    const meta = [m.label, a.motivo].filter(Boolean).map(esc).join(" · ");
+    const txt = (a.carryover ? "⟳ " : "") + (a.acao || "");
+    return '<div class="entry' + classOf(a) + '">' +
+      '<span class="num">' + (i + 1) + '</span>' +
+      '<span class="badge">' + m.emoji + '</span>' +
+      '<span class="body"><p class="txt">' + esc(txt) +
+        (a.detalhe ? ' <span style="color:var(--muted)">' + esc(a.detalhe) + '</span>' : '') +
+      '</p>' + (meta ? '<p class="meta">' + meta + '</p>' : '') +
+      '</span></div>';
+  }).join("");
+  // Read-only snapshot of the morning run: the live list (and the concluir/
+  // undo/delete controls) is the Tarefas page, backed by public.actions.
+  return section("Ações para hoje", inner) +
+    '<p class="note">Este é o retrato do resumo da manhã. ' +
+    'Para marcar como concluído, abra <a href="index.html">Tarefas</a>.</p>';
+}
+
+function amanhaHtml(p){
+  const t = p.amanha || {};
+  const rows = asArray(t.eventos);
+  const title = "Amanhã" + (t.data ? " — " + t.data : "");
+  if(rows.length === 0) return section(title, emptyRow("Nada agendado para amanhã."));
+  const inner = rows.map(ev => {
+    const meta = [ev.calendario, ev.prep].filter(Boolean).map(esc).join(" · ");
+    return '<div class="entry' + classOf(ev) + '">' +
+      '<span class="when">' + esc(ev.hora || "dia") + '</span>' +
+      '<span class="body"><p class="txt">' + esc(ev.evento || "") + '</p>' +
+      (meta ? '<p class="meta">' + meta + '</p>' : '') +
+      '</span></div>';
+  }).join("");
+  return section(title, inner);
+}
+
+function instrucoesHtml(p){
+  const rows = asArray(p.instrucoes);
+  if(rows.length === 0) return "";
+  const inner = rows.map(it =>
+    '<div class="entry">' +
+      '<span class="badge">🔔</span>' +
+      '<span class="body"><p class="txt">' + esc(it.instrucao || "") + '</p>' +
+      (it.resposta ? '<p class="meta">→ ' + esc(it.resposta) + '</p>' : '') +
+      '</span></div>'
+  ).join("");
+  return section("Suas instruções (WhatsApp)", inner);
+}
+
+function watchlistHtml(p){
+  const rows = asArray(p.watchlist);
+  if(rows.length === 0) return "";
+  const inner = rows.map(w =>
+    '<div class="entry">' +
+      '<span class="badge">👀</span>' +
+      '<span class="body"><p class="txt"><span class="tagname">' + esc(w.topico || "") + '</span>' +
+      (w.descricao ? ' — ' + esc(w.descricao) : '') + '</p></span>' +
+    '</div>'
+  ).join("");
+  return section("Watchlist — esta semana", inner);
+}
+
+function triagemHtml(p){
+  const email = p.email || {};
+  const wpp = p.whatsapp || {};
+  const has = (o) => o && (o.total === 0 || o.total || o.descricao);
+  if(!has(email) && !has(wpp)) return "";
+  const n = (v) => (v === 0 || v ? v : "—");
+  let inner = "";
+  if(has(email)){
+    inner += '<div class="entry">' +
+      '<span class="badge">📧</span>' +
+      '<span class="body"><p class="txt">' + esc(n(email.total)) + ' e-mails — ' +
+        esc(n(email.ruido)) + ' ruído, ' + esc(n(email.acao)) + ' com ação</p>' +
+      (email.descricao ? '<p class="meta">' + esc(email.descricao) + '</p>' : '') +
+      '</span></div>';
+  }
+  if(has(wpp)){
+    inner += '<div class="entry">' +
+      '<span class="badge">💬</span>' +
+      '<span class="body"><p class="txt">' + esc(n(wpp.total)) + ' mensagens — ' +
+        esc(n(wpp.grupos_ativos)) + ' grupos, ' + esc(n(wpp.diretas)) + ' diretas, ' +
+        esc(n(wpp.acao)) + ' com ação</p>' +
+      (wpp.descricao ? '<p class="meta">' + esc(wpp.descricao) + '</p>' : '') +
+      '</span></div>';
+  }
+  return section("Triagem", inner);
+}
+
+function render(data){
+  const report = data.report;
+  if(!report){
+    root.innerHTML = headerHtml() +
+      '<p class="msg">Nenhum resumo disponível ainda.</p>' +
+      '<p class="msg">O resumo é gerado todo dia às 07:00.</p>';
+    wireMenuButton();
+    return;
+  }
+  const p = report.payload || {};
+  root.innerHTML = headerHtml() +
+    dateBarHtml(report, data.prev_date, data.next_date) +
+    summaryCardHtml(p) +
+    acoesHtml(p) +
+    agendaHtml(p) +
+    amanhaHtml(p) +
+    instrucoesHtml(p) +
+    watchlistHtml(p) +
+    triagemHtml(p);
+
+  wireMenuButton();
+  const prev = document.getElementById("prev-day");
+  const next = document.getElementById("next-day");
+  if(prev && data.prev_date) prev.addEventListener("click", () => { currentDate = data.prev_date; load(); });
+  if(next && data.next_date) next.addEventListener("click", () => { currentDate = data.next_date; load(); });
+}
+
+async function load(){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  if(!getPass()){ showLogin(); return; }
+  try{
+    const data = await api("daily_report", currentDate ? { date: currentDate } : {});
+    render(data);
+  }catch(e){
+    if(e.unauthorized){
+      localStorage.removeItem(PASS_KEY);
+      showLogin("Senha incorreta.");
+    }else{
+      root.innerHTML = '<p class="msg err">Não foi possível carregar agora.</p>' +
+        '<p class="msg"><button class="link" onclick="load()">Tentar novamente</button></p>';
+    }
+  }
+}
+
+load();
+</script>
+</body>
+</html>
