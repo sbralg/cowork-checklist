@@ -21,6 +21,12 @@
   shape it expects is documented in the scheduled task's step 9; every field
   is treated as optional here, so a partial payload degrades to a shorter
   page instead of a broken one.
+
+  One exception to "pure snapshot": the `daily_report` response also carries
+  `action_status`, the CURRENT state of the actions this report listed (keyed
+  by the payload's action_id). An item completed during the day still appears
+  in the day's report — struck through and marked concluída — instead of
+  silently vanishing or pretending to still be open.
 -->
 <style>
   :root{
@@ -131,6 +137,7 @@
     background:var(--accent);color:var(--accent-text);border-radius:999px;
     padding:4px 12px;font-size:13px;font-weight:600;
   }
+  .pill.done{background:none;color:var(--muted);border:1px solid var(--border-strong)}
   .headmeta{padding:10px 14px 14px;font-size:13px;color:var(--muted);line-height:1.5}
   .headmeta b{color:var(--text);font-weight:600}
   .sect{margin-top:20px}
@@ -160,6 +167,13 @@
   .entry.conflict .tagname{color:var(--warn)}
   .entry.lead{border-left-color:var(--lead);background:var(--tint)}
   .entry.incident{border-left-color:var(--incident);background:var(--tint)}
+  /* Declared after the highlight classes on purpose: a completed item drops
+     its urgency rule/tint (equal specificity, later rule wins). */
+  .entry.done{border-left-color:transparent;background:none}
+  .entry.done .txt{text-decoration:line-through;color:var(--muted)}
+  .entry.done .badge{opacity:.55}
+  .entry.done .num{color:var(--accent);font-size:15px}
+  .entry.done .when{color:var(--muted)}
   .tagname{font-weight:600}
   .num{
     flex:none;width:26px;font-size:13px;font-weight:700;color:var(--muted);
@@ -331,16 +345,18 @@ function dateBarHtml(report, prevDate, nextDate){
     '</div>';
 }
 
-function summaryCardHtml(p){
+function summaryCardHtml(p, statuses){
   const email = p.email || {};
   const wpp = p.whatsapp || {};
   const acoes = asArray(p.acoes);
+  const nDone = acoes.filter(a => statusOf(a, statuses)).length;
   const n = (v) => (v === 0 || v ? v : "—");
   const pills =
     '<div class="pills">' +
       '<span class="pill">' + esc(n(email.total)) + ' e-mails</span>' +
       '<span class="pill">' + esc(n(wpp.total)) + ' WhatsApp</span>' +
       '<span class="pill">' + acoes.length + ' ações</span>' +
+      (nDone > 0 ? '<span class="pill done">✓ ' + nDone + (nDone === 1 ? ' feita' : ' feitas') + '</span>' : '') +
     '</div>';
   const lines = [];
   if(p.janela_inicio || p.janela_fim){
@@ -369,28 +385,43 @@ function agendaHtml(p){
     (p.observacao ? '<p class="note">' + esc(p.observacao) + '</p>' : '');
 }
 
-function acoesHtml(p){
+// The report's action list is the morning's snapshot and never loses an
+// item — but the item's STATE is read live from public.actions (by the
+// action_id stored in the payload), so something completed during the day
+// shows up here as done rather than still open.
+function statusOf(a, statuses){
+  const st = a && a.action_id ? statuses[a.action_id] : null;
+  if(!st) return null;
+  if(st.status === "done") return { cls:"done", label:"concluída", done_at: st.done_at };
+  if(st.status === "deleted") return { cls:"done", label:"excluída", done_at: null };
+  return null;
+}
+
+function acoesHtml(p, statuses){
   const rows = asArray(p.acoes);
   if(rows.length === 0){
     return section("Ações para hoje", emptyRow("Nenhuma ação para hoje. 🎉"));
   }
   const inner = rows.map((a, i) => {
     const m = SOURCE_META[a.origem] || { emoji:"•", label: a.origem || "" };
-    const meta = [m.label, a.motivo].filter(Boolean).map(esc).join(" · ");
+    const st = statusOf(a, statuses);
+    const done = st ? " done" : "";
+    const stamp = st && st.done_at ? fmtStamp(st.done_at) : "";
+    const meta = st
+      ? [st.label + (stamp ? " em " + stamp : ""), m.label].filter(Boolean).map(esc).join(" · ")
+      : [m.label, a.motivo].filter(Boolean).map(esc).join(" · ");
     const txt = (a.carryover ? "⟳ " : "") + (a.acao || "");
-    return '<div class="entry' + classOf(a) + '">' +
-      '<span class="num">' + (i + 1) + '</span>' +
+    return '<div class="entry' + classOf(a) + done + '">' +
+      '<span class="num">' + (st ? "✓" : (i + 1)) + '</span>' +
       '<span class="badge">' + m.emoji + '</span>' +
       '<span class="body"><p class="txt">' + esc(txt) +
         (a.detalhe ? ' <span style="color:var(--muted)">' + esc(a.detalhe) + '</span>' : '') +
       '</p>' + (meta ? '<p class="meta">' + meta + '</p>' : '') +
       '</span></div>';
   }).join("");
-  // Read-only snapshot of the morning run: the live list (and the concluir/
-  // undo/delete controls) is the Tarefas page, backed by public.actions.
   return section("Ações para hoje", inner) +
-    '<p class="note">Este é o retrato do resumo da manhã. ' +
-    'Para marcar como concluído, abra <a href="index.html">Tarefas</a>.</p>';
+    '<p class="note">A lista é o retrato do resumo da manhã; o estado de cada ' +
+    'item é o atual. Para concluir ou reabrir, abra <a href="index.html">Tarefas</a>.</p>';
 }
 
 function amanhaHtml(p){
@@ -472,10 +503,11 @@ function render(data){
     return;
   }
   const p = report.payload || {};
+  const statuses = data.action_status || {};
   root.innerHTML = headerHtml() +
     dateBarHtml(report, data.prev_date, data.next_date) +
-    summaryCardHtml(p) +
-    acoesHtml(p) +
+    summaryCardHtml(p, statuses) +
+    acoesHtml(p, statuses) +
     agendaHtml(p) +
     amanhaHtml(p) +
     instrucoesHtml(p) +
