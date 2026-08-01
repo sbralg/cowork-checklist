@@ -86,7 +86,7 @@
   .icon-btn.danger{color:var(--danger)}
   .icon-btn.danger:hover{background:rgba(220,38,38,.15);color:var(--danger)}
   .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
-  .row{display:flex;align-items:center;gap:8px;padding:14px;border-bottom:1px solid var(--border);transition:background-color .15s ease}
+  .row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:14px;border-bottom:1px solid var(--border);transition:background-color .15s ease}
   .row:hover{background:rgba(127,127,127,.06)}
   .row:last-child{border-bottom:none}
   .row label{flex:1;min-width:0;display:flex;align-items:center;gap:12px;cursor:pointer}
@@ -96,10 +96,24 @@
   .body .txt{font-size:15px;line-height:1.35;margin:0;word-wrap:break-word}
   .body .txt.done{text-decoration:line-through;color:var(--muted)}
   .body .meta{font-size:12px;color:var(--muted);margin:3px 0 0}
-  .price-input{
-    width:84px;flex:none;font:inherit;font-size:14px;padding:8px;border-radius:8px;
-    border:1px solid var(--border-strong);background:var(--card);color:var(--text);text-align:right;
+  /* Quantity + price sit on their own line inside the row (the row wraps),
+     indented to line up under the item name rather than under the checkbox.
+     They're outside the row's <label> on purpose — inside it, a tap on an
+     input would forward to the label's checkbox and toggle "purchased". */
+  .fields{display:flex;align-items:center;gap:8px;flex:1 1 100%;padding-left:36px}
+  .field{display:flex;align-items:center;flex:none}
+  .field .prefix{
+    font-size:12px;color:var(--muted);background:rgba(127,127,127,.1);
+    border:1px solid var(--border-strong);border-right:none;border-radius:8px 0 0 8px;
+    padding:9px 7px;line-height:1;white-space:nowrap;
   }
+  .num-input{
+    width:82px;flex:none;font:inherit;font-size:14px;padding:8px;
+    border:1px solid var(--border-strong);border-radius:0 8px 8px 0;
+    background:var(--card);color:var(--text);text-align:right;
+  }
+  .num-input.qty-input{width:64px}
+  .subtotal{font-size:13px;color:var(--muted);margin-left:auto;white-space:nowrap}
   .msg{padding:28px 8px;text-align:center;color:var(--muted);font-size:15px}
   .msg.err{color:var(--danger)}
   .login{max-width:360px;margin:12vh auto 0;text-align:center}
@@ -126,8 +140,13 @@
     flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
     border:1px solid var(--border-strong);background:var(--card);color:var(--text);
   }
-  .addrow input.price{width:84px;flex:none;text-align:right}
   .addrow input.emoji{width:52px;flex:none;text-align:center;font-size:18px;padding:10px 6px}
+  /* The "new item" row wraps: name on its own line, then quantity, price
+     and the + button — three controls plus a text field don't fit across a
+     phone otherwise. */
+  .addrow.additem{flex-wrap:wrap}
+  .addrow.additem input[type=text]{flex:1 1 100%}
+  .addrow.additem button{margin-left:auto}
   .total-bar{padding:12px 4px 0;text-align:right;color:var(--muted);font-size:13px}
   .total-bar strong{color:var(--text);font-size:14px}
   .modal-backdrop{
@@ -511,15 +530,36 @@ async function openList(id){
   }catch(e){ handleAuthError(e, loadLists); }
 }
 
+// An item's own line total (price × quantity), shown next to the fields so
+// the currency is visible even while the inputs hold bare numbers. Empty
+// when there's no price yet — "R$ 0,00" would read as free, not as unknown.
+function lineTotal(it){
+  if(it.price == null || it.price === "") return "";
+  return fmtMoney(Number(it.price) * qtyOf(it));
+}
+function qtyOf(it){
+  const q = Number(it.quantity);
+  return Number.isFinite(q) && q > 0 ? q : 1;
+}
+
 function itemRowHtml(it){
   return '<div class="row" data-id="' + esc(it.id) + '">' +
     '<label>' +
       '<input type="checkbox" data-purchase' + (it.purchased ? ' checked' : '') + '>' +
       '<span class="body"><p class="txt' + (it.purchased ? ' done' : '') + '">' + esc(it.name) + '</p></span>' +
     '</label>' +
-    '<input class="price-input" type="number" step="0.01" min="0" placeholder="R$" value="' + (it.price != null ? it.price : '') + '">' +
     '<button class="icon-btn" data-action="rename-item" title="Renomear">✎</button>' +
     '<button class="icon-btn danger" data-action="delete-item" title="Remover">✕</button>' +
+    '<div class="fields">' +
+      '<span class="field"><span class="prefix">×</span>' +
+        '<input class="num-input qty-input" type="number" step="0.01" min="0.01" ' +
+          'inputmode="decimal" aria-label="Quantidade" value="' + esc(qtyOf(it)) + '"></span>' +
+      '<span class="field"><span class="prefix">R$</span>' +
+        '<input class="num-input price-input" type="number" step="0.01" min="0" ' +
+          'inputmode="decimal" aria-label="Preço unitário" placeholder="0,00" value="' +
+          (it.price != null ? esc(it.price) : '') + '"></span>' +
+      '<span class="subtotal" data-subtotal>' + esc(lineTotal(it)) + '</span>' +
+    '</div>' +
   '</div>';
 }
 
@@ -530,9 +570,14 @@ function renderItems(list, items){
     : '<div class="card" id="items-card">' + items.map(itemRowHtml).join("") + '</div>';
 
   root.innerHTML = navHeader(list.name, loadLists, emoji) + rowsHtml +
-    '<div class="addrow">' +
+    '<div class="addrow additem">' +
       '<input type="text" id="new-item-name" placeholder="Novo item">' +
-      '<input type="number" step="0.01" min="0" class="price" id="new-item-price" placeholder="R$">' +
+      '<span class="field"><span class="prefix">×</span>' +
+        '<input class="num-input qty-input" type="number" step="0.01" min="0.01" ' +
+          'inputmode="decimal" id="new-item-qty" aria-label="Quantidade" placeholder="1"></span>' +
+      '<span class="field"><span class="prefix">R$</span>' +
+        '<input class="num-input price-input" type="number" step="0.01" min="0" ' +
+          'inputmode="decimal" id="new-item-price" aria-label="Preço unitário" placeholder="0,00"></span>' +
       '<button class="primary small" id="add-item-btn">+</button>' +
     '</div>' +
     '<div class="total-bar">Total lista: <strong id="total-all">' + fmtMoney(list.total_all) + '</strong> · No carrinho: <strong id="total-cart">' + fmtMoney(list.total_cart) + '</strong></div>';
@@ -546,9 +591,16 @@ function renderItems(list, items){
     const totalAllEl = document.getElementById("total-all");
     const totalCartEl = document.getElementById("total-cart");
     if(!totalAllEl || !totalCartEl) return;
-    const sum = pred => items.filter(pred).reduce((acc, i) => acc + (Number(i.price) || 0), 0);
+    // price * quantity, same as the server computes for the lists screen.
+    const sum = pred => items.filter(pred)
+      .reduce((acc, i) => acc + (Number(i.price) || 0) * qtyOf(i), 0);
     totalAllEl.textContent = fmtMoney(sum(() => true));
     totalCartEl.textContent = fmtMoney(sum(i => i.purchased));
+  }
+
+  function refreshLineTotal(row, it){
+    const el = row.querySelector("[data-subtotal]");
+    if(el) el.textContent = lineTotal(it);
   }
 
   function wireItemRow(it){
@@ -576,6 +628,7 @@ function renderItems(list, items){
       const newPrice = v === "" ? null : v;
       const prevPrice = it.price;
       it.price = newPrice === null ? null : Number(newPrice);
+      refreshLineTotal(row, it);
       recomputeTotals();
       try{
         await api("shopping_item_update", { id: it.id, price: newPrice });
@@ -583,6 +636,29 @@ function renderItems(list, items){
         if(err.unauthorized){ handleAuthError(err, loadLists); return; }
         it.price = prevPrice;
         e.target.value = prevPrice != null ? prevPrice : "";
+        refreshLineTotal(row, it);
+        recomputeTotals();
+        alert("Não foi possível salvar. Tente novamente.");
+      }
+    });
+    row.querySelector(".qty-input").addEventListener("change", async (e) => {
+      // Quantity is NOT NULL and must stay positive: a cleared or nonsense
+      // value falls back to 1 (and the field is rewritten to match) rather
+      // than being sent to the API to be rejected.
+      const parsed = Number(e.target.value);
+      const newQty = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+      e.target.value = newQty;
+      const prevQty = it.quantity;
+      it.quantity = newQty;
+      refreshLineTotal(row, it);
+      recomputeTotals();
+      try{
+        await api("shopping_item_update", { id: it.id, quantity: newQty });
+      }catch(err){
+        if(err.unauthorized){ handleAuthError(err, loadLists); return; }
+        it.quantity = prevQty;
+        e.target.value = qtyOf(it);
+        refreshLineTotal(row, it);
         recomputeTotals();
         alert("Não foi possível salvar. Tente novamente.");
       }
@@ -640,16 +716,23 @@ function renderItems(list, items){
   const addBtn = document.getElementById("add-item-btn");
   const nameInput = document.getElementById("new-item-name");
   const priceInput = document.getElementById("new-item-price");
+  const qtyInput = document.getElementById("new-item-qty");
   const addItem = async () => {
     const name = nameInput.value.trim();
     if(!name) return;
     addBtn.disabled = true;
     const price = priceInput.value.trim();
+    const qty = Number(qtyInput.value);
+    // Left blank (the common case) means one of them.
+    const quantity = Number.isFinite(qty) && qty > 0 ? qty : 1;
     try{
-      const data = await api("shopping_item_add", { list_id: list.id, name, price: price === "" ? null : price });
+      const data = await api("shopping_item_add", {
+        list_id: list.id, name, price: price === "" ? null : price, quantity
+      });
       items.push(data.item);
       nameInput.value = "";
       priceInput.value = "";
+      qtyInput.value = "";
 
       let card = document.getElementById("items-card");
       if(!card){
@@ -672,8 +755,8 @@ function renderItems(list, items){
     }
   };
   addBtn.addEventListener("click", addItem);
-  nameInput.addEventListener("keydown", e => { if(e.key === "Enter") addItem(); });
-  priceInput.addEventListener("keydown", e => { if(e.key === "Enter") addItem(); });
+  [nameInput, qtyInput, priceInput].forEach(el =>
+    el.addEventListener("keydown", e => { if(e.key === "Enter") addItem(); }));
 }
 
 loadLists();
