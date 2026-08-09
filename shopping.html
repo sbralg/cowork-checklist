@@ -510,6 +510,21 @@ async function openScanner(){
 
     function canFocus(){ return focusModes.length > 0 || !!caps.pointsOfInterest; }
 
+    // "Câmera 2/3", plus the raw device label when there is one — cryptic
+    // ("camera2 2, facing back") but it's the only thing that distinguishes
+    // one rear lens from another, and it's stable across openings.
+    //
+    // Deliberately NOT claiming a lens focuses. A phone in real use reported
+    // focusMode on its ultra-wide, which is fixed-focus glass — the
+    // capability can lie, and there is no web API that can catch it out. The
+    // ABSENCE of focusMode is trustworthy, so only that is reported.
+    function camLabel(i){
+      const raw = ((cameras[i] && cameras[i].label) || "").trim();
+      return "Câmera " + (i + 1) + "/" + cameras.length +
+        (raw ? " · " + raw : "") +
+        (canFocus() ? "" : " · sem foco");
+    }
+
     function refreshChrome(){
       torchBtn.style.display = caps.torch ? "" : "none";
       torchBtn.classList.toggle("on", torchOn && !!caps.torch);
@@ -549,8 +564,12 @@ async function openScanner(){
       try{
         const devices = await navigator.mediaDevices.enumerateDevices();
         const vids = devices.filter(d => d.kind === "videoinput" && d.deviceId);
-        const back = vids.filter(d => /back|rear|traseira|environment/i.test(d.label || ""));
-        cameras = back.length ? back : vids;
+        // Exclude only the clearly front-facing ones, rather than requiring
+        // a "back" match. Some phones label a rear lens with nothing that
+        // says which way it points, and demanding the match dropped that
+        // lens out of the cycle entirely.
+        const rear = vids.filter(d => !/front|user|frontal|selfie/i.test(d.label || ""));
+        cameras = rear.length ? rear : vids;
       }catch(_){ cameras = []; }
       const i = cameras.findIndex(d => d.deviceId === activeId);
       camIndex = i >= 0 ? i : 0;
@@ -592,7 +611,7 @@ async function openScanner(){
         if(canFocus()){
           camIndex = i;
           localStorage.setItem(CAM_KEY, cameras[i].deviceId);
-          toast("Câmera com foco automático");
+          toast(camLabel(i));
           break;
         }
       }
@@ -609,8 +628,7 @@ async function openScanner(){
         await startStream(cameras[next].deviceId);
         camIndex = next;
         localStorage.setItem(CAM_KEY, cameras[next].deviceId);
-        toast("Câmera " + (next + 1) + "/" + cameras.length +
-          (canFocus() ? " · com foco" : " · sem foco"));
+        toast(camLabel(next));
       }catch(_){
         toast("Câmera indisponível");
       }
