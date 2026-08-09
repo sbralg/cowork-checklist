@@ -206,6 +206,17 @@
   .gtin-row{display:flex;gap:8px;align-items:flex-start}
   .gtin-row input[type=text]{flex:1;min-width:0}
   .modal-card .hint{font-size:12px;color:var(--muted);line-height:1.4;margin:-6px 0 16px}
+  /* Scan dialog: the product it resolved to, then the two things worth
+     entering while the box is still in your hand. */
+  .scan-product{margin:0 0 4px;font-size:16px;font-weight:600;line-height:1.3}
+  .scan-meta{margin:0 0 16px;font-size:13px;color:var(--muted)}
+  .scan-fields{display:flex;gap:12px;align-items:flex-end;margin:0 0 6px}
+  .scan-fields .col{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .scan-fields .col.grow{flex:1}
+  .scan-fields label{margin:0;font-size:13px;color:var(--muted)}
+  .scan-fields .field{display:flex;align-items:center;flex:none}
+  .scan-fields .num-input{width:100%;min-width:0}
+  .scan-fields .qty-field .num-input{width:44px}
   .modal-actions{display:flex;gap:8px;justify-content:flex-end}
   .modal-actions button{
     font:inherit;font-weight:600;font-size:14px;padding:10px 16px;border-radius:10px;
@@ -934,6 +945,99 @@ function hideListToast(){
   clearTimeout(listToastTimer);
 }
 
+// Shown after every scan, before anything is written. It confirms WHICH
+// product the barcode resolved to — the safety check that matters when the
+// name comes from a shared external catalogue — and collects the two things
+// only the person holding the box knows: how many, and what it costs here.
+// Capturing the price at scan time is also what makes the price history
+// worth graphing; relying on it being typed later left it almost empty.
+// Resolves with {name, quantity, price} or null.
+function scanConfirmModal(opts){
+  const known = !!opts.product;
+  const p = opts.product || {};
+  const meta = productMeta({ products: p, brand: null, net_qty: null });
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>' + (known ? "Adicionar à lista" : "Produto novo") + '</h3>' +
+        (known
+          ? '<p class="scan-product">' + esc(p.name || "") + '</p>' +
+            (meta ? '<p class="scan-meta">' + esc(meta) + '</p>'
+                  : '<p class="scan-meta">' + esc(opts.gtin) + '</p>')
+          : '<label for="scan-name">Nome do produto</label>' +
+            '<input type="text" id="scan-name" placeholder="ex: Arroz 5 kg">' +
+            '<p class="scan-meta">Código ' + esc(opts.gtin) + ' — ainda não conhecido.</p>') +
+        '<div class="scan-fields">' +
+          '<div class="col">' +
+            '<label for="scan-qty">Quantidade</label>' +
+            '<span class="field qty-field">' +
+              '<button type="button" class="step-btn" data-step="-1" aria-label="Diminuir">\u2212</button>' +
+              '<input class="num-input qty-input" type="text" inputmode="decimal" ' +
+                'id="scan-qty" aria-label="Quantidade" value="1">' +
+              '<button type="button" class="step-btn" data-step="1" aria-label="Aumentar">+</button>' +
+            '</span>' +
+          '</div>' +
+          '<div class="col grow">' +
+            '<label for="scan-price">Preço</label>' +
+            '<span class="field"><span class="prefix">R$</span>' +
+              '<input class="num-input price-input" type="text" inputmode="numeric" ' +
+                'id="scan-price" aria-label="Preço unitário" placeholder="0,00"></span>' +
+          '</div>' +
+        '</div>' +
+        (opts.lastPrice != null
+          ? '<p class="hint">Última vez: ' + esc(fmtMoney(opts.lastPrice)) + '</p>'
+          : '<p class="hint">O preço é opcional — em branco significa desconhecido.</p>') +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="scan-cancel">Cancelar</button>' +
+          '<button class="save" id="scan-ok">Adicionar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+
+    const nameEl = backdrop.querySelector("#scan-name");
+    const qtyEl = backdrop.querySelector("#scan-qty");
+    const priceEl = backdrop.querySelector("#scan-price");
+    wireQtyInput(qtyEl);
+    wirePriceInput(priceEl);
+    backdrop.querySelectorAll(".step-btn").forEach(btn =>
+      btn.addEventListener("click", () => {
+        const step = Number(btn.getAttribute("data-step"));
+        qtyEl.value = fmtQty(Math.max((parseQtyInput(qtyEl.value) ?? 1) + step, 1));
+      }));
+
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    const ok = () => {
+      const name = nameEl ? nameEl.value.trim() : "";
+      // An unknown code has to be named before it can be stored.
+      if(nameEl && !name){ nameEl.focus(); return; }
+      close({
+        name,
+        quantity: parseQtyInput(qtyEl.value) ?? 1,
+        price: centsToPrice(priceDigits(priceEl.value))
+      });
+    };
+    function onKey(e){
+      if(e.key === "Escape") close(null);
+      if(e.key === "Enter"){ e.preventDefault(); ok(); }
+    }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#scan-cancel").addEventListener("click", () => close(null));
+    backdrop.querySelector("#scan-ok").addEventListener("click", ok);
+    // Straight to the price for a product we recognize — that's the only
+    // thing left to say. An unrecognized one needs its name first.
+    const first = nameEl || priceEl;
+    first.focus();
+    if(first.select) first.select();
+  });
+}
+
 // Informational dialog — confirmModal's red/Cancel pair reads as a warning
 // for something that is only telling the user why nothing happened.
 function alertModal(message){
@@ -1225,6 +1329,52 @@ function fmtPriceInput(v){
     { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// The price and quantity fields behave the same wherever they appear — in a
+// list row and in the scan dialog — so the behaviour is attached by these
+// two rather than written out twice.
+function wirePriceInput(el){
+  // WHILE TYPING the caret belongs at the far right: digits shift left as
+  // they are entered, so any other position edits a slot that is about to
+  // mean something else.
+  const caretToEnd = () => {
+    // A real selection is left alone — collapsing it would turn a replace
+    // into an append.
+    if(el.selectionStart !== el.selectionEnd) return;
+    const end = el.value.length;
+    try{ el.setSelectionRange(end, end); }catch(_){ /* not focusable */ }
+  };
+  // ON TAP the whole amount is selected instead. With cents-first entry the
+  // two agree rather than conflict: typing over the selection restarts the
+  // amount from the right, so a tap always means "replace this".
+  const selectAll = () => { try{ el.select(); }catch(_){ /* not focusable */ } };
+  // Selected synchronously, NOT on a timer. focus does fire before the
+  // browser places the caret from a tap — but click and pointerup fire
+  // after it, so between them the tap is covered without deferring. A
+  // deferred select was a race: it could land after the first keystroke and
+  // wipe what had just been typed.
+  el.addEventListener("focus", selectAll);
+  el.addEventListener("click", selectAll);
+  el.addEventListener("pointerup", selectAll);
+  el.addEventListener("input", () => {
+    el.value = fmtPriceInput(centsToPrice(priceDigits(el.value)));
+    caretToEnd();
+  });
+}
+
+function wireQtyInput(el){
+  el.addEventListener("input", () => {
+    const clean = sanitizeQtyInput(el.value);
+    if(clean !== el.value) el.value = clean;
+  });
+  // Tapping selects what's there, so the next digit replaces the amount
+  // instead of landing beside it. Synchronous for the same reason as the
+  // price field — a deferred select can land after the first keystroke.
+  const selectAll = () => { try{ el.select(); }catch(_){ /* not focusable */ } };
+  el.addEventListener("focus", selectAll);
+  el.addEventListener("click", selectAll);
+  el.addEventListener("pointerup", selectAll);
+}
+
 // Quantity accepts digits and at most ONE decimal separator, and nothing
 // else — type=number still let "e", "+" and "-" through on some browsers,
 // which then read back as an empty value. Decimals stay allowed on purpose:
@@ -1486,32 +1636,7 @@ function renderItems(list, items){
       }
     });
     const priceEl = row.querySelector(".price-input");
-    // WHILE TYPING the caret belongs at the far right: digits shift left as
-    // they are entered, so any other position edits a slot that is about to
-    // mean something else.
-    const caretToEnd = () => {
-      // A real selection is left alone — collapsing it would turn a replace
-      // into an append.
-      if(priceEl.selectionStart !== priceEl.selectionEnd) return;
-      const end = priceEl.value.length;
-      try{ priceEl.setSelectionRange(end, end); }catch(_){ /* not focusable */ }
-    };
-    // ON TAP the whole amount is selected instead, same as the quantity
-    // field. With cents-first entry the two agree rather than conflict:
-    // typing over the selection restarts the amount from the right, so a
-    // tap always means "replace this", never "insert here".
-    const selectPrice = () => { try{ priceEl.select(); }catch(_){ /* not focusable */ } };
-    // focus fires before the browser places the caret from the tap, so this
-    // has to run after the current task rather than inline.
-    priceEl.addEventListener("focus", () => setTimeout(selectPrice, 0));
-    priceEl.addEventListener("click", selectPrice);
-    priceEl.addEventListener("pointerup", selectPrice);
-    // Reformat on every keystroke so the value is always a well-formed
-    // amount.
-    priceEl.addEventListener("input", () => {
-      priceEl.value = fmtPriceInput(centsToPrice(priceDigits(priceEl.value)));
-      caretToEnd();
-    });
+    wirePriceInput(priceEl);
     priceEl.addEventListener("change", async () => {
       const newPrice = centsToPrice(priceDigits(priceEl.value));
       priceEl.value = fmtPriceInput(newPrice);
@@ -1532,20 +1657,7 @@ function renderItems(list, items){
       }
     });
     const qtyEl = row.querySelector(".qty-input");
-    // Anything that isn't a digit or a single separator is dropped as it's
-    // typed, so the field can never hold something unusable.
-    qtyEl.addEventListener("input", () => {
-      const clean = sanitizeQtyInput(qtyEl.value);
-      if(clean !== qtyEl.value) qtyEl.value = clean;
-    });
-    // Tapping the field selects what's there, so the next digit replaces the
-    // amount instead of landing beside it — quantities are almost always
-    // retyped rather than edited character by character.
-    const selectQty = () => { try{ qtyEl.select(); }catch(_){ /* not focusable */ } };
-    // focus fires before the browser places the caret from the tap, so the
-    // selection has to be made after the current task.
-    qtyEl.addEventListener("focus", () => setTimeout(selectQty, 0));
-    qtyEl.addEventListener("click", selectQty);
+    wireQtyInput(qtyEl);
 
     // Quantity is NOT NULL and must stay positive: a cleared or nonsense
     // value falls back to 1 (and the field is rewritten to match) rather
@@ -1637,13 +1749,7 @@ function renderItems(list, items){
   const addBtn = document.getElementById("add-item-btn");
   const nameInput = document.getElementById("new-item-name");
   const qtyInput = document.getElementById("new-item-qty");
-  qtyInput.addEventListener("input", () => {
-    const clean = sanitizeQtyInput(qtyInput.value);
-    if(clean !== qtyInput.value) qtyInput.value = clean;
-  });
-  const selectAddQty = () => { try{ qtyInput.select(); }catch(_){} };
-  qtyInput.addEventListener("focus", () => setTimeout(selectAddQty, 0));
-  qtyInput.addEventListener("click", selectAddQty);
+  wireQtyInput(qtyInput);
   const addItem = async () => {
     const name = nameInput.value.trim();
     if(!name) return;
@@ -1734,37 +1840,52 @@ function renderItems(list, items){
   // local catalogue nor Open Food Facts knows the code. The name typed then
   // is stored against the barcode, so the next scan of it never asks again.
   async function handleScannedCode(code){
-    // A local hit is instant, but a code that has to go out to Open Food
-    // Facts can take a couple of seconds — long enough to need saying so.
+    // Resolve FIRST and write nothing yet: the dialog needs to show which
+    // product this is before anything lands in the list. A local hit is
+    // instant; a code that has to go out to Open Food Facts can take a
+    // couple of seconds, which is long enough to need saying so.
     listToast("Buscando produto…");
-    let data;
+    let found;
     try{
-      data = await api("shopping_item_scan", { list_id: list.id, gtin: code });
+      found = await api("product_lookup", { gtin: code });
     }catch(err){
       hideListToast();
       if(err.unauthorized){ handleAuthError(err, loadLists); return; }
       listToast("Falha de conexão", true);
       return;
     }
-    if(data.needs_name){
-      hideListToast();
-      const typed = await promptModal(
-        "Produto novo",
-        "Código " + code + " não encontrado. Qual é o nome?",
-        ""
-      );
-      if(typed === null || !typed.trim()) return;
-      listToast("Salvando…");
+    // Best-effort: what this cost last time is a useful thing to see while
+    // standing in the aisle, but never worth failing the scan over.
+    let lastPrice = null;
+    if(found.found){
       try{
-        data = await api("shopping_item_scan", {
-          list_id: list.id, gtin: code, name: typed.trim()
-        });
-      }catch(err){
-        hideListToast();
-        if(err.unauthorized){ handleAuthError(err, loadLists); return; }
-        listToast("Falha ao salvar", true);
-        return;
-      }
+        const hist = await api("product_price_history", { gtin: code, limit: 1 });
+        const latest = (hist.prices || [])[0];
+        if(latest && latest.price != null) lastPrice = Number(latest.price);
+      }catch(_){ /* no history is the normal case for a while */ }
+    }
+    hideListToast();
+
+    const confirmed = await scanConfirmModal({
+      gtin: code, product: found.found ? found.product : null, lastPrice
+    });
+    if(confirmed === null) return;
+
+    listToast("Salvando…");
+    let data;
+    try{
+      data = await api("shopping_item_scan", {
+        list_id: list.id,
+        gtin: code,
+        name: confirmed.name || undefined,
+        quantity: confirmed.quantity,
+        price: confirmed.price
+      });
+    }catch(err){
+      hideListToast();
+      if(err.unauthorized){ handleAuthError(err, loadLists); return; }
+      listToast("Falha ao salvar", true);
+      return;
     }
     if(!data.item){ listToast("Não foi possível adicionar", true); return; }
     applyScannedItem(data.item);
