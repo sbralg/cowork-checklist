@@ -134,6 +134,9 @@
   button.primary:active:not(:disabled){transform:scale(.98)}
   button.primary:disabled{opacity:.5}
   button.primary.small{min-height:44px;padding:10px 16px;font-size:14px;width:auto;flex:none}
+  /* Secondary action sitting next to a primary one (the scan button beside +). */
+  button.primary.alt{background:rgba(127,127,127,.16);color:var(--text)}
+  button.primary.alt:hover:not(:disabled){background:rgba(127,127,127,.26);filter:none}
   .loginerr{color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px}
   .addrow{display:flex;gap:8px;margin-top:14px}
   .addrow input[type=text]{
@@ -146,7 +149,11 @@
      phone otherwise. */
   .addrow.additem{flex-wrap:wrap}
   .addrow.additem input[type=text]{flex:1 1 100%}
-  .addrow.additem button{margin-left:auto}
+  /* The scan and + buttons travel together at the right of the second line.
+     The auto margin lives on their wrapper, not on each button — two
+     auto-margined siblings would split the free space and strand the first
+     one in the middle of the row. */
+  .addrow.additem .addrow-actions{margin-left:auto;display:flex;gap:8px}
   .total-bar{padding:12px 4px 0;text-align:right;color:var(--muted);font-size:13px}
   .total-bar strong{color:var(--text);font-size:14px}
   .modal-backdrop{
@@ -181,6 +188,54 @@
   .modal-actions .save{background:var(--accent);color:var(--accent-text)}
   .modal-actions .save.danger{background:var(--danger)}
   .modal-actions .save:hover{filter:brightness(1.1)}
+
+  /* Barcode scanner. Sits BELOW .modal-backdrop (z-index 100) on purpose:
+     an unrecognized code opens the ordinary "name this product" modal on
+     top of the still-running camera. */
+  .scan-overlay{
+    position:fixed;inset:0;z-index:90;background:#000;
+    display:flex;align-items:center;justify-content:center;
+    animation:modalFadeIn .15s ease;
+  }
+  .scan-overlay video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  /* The huge spread shadow dims everything outside the frame in one rule. */
+  .scan-frame{
+    position:relative;width:min(78vw,320px);aspect-ratio:1.6/1;
+    border:2px solid rgba(255,255,255,.9);border-radius:14px;
+    box-shadow:0 0 0 100vmax rgba(0,0,0,.45);
+  }
+  .scan-frame::after{
+    content:"";position:absolute;left:6%;right:6%;top:50%;height:2px;
+    background:#ef4444;opacity:.9;
+  }
+  .scan-hint{
+    position:absolute;left:16px;right:16px;top:max(20px,env(safe-area-inset-top));
+    text-align:center;color:#fff;font-size:14px;line-height:1.45;
+    text-shadow:0 1px 3px rgba(0,0,0,.8);
+  }
+  .scan-toast{
+    position:absolute;left:16px;right:16px;
+    bottom:calc(92px + env(safe-area-inset-bottom));
+    margin:0 auto;max-width:420px;text-align:center;
+    background:rgba(0,0,0,.8);color:#fff;font-size:14px;font-weight:600;
+    padding:11px 14px;border-radius:12px;
+    opacity:0;transition:opacity .2s ease;pointer-events:none;
+  }
+  .scan-toast.show{opacity:1}
+  .scan-toast.err{background:rgba(220,38,38,.92)}
+  .scan-actions{
+    position:absolute;left:16px;right:16px;
+    bottom:max(20px,env(safe-area-inset-bottom));
+    display:flex;gap:10px;justify-content:center;align-items:center;
+  }
+  .scan-actions button{
+    font:inherit;font-weight:600;font-size:15px;border:none;border-radius:14px;
+    padding:14px 22px;min-height:52px;cursor:pointer;background:#fff;color:#111;
+    transition:transform .1s ease,background-color .15s ease;
+  }
+  .scan-actions button:active{transform:scale(.97)}
+  .scan-actions .ghost{background:rgba(255,255,255,.2);color:#fff;padding:14px 16px}
+  .scan-actions .ghost.on{background:#fde68a;color:#111}
 </style>
 </head>
 <body>
@@ -306,6 +361,171 @@ function confirmModal(message, confirmLabel){
     backdrop.addEventListener("click", e => { if(e.target === backdrop) close(false); });
     document.getElementById("confirm-cancel").addEventListener("click", () => close(false));
     document.getElementById("confirm-ok").addEventListener("click", () => close(true));
+  });
+}
+
+// ---- barcode scanning ----
+//
+// Chrome on Android implements BarcodeDetector natively, so this needs no
+// library and the page stays dependency-free. Safari/iOS has never shipped
+// it and every iOS browser is WebKit underneath, so there is no native path
+// there at all — hence the explicit unsupported message rather than a
+// button that silently does nothing.
+const SCAN_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"];
+
+function scanningSupported(){
+  return typeof window.BarcodeDetector === "function";
+}
+
+// Opens the camera and calls handleCode(code, toast) for each new barcode,
+// staying open so a whole shop can be scanned in one go. Resolves when the
+// user closes it.
+async function openScanner(handleCode){
+  return new Promise(async (resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "scan-overlay";
+    overlay.innerHTML =
+      '<video playsinline muted autoplay></video>' +
+      '<div class="scan-frame"></div>' +
+      '<p class="scan-hint">Aponte para o código de barras</p>' +
+      '<div class="scan-toast"></div>' +
+      '<div class="scan-actions">' +
+        '<button class="ghost" id="scan-torch" title="Lanterna">🔦</button>' +
+        '<button id="scan-close">Concluir</button>' +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    const video = overlay.querySelector("video");
+    const hintEl = overlay.querySelector(".scan-hint");
+    const toastEl = overlay.querySelector(".scan-toast");
+    const torchBtn = overlay.querySelector("#scan-torch");
+    let stream = null, stopped = false, toastTimer = null;
+
+    const toast = (msg, isErr) => {
+      toastEl.textContent = msg;
+      toastEl.classList.toggle("err", !!isErr);
+      toastEl.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastEl.classList.remove("show"), 2600);
+    };
+
+    const close = () => {
+      if(stopped) return;
+      stopped = true;
+      clearTimeout(toastTimer);
+      // Releasing the camera matters: without this the indicator light and
+      // the capture stay live after the overlay is gone.
+      if(stream) stream.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("visibilitychange", onHide);
+      resolve();
+    };
+    function onKey(e){ if(e.key === "Escape") close(); }
+    // Backgrounding the page (a call, the home button) should free the
+    // camera rather than leave it held by a page nobody is looking at.
+    function onHide(){ if(document.hidden) close(); }
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("visibilitychange", onHide);
+    overlay.querySelector("#scan-close").addEventListener("click", close);
+
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } }, audio: false
+      });
+    }catch(err){
+      // Denied, already in use, or no camera at all — all land here.
+      hintEl.textContent = err && err.name === "NotAllowedError"
+        ? "Permissão de câmera negada. Autorize o acesso nas configurações do site e tente de novo."
+        : "Não foi possível acessar a câmera.";
+      torchBtn.style.display = "none";
+      return;
+    }
+    video.srcObject = stream;
+    try{ await video.play(); }catch(_){ /* autoplay attribute covers it */ }
+
+    const track = stream.getVideoTracks()[0];
+    const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+    if(!caps.torch){
+      torchBtn.style.display = "none";
+    }else{
+      let torchOn = false;
+      torchBtn.addEventListener("click", async () => {
+        torchOn = !torchOn;
+        try{
+          await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+          torchBtn.classList.toggle("on", torchOn);
+        }catch(_){ torchOn = !torchOn; }
+      });
+    }
+
+    let detector;
+    try{
+      // Ask for only the formats this browser actually decodes: an
+      // unsupported entry in the list makes the constructor throw.
+      let formats = SCAN_FORMATS;
+      try{
+        const ok = await window.BarcodeDetector.getSupportedFormats();
+        const filtered = SCAN_FORMATS.filter(f => ok.includes(f));
+        if(filtered.length) formats = filtered;
+      }catch(_){ /* keep the default list */ }
+      detector = new window.BarcodeDetector({ formats });
+    }catch(_){
+      hintEl.textContent = "Este navegador não consegue ler códigos de barras.";
+      return;
+    }
+
+    // Same code re-read every frame while the box sits in front of the lens
+    // is one scan, not thirty — but a deliberate re-scan after a couple of
+    // seconds is a real "one more of these".
+    let lastCode = "", lastAt = 0, busy = false;
+    const tick = async () => {
+      if(stopped) return;
+      if(!busy && video.readyState >= 2){
+        try{
+          const found = await detector.detect(video);
+          const code = found && found.length ? found[0].rawValue : "";
+          const now = Date.now();
+          if(code && (code !== lastCode || now - lastAt > 2500)){
+            lastCode = code;
+            busy = true;
+            if(navigator.vibrate) navigator.vibrate(40);
+            try{ await handleCode(code, toast); }
+            catch(_){ toast("Falha ao adicionar", true); }
+            finally{ busy = false; lastAt = Date.now(); }
+          }
+        }catch(_){ /* detect() throws transiently between frames */ }
+      }
+      if(!stopped) setTimeout(tick, 220);
+    };
+    tick();
+  });
+}
+
+// Informational dialog — confirmModal's red/Cancel pair reads as a warning
+// for something that is only telling the user why nothing happened.
+function alertModal(message){
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<p>' + esc(message) + '</p>' +
+        '<div class="modal-actions">' +
+          '<button class="save" id="alert-ok">Entendi</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+    const close = () => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve();
+    };
+    function onKey(e){ if(e.key === "Escape" || e.key === "Enter") close(); }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
+    document.getElementById("alert-ok").addEventListener("click", close);
   });
 }
 
@@ -541,6 +761,12 @@ function qtyOf(it){
   const q = Number(it.quantity);
   return Number.isFinite(q) && q > 0 ? q : 1;
 }
+// Quantity for display: "2", not "2,00" — but "1,5" stays "1,5" (kg happens).
+function fmtQty(q){
+  const n = Number(q);
+  if(!Number.isFinite(n) || n <= 0) return "1";
+  return Number.isInteger(n) ? String(n) : n.toLocaleString("pt-BR");
+}
 
 function itemRowHtml(it){
   return '<div class="row" data-id="' + esc(it.id) + '">' +
@@ -578,7 +804,11 @@ function renderItems(list, items){
       '<span class="field"><span class="prefix">R$</span>' +
         '<input class="num-input price-input" type="number" step="0.01" min="0" ' +
           'inputmode="decimal" id="new-item-price" aria-label="Preço unitário" placeholder="0,00"></span>' +
-      '<button class="primary small" id="add-item-btn">+</button>' +
+      '<span class="addrow-actions">' +
+        '<button class="primary small alt" id="scan-item-btn" ' +
+          'title="Ler código de barras" aria-label="Ler código de barras">📷</button>' +
+        '<button class="primary small" id="add-item-btn">+</button>' +
+      '</span>' +
     '</div>' +
     '<div class="total-bar">Total lista: <strong id="total-all">' + fmtMoney(list.total_all) + '</strong> · No carrinho: <strong id="total-cart">' + fmtMoney(list.total_cart) + '</strong></div>';
 
@@ -757,6 +987,86 @@ function renderItems(list, items){
   addBtn.addEventListener("click", addItem);
   [nameInput, qtyInput, priceInput].forEach(el =>
     el.addEventListener("keydown", e => { if(e.key === "Enter") addItem(); }));
+
+  // Appends a scanned row, or refreshes the one the API merged into. The
+  // merge case mutates the SAME object the row's handlers closed over, so
+  // editing that row afterwards still works without a re-render.
+  function applyScannedItem(item){
+    const existing = items.find(i => i.id === item.id);
+    if(existing){
+      Object.assign(existing, item);
+      const row = root.querySelector('.row[data-id="' + existing.id + '"]');
+      if(row){
+        row.querySelector(".qty-input").value = qtyOf(existing);
+        const priceEl = row.querySelector(".price-input");
+        priceEl.value = existing.price != null ? existing.price : "";
+        refreshLineTotal(row, existing);
+      }
+      recomputeTotals();
+      return;
+    }
+    items.push(item);
+    let card = document.getElementById("items-card");
+    if(!card){
+      card = document.createElement("div");
+      card.className = "card";
+      card.id = "items-card";
+      const emptyMsg = document.getElementById("items-empty");
+      if(emptyMsg) emptyMsg.replaceWith(card);
+    }
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = itemRowHtml(item);
+    card.appendChild(wrapper.firstElementChild);
+    wireItemRow(item);
+    recomputeTotals();
+  }
+
+  // One scanned barcode: resolve it, and only stop to ask when neither the
+  // local catalogue nor Open Food Facts knows the code. The name typed then
+  // is stored against the barcode, so the next scan of it never asks again.
+  async function handleScannedCode(code, toast){
+    let data;
+    try{
+      data = await api("shopping_item_scan", { list_id: list.id, gtin: code });
+    }catch(err){
+      if(err.unauthorized){ handleAuthError(err, loadLists); return; }
+      toast("Falha de conexão", true);
+      return;
+    }
+    if(data.needs_name){
+      const typed = await promptModal(
+        "Produto novo",
+        "Código " + code + " não encontrado. Qual é o nome?",
+        ""
+      );
+      if(typed === null || !typed.trim()){ toast("Ignorado", true); return; }
+      try{
+        data = await api("shopping_item_scan", {
+          list_id: list.id, gtin: code, name: typed.trim()
+        });
+      }catch(err){
+        if(err.unauthorized){ handleAuthError(err, loadLists); return; }
+        toast("Falha ao salvar", true);
+        return;
+      }
+    }
+    if(!data.item){ toast("Não foi possível adicionar", true); return; }
+    applyScannedItem(data.item);
+    toast(data.merged
+      ? data.item.name + "  ×" + fmtQty(data.item.quantity)
+      : "＋ " + data.item.name);
+  }
+
+  document.getElementById("scan-item-btn").addEventListener("click", async () => {
+    if(!scanningSupported()){
+      await alertModal(
+        "Este navegador não suporta leitura de código de barras. " +
+        "No Android, use o Chrome."
+      );
+      return;
+    }
+    await openScanner(handleScannedCode);
+  });
 }
 
 loadLists();
