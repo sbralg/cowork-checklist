@@ -84,6 +84,10 @@
   .icon-btn:hover{background:rgba(127,127,127,.15);color:var(--text)}
   .icon-btn:active{transform:scale(.9)}
   .icon-btn.danger{color:var(--danger)}
+  /* An item with no barcode: muted rather than alarming, since a hand-typed
+     row is perfectly normal today — it just can't feed stock control. */
+  .icon-btn.nobc{font-size:13px;opacity:.5}
+  .icon-btn.nobc:hover{opacity:1;background:rgba(127,127,127,.15)}
   .icon-btn.danger:hover{background:rgba(220,38,38,.15);color:var(--danger)}
   .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
   .row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:14px;border-bottom:1px solid var(--border);transition:background-color .15s ease}
@@ -160,6 +164,9 @@
   .addrow.additem .addrow-actions{margin-left:auto;display:flex;gap:8px}
   .total-bar{padding:12px 4px 0;text-align:right;color:var(--muted);font-size:13px}
   .total-bar strong{color:var(--text);font-size:14px}
+  /* Layering, bottom to top: ordinary dialogs (100) < the camera overlay
+     (110), so a scan can be started from the edit dialog < the camera
+     picker (120), which is opened from inside that overlay. */
   .modal-backdrop{
     position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;
     display:flex;align-items:center;justify-content:center;padding:16px;
@@ -169,6 +176,7 @@
     background:var(--card);border-radius:16px;padding:20px;width:100%;max-width:400px;
     animation:modalPopIn .18s cubic-bezier(.2,.8,.2,1);
   }
+  .modal-backdrop.above-scanner{z-index:120}
   @keyframes modalFadeIn{from{opacity:0} to{opacity:1}}
   @keyframes modalPopIn{
     from{opacity:0;transform:scale(.95) translateY(6px)}
@@ -181,6 +189,9 @@
     width:100%;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
     border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:14px;
   }
+  .gtin-row{display:flex;gap:8px;align-items:flex-start}
+  .gtin-row input[type=text]{flex:1;min-width:0}
+  .modal-card .hint{font-size:12px;color:var(--muted);line-height:1.4;margin:-6px 0 16px}
   .modal-actions{display:flex;gap:8px;justify-content:flex-end}
   .modal-actions button{
     font:inherit;font-weight:600;font-size:14px;padding:10px 16px;border-radius:10px;
@@ -193,11 +204,12 @@
   .modal-actions .save.danger{background:var(--danger)}
   .modal-actions .save:hover{filter:brightness(1.1)}
 
-  /* Barcode scanner. Sits BELOW .modal-backdrop (z-index 100) on purpose:
-     an unrecognized code opens the ordinary "name this product" modal on
-     top of the still-running camera. */
+  /* Barcode scanner. Sits ABOVE .modal-backdrop (z-index 100) because it can
+     be opened from inside the edit dialog to attach a code to an item. The
+     "name this product" prompt is never stacked on it — a read closes the
+     camera first. */
   .scan-overlay{
-    position:fixed;inset:0;z-index:90;background:#000;
+    position:fixed;inset:0;z-index:110;background:#000;
     display:flex;align-items:center;justify-content:center;
     animation:modalFadeIn .15s ease;
   }
@@ -522,7 +534,7 @@ function cameraScore(info){
 function cameraPickerModal(devices, activeId){
   return new Promise(async (resolve) => {
     const backdrop = document.createElement("div");
-    backdrop.className = "modal-backdrop";
+    backdrop.className = "modal-backdrop above-scanner";
     backdrop.innerHTML =
       '<div class="modal-card">' +
         '<h3>Câmeras</h3>' +
@@ -1242,6 +1254,15 @@ function itemEditModal(it){
         '<label for="edit-net">Peso / volume (opcional)</label>' +
         '<input type="text" id="edit-net" placeholder="ex: 380 g, 1 kg, 500 ml" value="' +
           esc(netTextOf(it)) + '">' +
+        '<label for="edit-gtin">Código de barras</label>' +
+        '<div class="gtin-row">' +
+          '<input type="text" id="edit-gtin" inputmode="numeric" ' +
+            'placeholder="sem código" value="' + esc(it.gtin || "") + '">' +
+          '<button type="button" class="primary small alt" id="edit-scan" ' +
+            'title="Ler código de barras">📷</button>' +
+        '</div>' +
+        '<p class="hint">Ao reconhecer o código, nome, marca e peso passam a vir do ' +
+          'catálogo.</p>' +
         '<div class="modal-actions">' +
           '<button class="cancel" id="edit-cancel">Cancelar</button>' +
           '<button class="save" id="edit-ok">Salvar</button>' +
@@ -1261,7 +1282,9 @@ function itemEditModal(it){
       close({
         name,
         brand: backdrop.querySelector("#edit-brand").value.trim(),
-        net_text: backdrop.querySelector("#edit-net").value.trim()
+        net_text: backdrop.querySelector("#edit-net").value.trim(),
+        // Digits only: a barcode pasted with spaces or dashes still works.
+        gtin: backdrop.querySelector("#edit-gtin").value.replace(/\D/g, "")
       });
     };
     function onKey(e){
@@ -1272,6 +1295,19 @@ function itemEditModal(it){
     backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
     backdrop.querySelector("#edit-cancel").addEventListener("click", () => close(null));
     backdrop.querySelector("#edit-ok").addEventListener("click", ok);
+    backdrop.querySelector("#edit-scan").addEventListener("click", async () => {
+      if(!scanningSupported()){
+        await alertModal(
+          "Este navegador não suporta leitura de código de barras. " +
+          "No Android, use o Chrome."
+        );
+        return;
+      }
+      // The camera overlay sits above this dialog, which stays open
+      // underneath so nothing typed so far is lost.
+      const code = await openScanner();
+      if(code) backdrop.querySelector("#edit-gtin").value = code;
+    });
     nameEl.focus();
     nameEl.select();
   });
@@ -1286,7 +1322,10 @@ function itemRowHtml(it){
         (meta ? '<p class="meta">' + esc(meta) + '</p>' : '') +
       '</span>' +
     '</label>' +
-    '<button class="icon-btn" data-action="rename-item" title="Renomear">✎</button>' +
+    '<button class="icon-btn nobc" data-action="fix-gtin" data-nobc' +
+      (it.gtin ? ' hidden' : '') +
+      ' title="Sem código de barras — necessário para o controle de estoque">⚠️</button>' +
+    '<button class="icon-btn" data-action="rename-item" title="Editar">✎</button>' +
     '<button class="icon-btn danger" data-action="delete-item" title="Remover">✕</button>' +
     '<div class="fields">' +
       '<span class="field"><span class="prefix">×</span>' +
@@ -1352,6 +1391,8 @@ function renderItems(list, items){
   // entirely depending on what was just saved.
   function redrawItemText(row, it){
     row.querySelector(".txt").textContent = it.name;
+    const nobc = row.querySelector("[data-nobc]");
+    if(nobc) nobc.hidden = !!it.gtin;
     const meta = productMeta(it);
     let metaEl = row.querySelector(".meta");
     if(!meta){ if(metaEl) metaEl.remove(); return; }
@@ -1423,12 +1464,15 @@ function renderItems(list, items){
         alert("Não foi possível salvar. Tente novamente.");
       }
     });
-    row.querySelector('[data-action="rename-item"]').addEventListener("click", async () => {
+    // Both the ✎ and the missing-barcode marker open the same dialog.
+    row.querySelectorAll('[data-action="rename-item"],[data-action="fix-gtin"]').forEach(btn =>
+      btn.addEventListener("click", async () => {
       const edited = await itemEditModal(it);
       if(edited === null) return;
       try{
         const data = await api("shopping_item_update", {
-          id: it.id, name: edited.name, brand: edited.brand, net_text: edited.net_text
+          id: it.id, name: edited.name, brand: edited.brand,
+          net_text: edited.net_text, gtin: edited.gtin
         });
         // The API returns the stored row, with the size normalized out of
         // whatever free text was typed — so redraw from that, not from the
@@ -1439,10 +1483,10 @@ function renderItems(list, items){
       }catch(err){
         if(err.unauthorized){ handleAuthError(err, loadLists); return; }
         alert(err.badRequest
-          ? "Não entendi o peso/volume. Use algo como 380 g, 1 kg ou 500 ml."
+          ? "Verifique o peso/volume (ex: 380 g) e o código de barras."
           : "Não foi possível salvar. Tente novamente.");
       }
-    });
+    }));
     row.querySelector('[data-action="delete-item"]').addEventListener("click", async () => {
       if(!(await confirmModal('Remover "' + it.name + '"?'))) return;
       const idx = items.indexOf(it);
