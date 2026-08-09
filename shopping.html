@@ -1469,13 +1469,29 @@ function renderItems(list, items){
       }
     });
     const priceEl = row.querySelector(".price-input");
-    // Reformat on every keystroke so the value is always a well-formed
-    // amount; the caret goes back to the end because the digits shift left
-    // as they are typed and any other position would be meaningless.
-    priceEl.addEventListener("input", () => {
-      priceEl.value = fmtPriceInput(centsToPrice(priceDigits(priceEl.value)));
+    // The caret lives at the far right, always. Digits shift left as they
+    // are typed, so a caret anywhere else edits a position that is about to
+    // mean something different — and tapping into the middle of an amount
+    // would silently insert there. Pinning it right makes every edit the
+    // same gesture: type the amount again, or backspace it away.
+    const caretToEnd = () => {
+      // A real selection is left alone: select-all-then-type is a
+      // legitimate way to replace the amount, and collapsing it would
+      // silently turn that into an append. Only a plain caret gets moved.
+      if(priceEl.selectionStart !== priceEl.selectionEnd) return;
       const end = priceEl.value.length;
       try{ priceEl.setSelectionRange(end, end); }catch(_){ /* not focusable */ }
+    };
+    // focus fires before the browser places the caret from the tap, so this
+    // has to run after the current task rather than inline.
+    priceEl.addEventListener("focus", () => setTimeout(caretToEnd, 0));
+    priceEl.addEventListener("click", caretToEnd);
+    priceEl.addEventListener("pointerup", caretToEnd);
+    // Reformat on every keystroke so the value is always a well-formed
+    // amount.
+    priceEl.addEventListener("input", () => {
+      priceEl.value = fmtPriceInput(centsToPrice(priceDigits(priceEl.value)));
+      caretToEnd();
     });
     priceEl.addEventListener("change", async () => {
       const newPrice = centsToPrice(priceDigits(priceEl.value));
