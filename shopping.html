@@ -104,7 +104,10 @@
      indented to line up under the item name rather than under the checkbox.
      They're outside the row's <label> on purpose — inside it, a tap on an
      input would forward to the label's checkbox and toggle "purchased". */
-  .fields{display:flex;align-items:center;gap:8px;flex:1 1 100%;padding-left:36px}
+  /* Wraps as a safety valve: with the quantity steppers the line can get
+     tight on a narrow phone, and the subtotal dropping to its own line
+     reads better than being clipped. */
+  .fields{display:flex;align-items:center;gap:6px;flex:1 1 100%;padding-left:14px;flex-wrap:wrap}
   .field{display:flex;align-items:center;flex:none}
   .field .prefix{
     font-size:12px;color:var(--muted);background:rgba(127,127,127,.1);
@@ -112,11 +115,26 @@
     padding:9px 7px;line-height:1;white-space:nowrap;
   }
   .num-input{
-    width:82px;flex:none;font:inherit;font-size:14px;padding:8px;
+    width:70px;flex:none;font:inherit;font-size:14px;padding:8px;
     border:1px solid var(--border-strong);border-radius:0 8px 8px 0;
     background:var(--card);color:var(--text);text-align:right;
   }
-  .num-input.qty-input{width:64px}
+  .num-input.qty-input{width:48px}
+  /* Quantity stepper: the − and + flank the input and carry the rounded
+     ends, so the three read as one control. Sized to stay a comfortable tap
+     target without pushing the price off the line. */
+  .qty-field .num-input.qty-input{border-radius:0;border-left:none;border-right:none;text-align:center}
+  .step-btn{
+    font:inherit;font-size:17px;line-height:1;font-weight:600;
+    color:var(--muted);background:rgba(127,127,127,.1);
+    border:1px solid var(--border-strong);padding:0 9px;min-height:38px;
+    cursor:pointer;flex:none;
+    transition:background-color .15s ease,color .15s ease,transform .1s ease;
+  }
+  .step-btn[data-step="-1"]{border-radius:8px 0 0 8px}
+  .step-btn[data-step="1"]{border-radius:0 8px 8px 0}
+  .step-btn:hover{background:rgba(127,127,127,.22);color:var(--text)}
+  .step-btn:active{transform:scale(.92)}
   .subtotal{font-size:13px;color:var(--muted);margin-left:auto;white-space:nowrap}
   .msg{padding:28px 8px;text-align:center;color:var(--muted);font-size:15px}
   .msg.err{color:var(--danger)}
@@ -151,17 +169,13 @@
   /* The "new item" row wraps: name on its own line, then quantity, price
      and the + button — three controls plus a text field don't fit across a
      phone otherwise. */
-  .addrow.additem{flex-wrap:wrap}
-  .addrow.additem input[type=text]{flex:1 1 100%}
-  /* Brand and size share a line below the name: both optional, and only
-     ever filled in for an item typed by hand — a scanned one gets them
-     from its product. */
-  .addrow.additem input.detail{flex:1 1 45%;min-width:0;font-size:14px}
-  /* The scan and + buttons travel together at the right of the second line.
-     The auto margin lives on their wrapper, not on each button — two
-     auto-margined siblings would split the free space and strand the first
-     one in the middle of the row. */
-  .addrow.additem .addrow-actions{margin-left:auto;display:flex;gap:8px}
+  /* Quick add: name, quantity and the buttons all on one line. Brand, size
+     and price are deliberately NOT here — they belong to the edit dialog,
+     which keeps the common "add a thing to the list" gesture to one tap. */
+  .addrow.additem{flex-wrap:nowrap}
+  .addrow.additem input[type=text]{flex:1 1 auto;min-width:0}
+  .addrow.additem .addrow-actions{display:flex;gap:6px;flex:none}
+  .addrow.additem button.primary.small{padding:10px 13px}
   .total-bar{padding:12px 4px 0;text-align:right;color:var(--muted);font-size:13px}
   .total-bar strong{color:var(--text);font-size:14px}
   /* Layering, bottom to top: ordinary dialogs (100) < the camera overlay
@@ -1328,9 +1342,12 @@ function itemRowHtml(it){
     '<button class="icon-btn" data-action="rename-item" title="Editar">✎</button>' +
     '<button class="icon-btn danger" data-action="delete-item" title="Remover">✕</button>' +
     '<div class="fields">' +
-      '<span class="field"><span class="prefix">×</span>' +
+      '<span class="field qty-field">' +
+        '<button class="step-btn" data-step="-1" aria-label="Diminuir">\u2212</button>' +
         '<input class="num-input qty-input" type="number" step="0.01" min="0.01" ' +
-          'inputmode="decimal" aria-label="Quantidade" value="' + esc(qtyOf(it)) + '"></span>' +
+          'inputmode="decimal" aria-label="Quantidade" value="' + esc(qtyOf(it)) + '">' +
+        '<button class="step-btn" data-step="1" aria-label="Aumentar">+</button>' +
+      '</span>' +
       '<span class="field"><span class="prefix">R$</span>' +
         '<input class="num-input price-input" type="number" step="0.01" min="0" ' +
           'inputmode="decimal" aria-label="Preço unitário" placeholder="0,00" value="' +
@@ -1348,16 +1365,10 @@ function renderItems(list, items){
 
   root.innerHTML = navHeader(list.name, loadLists, emoji) + rowsHtml +
     '<div class="addrow additem">' +
-      '<input type="text" id="new-item-name" placeholder="Novo item">' +
-      '<input type="text" class="detail" id="new-item-brand" placeholder="Marca (opcional)">' +
-      '<input type="text" class="detail" id="new-item-net" ' +
-        'placeholder="Peso / volume (ex: 380 g)">' +
+      '<input type="text" id="new-item-name" placeholder="Novo item rápido">' +
       '<span class="field"><span class="prefix">×</span>' +
         '<input class="num-input qty-input" type="number" step="0.01" min="0.01" ' +
           'inputmode="decimal" id="new-item-qty" aria-label="Quantidade" placeholder="1"></span>' +
-      '<span class="field"><span class="prefix">R$</span>' +
-        '<input class="num-input price-input" type="number" step="0.01" min="0" ' +
-          'inputmode="decimal" id="new-item-price" aria-label="Preço unitário" placeholder="0,00"></span>' +
       '<span class="addrow-actions">' +
         '<button class="primary small alt" id="scan-item-btn" ' +
           'title="Ler código de barras" aria-label="Ler código de barras">📷</button>' +
@@ -1442,13 +1453,18 @@ function renderItems(list, items){
         alert("Não foi possível salvar. Tente novamente.");
       }
     });
-    row.querySelector(".qty-input").addEventListener("change", async (e) => {
-      // Quantity is NOT NULL and must stay positive: a cleared or nonsense
-      // value falls back to 1 (and the field is rewritten to match) rather
-      // than being sent to the API to be rejected.
-      const parsed = Number(e.target.value);
-      const newQty = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-      e.target.value = newQty;
+    const qtyEl = row.querySelector(".qty-input");
+    // Quantity is NOT NULL and must stay positive: a cleared or nonsense
+    // value falls back to 1 (and the field is rewritten to match) rather
+    // than being sent to the API to be rejected. Shared by the typed input
+    // and the − / + steppers so both save the same way.
+    async function setQty(raw){
+      const parsed = Number(raw);
+      const newQty = Number.isFinite(parsed) && parsed > 0
+        ? Math.round(parsed * 100) / 100
+        : 1;
+      qtyEl.value = newQty;
+      if(newQty === qtyOf(it)) return;
       const prevQty = it.quantity;
       it.quantity = newQty;
       refreshLineTotal(row, it);
@@ -1458,12 +1474,20 @@ function renderItems(list, items){
       }catch(err){
         if(err.unauthorized){ handleAuthError(err, loadLists); return; }
         it.quantity = prevQty;
-        e.target.value = qtyOf(it);
+        qtyEl.value = qtyOf(it);
         refreshLineTotal(row, it);
         recomputeTotals();
         alert("Não foi possível salvar. Tente novamente.");
       }
-    });
+    }
+    qtyEl.addEventListener("change", (e) => setQty(e.target.value));
+    row.querySelectorAll(".step-btn").forEach(btn =>
+      btn.addEventListener("click", () => {
+        // Steps by whole units and never below 1 — zero would fail the
+        // column's check constraint, and "none of this" is the ✕ button.
+        const step = Number(btn.getAttribute("data-step"));
+        setQty(Math.max(qtyOf(it) + step, 1));
+      }));
     // Both the ✎ and the missing-barcode marker open the same dialog.
     row.querySelectorAll('[data-action="rename-item"],[data-action="fix-gtin"]').forEach(btn =>
       btn.addEventListener("click", async () => {
@@ -1522,29 +1546,21 @@ function renderItems(list, items){
 
   const addBtn = document.getElementById("add-item-btn");
   const nameInput = document.getElementById("new-item-name");
-  const priceInput = document.getElementById("new-item-price");
   const qtyInput = document.getElementById("new-item-qty");
-  const brandInput = document.getElementById("new-item-brand");
-  const netInput = document.getElementById("new-item-net");
   const addItem = async () => {
     const name = nameInput.value.trim();
     if(!name) return;
     addBtn.disabled = true;
-    const price = priceInput.value.trim();
     const qty = Number(qtyInput.value);
     // Left blank (the common case) means one of them.
     const quantity = Number.isFinite(qty) && qty > 0 ? qty : 1;
     try{
       const data = await api("shopping_item_add", {
-        list_id: list.id, name, price: price === "" ? null : price, quantity,
-        brand: brandInput.value.trim(), net_text: netInput.value.trim()
+        list_id: list.id, name, quantity
       });
       items.push(data.item);
       nameInput.value = "";
-      priceInput.value = "";
       qtyInput.value = "";
-      brandInput.value = "";
-      netInput.value = "";
 
       let card = document.getElementById("items-card");
       if(!card){
@@ -1570,7 +1586,7 @@ function renderItems(list, items){
     }
   };
   addBtn.addEventListener("click", addItem);
-  [nameInput, brandInput, netInput, qtyInput, priceInput].forEach(el =>
+  [nameInput, qtyInput].forEach(el =>
     el.addEventListener("keydown", e => { if(e.key === "Enter") addItem(); }));
 
   // Appends a scanned row, or refreshes the one the API merged into. The
