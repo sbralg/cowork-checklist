@@ -388,10 +388,44 @@ function confirmModal(message, confirmLabel){
 // it and every iOS browser is WebKit underneath, so there is no native path
 // there at all — hence the explicit unsupported message rather than a
 // button that silently does nothing.
-const SCAN_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"];
+// GTIN families only. code_128 was in this list originally and is gone on
+// purpose: it carries arbitrary text, not a product number, so it mostly
+// added surface for reading a shipping label off the side of a box.
+const SCAN_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e"];
+
+// Number of consecutive frames that must decode to the SAME valid code
+// before it counts. A misread that happens to satisfy the check digit
+// anyway (1 in 10 do) almost never repeats identically on the next frame.
+const SCAN_AGREE = 2;
 
 function scanningSupported(){
   return typeof window.BarcodeDetector === "function";
+}
+
+// Standard GS1 mod-10 check digit — the same algorithm normalizeGtin() runs
+// in checklist-api. The server stays the authority; this copy exists so a
+// misread is thrown away before it costs a closed camera and a bogus
+// "produto novo" prompt. Keep the two in step.
+function gtinCheckDigitOk(code){
+  const d = code.split("").map(Number);
+  const check = d.pop();
+  const sum = d.reverse().reduce((acc, n, i) => acc + n * (i % 2 === 0 ? 3 : 1), 0);
+  return (10 - (sum % 10)) % 10 === check;
+}
+
+// Returns the code if it's a plausible GTIN, or null to keep scanning.
+// Dropping or inventing a digit — the exact failure being seen on real
+// boxes — breaks the check digit, so this catches it.
+function validScan(raw, format){
+  const code = String(raw ?? "").trim();
+  if(!/^\d+$/.test(code)) return null;
+  // UPC-E is the one format the check digit can't be run on as-is: its
+  // digit is computed over the EXPANDED 12-digit form, so the 8 digits as
+  // reported would fail a straight mod-10. Length is all that's checked
+  // here; the repeat-read agreement below still has to hold.
+  if(format === "upc_e") return code.length === 8 ? code : null;
+  if(!/^(\d{8}|\d{12,14})$/.test(code)) return null;
+  return gtinCheckDigitOk(code) ? code : null;
 }
 
 // Opens the camera and resolves with the FIRST barcode read, or null if the
@@ -550,16 +584,40 @@ async function openScanner(){
       return;
     }
 
+    // A candidate has to survive two gates before it counts: the GS1 check
+    // digit, and agreeing with the previous frame. Anything else is dropped
+    // silently and scanning continues — no vibration, no closing, because a
+    // buzz on a misread is worse than no buzz at all.
+    let candidate = "", agreed = 0, nudgedAt = 0;
     const tick = async () => {
       if(stopped) return;
       if(video.readyState >= 2){
         try{
           const found = await detector.detect(video);
-          const code = found && found.length ? found[0].rawValue : "";
-          if(code){
-            if(navigator.vibrate) navigator.vibrate(40);
-            close(code);
-            return;
+          const hit = found && found.length ? found[0] : null;
+          if(hit){
+            const code = validScan(hit.rawValue, hit.format);
+            if(!code){
+              candidate = "";
+              agreed = 0;
+              // Something IS being decoded, it just keeps coming out
+              // malformed — worth saying so rather than letting the user
+              // hold the phone there indefinitely.
+              const now = Date.now();
+              if(now - nudgedAt > 4000){
+                nudgedAt = now;
+                toast("Código ilegível — aproxime ou afaste");
+              }
+            }else if(code === candidate){
+              if(++agreed >= SCAN_AGREE){
+                if(navigator.vibrate) navigator.vibrate(40);
+                close(code);
+                return;
+              }
+            }else{
+              candidate = code;
+              agreed = 1;
+            }
           }
         }catch(_){ /* detect() throws transiently between frames */ }
       }
