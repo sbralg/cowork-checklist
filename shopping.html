@@ -250,6 +250,18 @@
   }
   .toast.show{opacity:1;transform:translateY(0)}
   .toast.err{background:var(--danger);color:#fff}
+  /* Camera picker / diagnostic list. */
+  .cam-list{display:flex;flex-direction:column;gap:8px;margin:0 0 14px;max-height:52vh;overflow:auto}
+  .cam-item{
+    display:block;width:100%;text-align:left;font:inherit;cursor:pointer;
+    background:none;border:1px solid var(--border-strong);border-radius:10px;
+    padding:10px 12px;color:var(--text);transition:background-color .15s ease;
+  }
+  .cam-item:hover{background:rgba(127,127,127,.1)}
+  .cam-item.active{border-color:var(--accent)}
+  /* Both are spans inside a <button>, so they need to be told to stack. */
+  .cam-name{display:block;font-size:14px;font-weight:600;word-break:break-word}
+  .cam-caps{display:block;font-size:12px;color:var(--muted);margin-top:3px;word-break:break-word}
   /* A scanned row lights up briefly so it's obvious what just landed. */
   @keyframes rowFlash{from{background:rgba(37,99,235,.22)} to{background:transparent}}
   .row.flash{animation:rowFlash 1.4s ease-out}
@@ -432,6 +444,103 @@ function validScan(raw, format){
 // per origin once camera permission has been granted.
 const CAM_KEY = "scan_camera_id";
 
+// Opens one camera just long enough to read what it can do, then releases
+// it. This is the only way to learn a lens's capabilities — enumerateDevices
+// reports names, never abilities.
+async function probeCamera(deviceId){
+  let s = null;
+  try{
+    s = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: { exact: deviceId } }, audio: false
+    });
+    const t = s.getVideoTracks()[0];
+    const c = (t && t.getCapabilities) ? t.getCapabilities() : {};
+    const st = (t && t.getSettings) ? t.getSettings() : {};
+    const bits = [];
+    // focusMode present is NOT proof the lens focuses — a fixed-focus
+    // ultra-wide has been seen reporting it. Absence is the reliable half,
+    // so that's what gets stated plainly.
+    bits.push((c.focusMode && c.focusMode.length)
+      ? "foco: " + c.focusMode.join(", ")
+      : "SEM controle de foco");
+    if(c.torch) bits.push("lanterna");
+    if(c.zoom) bits.push("zoom " + c.zoom.min + "–" + c.zoom.max);
+    const w = (c.width && c.width.max) || st.width;
+    const h = (c.height && c.height.max) || st.height;
+    if(w && h) bits.push(w + "×" + h);
+    return bits.join(" · ");
+  }catch(err){
+    return "indisponível (" + ((err && err.name) || "erro") + ")";
+  }finally{
+    if(s) s.getTracks().forEach(t => t.stop());
+  }
+}
+
+// Lists every video input the browser exposes and lets one be chosen.
+// Resolves with a deviceId, or null if dismissed. Doubles as the diagnostic
+// for "which lenses does this phone actually hand to the browser?" — the
+// answer is often fewer than the phone physically has, and nothing on the
+// web platform can reveal the rest.
+function cameraPickerModal(devices, activeId){
+  return new Promise(async (resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>Câmeras</h3>' +
+        '<div class="cam-list" id="cam-list"></div>' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="cam-cancel">Fechar</button>' +
+          '<button class="save" id="cam-probe">Testar todas</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+
+    const listEl = backdrop.querySelector("#cam-list");
+    const probeBtn = backdrop.querySelector("#cam-probe");
+
+    const close = (id) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(id || null);
+    };
+    function onKey(e){ if(e.key === "Escape") close(null); }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#cam-cancel").addEventListener("click", () => close(null));
+
+    listEl.innerHTML = devices.map((d, i) => {
+      const front = /front|user|frontal|selfie/i.test(d.label || "");
+      const name = (d.label || "").trim() || ("Câmera " + (i + 1));
+      return '<button class="cam-item' + (d.deviceId === activeId ? ' active' : '') +
+        '" data-cam="' + esc(d.deviceId) + '">' +
+        '<span class="cam-name">' + (d.deviceId === activeId ? "● " : "") +
+          esc(name) + (front ? " (frontal)" : "") + '</span>' +
+        '<span class="cam-caps" data-caps>' +
+          (d.deviceId === activeId ? "em uso" : "toque para usar") + '</span>' +
+      '</button>';
+    }).join("") || '<p class="msg">Nenhuma câmera encontrada.</p>';
+
+    listEl.querySelectorAll(".cam-item").forEach(btn => {
+      btn.addEventListener("click", () => close(btn.getAttribute("data-cam")));
+    });
+
+    probeBtn.addEventListener("click", async () => {
+      probeBtn.disabled = true;
+      probeBtn.textContent = "Testando…";
+      for(const d of devices){
+        const btn = listEl.querySelector('.cam-item[data-cam="' + CSS.escape(d.deviceId) + '"]');
+        const capsEl = btn && btn.querySelector("[data-caps]");
+        if(capsEl) capsEl.textContent = "testando…";
+        const caps = await probeCamera(d.deviceId);
+        if(capsEl) capsEl.textContent = caps;
+      }
+      probeBtn.disabled = false;
+      probeBtn.textContent = "Testar de novo";
+    });
+  });
+}
+
 // Opens the camera and resolves with the FIRST barcode read, or null if the
 // user closed it without scanning. One read per opening: the camera closing
 // is itself the confirmation that the scan landed, and it puts the list back
@@ -459,7 +568,9 @@ async function openScanner(){
     const camBtn = overlay.querySelector("#scan-cam");
 
     let stream = null, track = null, caps = {}, focusModes = [];
-    let cameras = [], camIndex = 0, activeId = "";
+    // `cameras` is the rear-facing subset used by the auto-pick; the picker
+    // shows `allCameras` so the diagnostic hides nothing.
+    let cameras = [], allCameras = [], camIndex = 0, activeId = "";
     let stopped = false, toastTimer = null, torchOn = false;
 
     const toast = (msg) => {
@@ -528,7 +639,9 @@ async function openScanner(){
     function refreshChrome(){
       torchBtn.style.display = caps.torch ? "" : "none";
       torchBtn.classList.toggle("on", torchOn && !!caps.torch);
-      camBtn.style.display = cameras.length > 1 ? "" : "none";
+      // Shown even with a single camera: it's also the diagnostic for
+      // finding out how few lenses the browser is being offered.
+      camBtn.style.display = allCameras.length ? "" : "none";
       hintEl.textContent = canFocus()
         ? "Aponte para o código de barras · toque para focar"
         : "Aponte para o código de barras";
@@ -569,8 +682,9 @@ async function openScanner(){
         // says which way it points, and demanding the match dropped that
         // lens out of the cycle entirely.
         const rear = vids.filter(d => !/front|user|frontal|selfie/i.test(d.label || ""));
+        allCameras = vids;
         cameras = rear.length ? rear : vids;
-      }catch(_){ cameras = []; }
+      }catch(_){ cameras = []; allCameras = []; }
       const i = cameras.findIndex(d => d.deviceId === activeId);
       camIndex = i >= 0 ? i : 0;
     }
@@ -620,17 +734,26 @@ async function openScanner(){
     }
 
     // Manual override, because the heuristic above can't be right on every
-    // phone and some expose several indistinguishable rear cameras.
+    // phone: focusMode can be reported by a lens that doesn't focus, so the
+    // only reliable judge is the user looking at the picture.
     camBtn.addEventListener("click", async () => {
-      if(cameras.length < 2 || stopped) return;
-      const next = (camIndex + 1) % cameras.length;
+      if(stopped || !allCameras.length) return;
+      const previous = activeId;
+      // The camera has to be released before the picker can probe lenses —
+      // Android generally allows only one open at a time.
+      stopStream();
+      const chosen = await cameraPickerModal(allCameras, previous);
+      if(stopped) return;
       try{
-        await startStream(cameras[next].deviceId);
-        camIndex = next;
-        localStorage.setItem(CAM_KEY, cameras[next].deviceId);
-        toast(camLabel(next));
+        await startStream(chosen || previous || null);
+        if(chosen){
+          localStorage.setItem(CAM_KEY, chosen);
+          const i = cameras.findIndex(d => d.deviceId === chosen);
+          if(i >= 0) camIndex = i;
+        }
       }catch(_){
-        toast("Câmera indisponível");
+        // The chosen lens refused; fall back rather than leave a dead view.
+        try{ await startStream(null); }catch(_){ toast("Câmera indisponível"); }
       }
     });
 
