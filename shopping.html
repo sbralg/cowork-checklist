@@ -428,6 +428,10 @@ function validScan(raw, format){
   return gtinCheckDigitOk(code) ? code : null;
 }
 
+// Remembers which physical lens works on this phone. Device ids are stable
+// per origin once camera permission has been granted.
+const CAM_KEY = "scan_camera_id";
+
 // Opens the camera and resolves with the FIRST barcode read, or null if the
 // user closed it without scanning. One read per opening: the camera closing
 // is itself the confirmation that the scan landed, and it puts the list back
@@ -443,6 +447,7 @@ async function openScanner(){
       '<div class="scan-toast"></div>' +
       '<div class="scan-actions">' +
         '<button class="ghost" id="scan-torch" title="Lanterna">🔦</button>' +
+        '<button class="ghost" id="scan-cam" title="Trocar câmera">🔄</button>' +
         '<button id="scan-close">Cancelar</button>' +
       '</div>';
     document.body.appendChild(overlay);
@@ -451,22 +456,31 @@ async function openScanner(){
     const hintEl = overlay.querySelector(".scan-hint");
     const toastEl = overlay.querySelector(".scan-toast");
     const torchBtn = overlay.querySelector("#scan-torch");
-    let stream = null, stopped = false, toastTimer = null;
+    const camBtn = overlay.querySelector("#scan-cam");
+
+    let stream = null, track = null, caps = {}, focusModes = [];
+    let cameras = [], camIndex = 0, activeId = "";
+    let stopped = false, toastTimer = null, torchOn = false;
 
     const toast = (msg) => {
       toastEl.textContent = msg;
       toastEl.classList.add("show");
       clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1400);
+      toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1800);
+    };
+
+    const stopStream = () => {
+      // Releasing the camera matters: without this the indicator light and
+      // the capture stay live after the overlay is gone.
+      if(stream) stream.getTracks().forEach(t => t.stop());
+      stream = null; track = null; caps = {}; focusModes = [];
     };
 
     const close = (code) => {
       if(stopped) return;
       stopped = true;
       clearTimeout(toastTimer);
-      // Releasing the camera matters: without this the indicator light and
-      // the capture stay live after the overlay is gone.
-      if(stream) stream.getTracks().forEach(t => t.stop());
+      stopStream();
       video.srcObject = null;
       overlay.remove();
       document.removeEventListener("keydown", onKey);
@@ -481,41 +495,11 @@ async function openScanner(){
     document.addEventListener("visibilitychange", onHide);
     overlay.querySelector("#scan-close").addEventListener("click", () => close(null));
 
-    try{
-      stream = await navigator.mediaDevices.getUserMedia({
-        // Only facingMode really matters; the resolution is `ideal` so a
-        // device that can't manage it degrades quietly instead of throwing
-        // OverconstrainedError. The extra pixels help a lot when the
-        // barcode is small in frame.
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: false
-      });
-    }catch(err){
-      // Denied, already in use, or no camera at all — all land here.
-      hintEl.textContent = err && err.name === "NotAllowedError"
-        ? "Permissão de câmera negada. Autorize o acesso nas configurações do site e tente de novo."
-        : "Não foi possível acessar a câmera.";
-      torchBtn.style.display = "none";
-      return;
-    }
-    video.srcObject = stream;
-    try{ await video.play(); }catch(_){ /* autoplay attribute covers it */ }
-
-    const track = stream.getVideoTracks()[0];
-    const caps = track && track.getCapabilities ? track.getCapabilities() : {};
-
-    // ---- focus ----
     // Focus is requested AFTER the stream exists, never inside the
     // getUserMedia constraints: as a constraint, a device without focus
-    // control would reject the whole request instead of ignoring the hint.
-    const focusModes = caps.focusMode || [];
-    const canFocus = focusModes.length > 0 || !!caps.pointsOfInterest;
-
+    // control rejects the whole request instead of ignoring the hint.
     async function setFocus(mode, point){
+      if(!track) return false;
       const advanced = {};
       if(mode && focusModes.includes(mode)) advanced.focusMode = mode;
       if(point && caps.pointsOfInterest) advanced.pointsOfInterest = [point];
@@ -524,49 +508,147 @@ async function openScanner(){
       catch(_){ return false; }
     }
 
-    // Continuous autofocus is what stops the picture sitting locked at
-    // whatever distance the camera happened to open at.
-    await setFocus("continuous");
+    function canFocus(){ return focusModes.length > 0 || !!caps.pointsOfInterest; }
 
-    if(canFocus){
-      hintEl.textContent = "Aponte para o código de barras · toque para focar";
-      overlay.addEventListener("click", async (e) => {
-        if(e.target.closest(".scan-actions")) return;
-        const r = video.getBoundingClientRect();
-        // Normalized 0..1 inside the displayed video. The element is
-        // object-fit:cover, so this drifts a little at the cropped edges —
-        // close enough to aim a focus point, which is all it has to do.
-        const point = {
-          x: Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1),
-          y: Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1)
-        };
-        // single-shot drives one focus sweep at that point; where it isn't
-        // offered, re-applying continuous still nudges most cameras out of
-        // a stuck lock.
-        const ok = await setFocus(
-          focusModes.includes("single-shot") ? "single-shot" : "continuous",
-          point
-        );
-        if(ok){
-          toast("Focando…");
-          // Hand control back so the camera keeps tracking afterwards.
-          setTimeout(() => { if(!stopped) setFocus("continuous"); }, 2200);
-        }
-      });
+    function refreshChrome(){
+      torchBtn.style.display = caps.torch ? "" : "none";
+      torchBtn.classList.toggle("on", torchOn && !!caps.torch);
+      camBtn.style.display = cameras.length > 1 ? "" : "none";
+      hintEl.textContent = canFocus()
+        ? "Aponte para o código de barras · toque para focar"
+        : "Aponte para o código de barras";
     }
 
-    if(!caps.torch){
+    async function startStream(deviceId){
+      stopStream();
+      const video_c = deviceId
+        ? { deviceId: { exact: deviceId } }
+        : { facingMode: { ideal: "environment" } };
+      // Resolution is `ideal` so a device that can't manage it degrades
+      // quietly instead of throwing OverconstrainedError. The extra pixels
+      // help a lot when the barcode is small in frame.
+      video_c.width = { ideal: 1280 };
+      video_c.height = { ideal: 720 };
+      stream = await navigator.mediaDevices.getUserMedia({ video: video_c, audio: false });
+      video.srcObject = stream;
+      try{ await video.play(); }catch(_){ /* autoplay attribute covers it */ }
+      track = stream.getVideoTracks()[0];
+      caps = track && track.getCapabilities ? track.getCapabilities() : {};
+      focusModes = caps.focusMode || [];
+      activeId = (track && track.getSettings && track.getSettings().deviceId) || deviceId || "";
+      torchOn = false;
+      // Continuous autofocus is what stops the picture sitting locked at
+      // whatever distance the camera opened at.
+      await setFocus("continuous");
+      refreshChrome();
+    }
+
+    // Labels and stable ids only exist once permission has been granted, so
+    // this runs after the first successful getUserMedia.
+    async function loadCameras(){
+      try{
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const vids = devices.filter(d => d.kind === "videoinput" && d.deviceId);
+        const back = vids.filter(d => /back|rear|traseira|environment/i.test(d.label || ""));
+        cameras = back.length ? back : vids;
+      }catch(_){ cameras = []; }
+      const i = cameras.findIndex(d => d.deviceId === activeId);
+      camIndex = i >= 0 ? i : 0;
+    }
+
+    try{
+      const saved = localStorage.getItem(CAM_KEY);
+      try{
+        await startStream(saved || null);
+      }catch(err){
+        // A remembered id goes stale when permissions are reset; fall back
+        // to whatever the browser considers the rear camera.
+        if(!saved) throw err;
+        localStorage.removeItem(CAM_KEY);
+        await startStream(null);
+      }
+    }catch(err){
+      // Denied, already in use, or no camera at all — all land here.
+      hintEl.textContent = err && err.name === "NotAllowedError"
+        ? "Permissão de câmera negada. Autorize o acesso nas configurações do site e tente de novo."
+        : "Não foi possível acessar a câmera.";
       torchBtn.style.display = "none";
-    }else{
-      let torchOn = false;
-      torchBtn.addEventListener("click", async () => {
-        torchOn = !torchOn;
-        try{
-          await track.applyConstraints({ advanced: [{ torch: torchOn }] });
-          torchBtn.classList.toggle("on", torchOn);
-        }catch(_){ torchOn = !torchOn; }
-      });
+      camBtn.style.display = "none";
+      return;
     }
+
+    await loadCameras();
+    refreshChrome();
+
+    // Android routinely hands `facingMode:environment` the ULTRA-WIDE lens,
+    // and on most phones that lens is FIXED FOCUS — it has no autofocus
+    // hardware, so no constraint and no amount of tapping will ever sharpen
+    // it. When the lens we landed on reports no focus control at all, walk
+    // the other rear cameras and keep the first one that does.
+    if(!localStorage.getItem(CAM_KEY) && !canFocus() && cameras.length > 1){
+      for(let i = 0; i < cameras.length && i < 4; i++){
+        if(cameras[i].deviceId === activeId) continue;
+        try{ await startStream(cameras[i].deviceId); }catch(_){ continue; }
+        if(canFocus()){
+          camIndex = i;
+          localStorage.setItem(CAM_KEY, cameras[i].deviceId);
+          toast("Câmera com foco automático");
+          break;
+        }
+      }
+      if(!canFocus()) await loadCameras();
+      refreshChrome();
+    }
+
+    // Manual override, because the heuristic above can't be right on every
+    // phone and some expose several indistinguishable rear cameras.
+    camBtn.addEventListener("click", async () => {
+      if(cameras.length < 2 || stopped) return;
+      const next = (camIndex + 1) % cameras.length;
+      try{
+        await startStream(cameras[next].deviceId);
+        camIndex = next;
+        localStorage.setItem(CAM_KEY, cameras[next].deviceId);
+        toast("Câmera " + (next + 1) + "/" + cameras.length +
+          (canFocus() ? " · com foco" : " · sem foco"));
+      }catch(_){
+        toast("Câmera indisponível");
+      }
+    });
+
+    overlay.addEventListener("click", async (e) => {
+      if(e.target.closest(".scan-actions")) return;
+      if(!canFocus() || !track) return;
+      const r = video.getBoundingClientRect();
+      // Normalized 0..1 inside the displayed video. The element is
+      // object-fit:cover, so this drifts a little at the cropped edges —
+      // close enough to aim a focus point, which is all it has to do.
+      const point = {
+        x: Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1),
+        y: Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1)
+      };
+      // single-shot drives one focus sweep at that point; where it isn't
+      // offered, re-applying continuous still nudges most cameras out of a
+      // stuck lock.
+      const ok = await setFocus(
+        focusModes.includes("single-shot") ? "single-shot" : "continuous",
+        point
+      );
+      if(ok){
+        toast("Focando…");
+        // Hand control back so the camera keeps tracking afterwards.
+        setTimeout(() => { if(!stopped) setFocus("continuous"); }, 2200);
+      }
+    });
+
+    torchBtn.addEventListener("click", async () => {
+      if(!caps.torch || !track) return;
+      torchOn = !torchOn;
+      try{
+        await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+        torchBtn.classList.toggle("on", torchOn);
+      }catch(_){ torchOn = !torchOn; }
+    });
 
     let detector;
     try{
