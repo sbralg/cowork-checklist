@@ -1192,6 +1192,32 @@ function qtyOf(it){
   const q = Number(it.quantity);
   return Number.isFinite(q) && q > 0 ? q : 1;
 }
+// A price as typed on a phone. Both separators are accepted because both
+// appear on Brazilian keyboards; thousand separators are not, since a
+// shopping-list price never needs them. Returns null for blank (unknown
+// price, which is not the same as free) and undefined for unusable input,
+// so the caller can tell the two apart.
+function parsePriceInput(raw){
+  const s = String(raw ?? "").trim();
+  if(!s) return null;
+  if(!/^\d+([.,]\d+)?$/.test(s)) return undefined;
+  const n = Number(s.replace(",", "."));
+  if(!Number.isFinite(n) || n < 0) return undefined;
+  // Rounded to centavos here, not just when displaying, so the stored value
+  // and the shown one are the same number and the totals reconcile.
+  return Math.round(n * 100) / 100;
+}
+
+// Always written back as "5,50": comma separator, two decimals. This is why
+// the field is type=text with inputmode=decimal rather than type=number —
+// a number input's value must be a dot-decimal float, so assigning "5,50"
+// to one silently blanks it.
+function fmtPriceInput(v){
+  if(v === null || v === undefined || v === "") return "";
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(2).replace(".", ",") : "";
+}
+
 // Quantity for display: "2", not "2,00" — but "1,5" stays "1,5" (kg happens).
 function fmtQty(q){
   const n = Number(q);
@@ -1349,9 +1375,9 @@ function itemRowHtml(it){
         '<button class="step-btn" data-step="1" aria-label="Aumentar">+</button>' +
       '</span>' +
       '<span class="field"><span class="prefix">R$</span>' +
-        '<input class="num-input price-input" type="number" step="0.01" min="0" ' +
+        '<input class="num-input price-input" type="text" ' +
           'inputmode="decimal" aria-label="Preço unitário" placeholder="0,00" value="' +
-          (it.price != null ? esc(it.price) : '') + '"></span>' +
+          esc(fmtPriceInput(it.price)) + '"></span>' +
       '<span class="subtotal" data-subtotal>' + esc(lineTotal(it)) + '</span>' +
     '</div>' +
   '</div>';
@@ -1436,10 +1462,14 @@ function renderItems(list, items){
       }
     });
     row.querySelector(".price-input").addEventListener("change", async (e) => {
-      const v = e.target.value.trim();
-      const newPrice = v === "" ? null : v;
+      const newPrice = parsePriceInput(e.target.value);
+      // Unusable input is put back rather than saved, so a slip never wipes
+      // a price that was already there.
+      if(newPrice === undefined){ e.target.value = fmtPriceInput(it.price); return; }
+      // Normalized on the way out: "5.5" and "5,5" both come back as "5,50".
+      e.target.value = fmtPriceInput(newPrice);
       const prevPrice = it.price;
-      it.price = newPrice === null ? null : Number(newPrice);
+      it.price = newPrice;
       refreshLineTotal(row, it);
       recomputeTotals();
       try{
@@ -1447,7 +1477,7 @@ function renderItems(list, items){
       }catch(err){
         if(err.unauthorized){ handleAuthError(err, loadLists); return; }
         it.price = prevPrice;
-        e.target.value = prevPrice != null ? prevPrice : "";
+        e.target.value = fmtPriceInput(prevPrice);
         refreshLineTotal(row, it);
         recomputeTotals();
         alert("Não foi possível salvar. Tente novamente.");
@@ -1600,7 +1630,7 @@ function renderItems(list, items){
       if(row){
         row.querySelector(".qty-input").value = qtyOf(existing);
         const priceEl = row.querySelector(".price-input");
-        priceEl.value = existing.price != null ? existing.price : "";
+        priceEl.value = fmtPriceInput(existing.price);
         refreshLineTotal(row, existing);
       }
       recomputeTotals();
