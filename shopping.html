@@ -1225,6 +1225,22 @@ function fmtPriceInput(v){
     { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Quantity accepts digits and at most ONE decimal separator, and nothing
+// else — type=number still let "e", "+" and "-" through on some browsers,
+// which then read back as an empty value. Decimals stay allowed on purpose:
+// "1,5 kg" is a normal amount to put on a shopping list.
+function sanitizeQtyInput(raw){
+  let s = String(raw ?? "").replace(/[^\d.,]/g, "").replace(/\./g, ",");
+  const first = s.indexOf(",");
+  if(first !== -1) s = s.slice(0, first + 1) + s.slice(first + 1).replace(/,/g, "");
+  return s;
+}
+// Either separator in, a positive number or null out.
+function parseQtyInput(raw){
+  const n = Number(String(raw ?? "").replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+}
+
 // Quantity for display: "2", not "2,00" — but "1,5" stays "1,5" (kg happens).
 function fmtQty(q){
   const n = Number(q);
@@ -1377,8 +1393,9 @@ function itemRowHtml(it){
     '<div class="fields">' +
       '<span class="field qty-field">' +
         '<button class="step-btn" data-step="-1" aria-label="Diminuir">\u2212</button>' +
-        '<input class="num-input qty-input" type="number" step="0.01" min="0.01" ' +
-          'inputmode="decimal" aria-label="Quantidade" value="' + esc(qtyOf(it)) + '">' +
+        '<input class="num-input qty-input" type="text" ' +
+          'inputmode="decimal" aria-label="Quantidade" value="' +
+          esc(fmtQty(qtyOf(it))) + '">' +
         '<button class="step-btn" data-step="1" aria-label="Aumentar">+</button>' +
       '</span>' +
       '<span class="field"><span class="prefix">R$</span>' +
@@ -1400,7 +1417,7 @@ function renderItems(list, items){
     '<div class="addrow additem">' +
       '<input type="text" id="new-item-name" placeholder="Novo item rápido">' +
       '<span class="field"><span class="prefix">×</span>' +
-        '<input class="num-input qty-input" type="number" step="0.01" min="0.01" ' +
+        '<input class="num-input qty-input" type="text" ' +
           'inputmode="decimal" id="new-item-qty" aria-label="Quantidade" placeholder="1"></span>' +
       '<span class="addrow-actions">' +
         '<button class="primary small alt" id="scan-item-btn" ' +
@@ -1513,16 +1530,28 @@ function renderItems(list, items){
       }
     });
     const qtyEl = row.querySelector(".qty-input");
+    // Anything that isn't a digit or a single separator is dropped as it's
+    // typed, so the field can never hold something unusable.
+    qtyEl.addEventListener("input", () => {
+      const clean = sanitizeQtyInput(qtyEl.value);
+      if(clean !== qtyEl.value) qtyEl.value = clean;
+    });
+    // Tapping the field selects what's there, so the next digit replaces the
+    // amount instead of landing beside it — quantities are almost always
+    // retyped rather than edited character by character.
+    const selectQty = () => { try{ qtyEl.select(); }catch(_){ /* not focusable */ } };
+    // focus fires before the browser places the caret from the tap, so the
+    // selection has to be made after the current task.
+    qtyEl.addEventListener("focus", () => setTimeout(selectQty, 0));
+    qtyEl.addEventListener("click", selectQty);
+
     // Quantity is NOT NULL and must stay positive: a cleared or nonsense
     // value falls back to 1 (and the field is rewritten to match) rather
     // than being sent to the API to be rejected. Shared by the typed input
     // and the − / + steppers so both save the same way.
     async function setQty(raw){
-      const parsed = Number(raw);
-      const newQty = Number.isFinite(parsed) && parsed > 0
-        ? Math.round(parsed * 100) / 100
-        : 1;
-      qtyEl.value = newQty;
+      const newQty = parseQtyInput(raw) ?? 1;
+      qtyEl.value = fmtQty(newQty);
       if(newQty === qtyOf(it)) return;
       const prevQty = it.quantity;
       it.quantity = newQty;
@@ -1533,7 +1562,7 @@ function renderItems(list, items){
       }catch(err){
         if(err.unauthorized){ handleAuthError(err, loadLists); return; }
         it.quantity = prevQty;
-        qtyEl.value = qtyOf(it);
+        qtyEl.value = fmtQty(qtyOf(it));
         refreshLineTotal(row, it);
         recomputeTotals();
         alert("Não foi possível salvar. Tente novamente.");
@@ -1606,13 +1635,19 @@ function renderItems(list, items){
   const addBtn = document.getElementById("add-item-btn");
   const nameInput = document.getElementById("new-item-name");
   const qtyInput = document.getElementById("new-item-qty");
+  qtyInput.addEventListener("input", () => {
+    const clean = sanitizeQtyInput(qtyInput.value);
+    if(clean !== qtyInput.value) qtyInput.value = clean;
+  });
+  const selectAddQty = () => { try{ qtyInput.select(); }catch(_){} };
+  qtyInput.addEventListener("focus", () => setTimeout(selectAddQty, 0));
+  qtyInput.addEventListener("click", selectAddQty);
   const addItem = async () => {
     const name = nameInput.value.trim();
     if(!name) return;
     addBtn.disabled = true;
-    const qty = Number(qtyInput.value);
     // Left blank (the common case) means one of them.
-    const quantity = Number.isFinite(qty) && qty > 0 ? qty : 1;
+    const quantity = parseQtyInput(qtyInput.value) ?? 1;
     try{
       const data = await api("shopping_item_add", {
         list_id: list.id, name, quantity
@@ -1657,7 +1692,7 @@ function renderItems(list, items){
       Object.assign(existing, item);
       const row = root.querySelector('.row[data-id="' + existing.id + '"]');
       if(row){
-        row.querySelector(".qty-input").value = qtyOf(existing);
+        row.querySelector(".qty-input").value = fmtQty(qtyOf(existing));
         const priceEl = row.querySelector(".price-input");
         priceEl.value = fmtPriceInput(existing.price);
         refreshLineTotal(row, existing);
