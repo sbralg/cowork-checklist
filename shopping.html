@@ -1162,11 +1162,53 @@ function fmtQty(q){
   return Number.isInteger(n) ? String(n) : n.toLocaleString("pt-BR");
 }
 
+// Package size as stored: normalized to g / ml / un by the API, shown back
+// in whichever unit reads naturally.
+function fmtNetQty(qty, unit){
+  const n = Number(qty);
+  if(!Number.isFinite(n) || n <= 0 || !unit) return "";
+  if(unit === "g" && n >= 1000) return (n / 1000).toLocaleString("pt-BR") + " kg";
+  if(unit === "ml" && n >= 1000) return (n / 1000).toLocaleString("pt-BR") + " L";
+  return n.toLocaleString("pt-BR") + " " + unit;
+}
+
+// Same SHOUTED-name rule checklist-api applies to product names, used here
+// for the BRAND. Brands are tidied at render rather than on the way in
+// because, unlike the name, a brand is never copied onto an editable row and
+// never typed by the user — so the stored value can stay exactly as Open
+// Food Facts supplied it.
+const PT_SMALL_WORDS = ["de","da","do","das","dos","e","com","em","no","na",
+  "nos","nas","a","o","as","os","ao","aos","para","sem","por","um","uma"];
+function tidyShouted(raw){
+  const s = String(raw || "").trim().replace(/\s+/g, " ");
+  if(!s || /\p{Ll}/u.test(s)) return s;
+  return s.toLowerCase().replace(/\S+/gu, (word, offset) =>
+    (offset > 0 && PT_SMALL_WORDS.indexOf(word) >= 0)
+      ? word
+      : word.charAt(0).toUpperCase() + word.slice(1));
+}
+
+// Brand and package size of the scanned product, under the item name — the
+// check that the barcode resolved to the thing actually in your hand.
+// Empty for a hand-typed row, which has no product behind it.
+function productMeta(it){
+  const p = it && it.products;
+  if(!p) return "";
+  const bits = [];
+  if(p.brand) bits.push(tidyShouted(p.brand));
+  const size = fmtNetQty(p.net_qty, p.net_unit);
+  if(size) bits.push(size);
+  return bits.join(" · ");
+}
+
 function itemRowHtml(it){
+  const meta = productMeta(it);
   return '<div class="row" data-id="' + esc(it.id) + '">' +
     '<label>' +
       '<input type="checkbox" data-purchase' + (it.purchased ? ' checked' : '') + '>' +
-      '<span class="body"><p class="txt' + (it.purchased ? ' done' : '') + '">' + esc(it.name) + '</p></span>' +
+      '<span class="body"><p class="txt' + (it.purchased ? ' done' : '') + '">' + esc(it.name) + '</p>' +
+        (meta ? '<p class="meta">' + esc(meta) + '</p>' : '') +
+      '</span>' +
     '</label>' +
     '<button class="icon-btn" data-action="rename-item" title="Renomear">✎</button>' +
     '<button class="icon-btn danger" data-action="delete-item" title="Remover">✕</button>' +
