@@ -1486,24 +1486,26 @@ function renderItems(list, items){
       }
     });
     const priceEl = row.querySelector(".price-input");
-    // The caret lives at the far right, always. Digits shift left as they
-    // are typed, so a caret anywhere else edits a position that is about to
-    // mean something different — and tapping into the middle of an amount
-    // would silently insert there. Pinning it right makes every edit the
-    // same gesture: type the amount again, or backspace it away.
+    // WHILE TYPING the caret belongs at the far right: digits shift left as
+    // they are entered, so any other position edits a slot that is about to
+    // mean something else.
     const caretToEnd = () => {
-      // A real selection is left alone: select-all-then-type is a
-      // legitimate way to replace the amount, and collapsing it would
-      // silently turn that into an append. Only a plain caret gets moved.
+      // A real selection is left alone — collapsing it would turn a replace
+      // into an append.
       if(priceEl.selectionStart !== priceEl.selectionEnd) return;
       const end = priceEl.value.length;
       try{ priceEl.setSelectionRange(end, end); }catch(_){ /* not focusable */ }
     };
+    // ON TAP the whole amount is selected instead, same as the quantity
+    // field. With cents-first entry the two agree rather than conflict:
+    // typing over the selection restarts the amount from the right, so a
+    // tap always means "replace this", never "insert here".
+    const selectPrice = () => { try{ priceEl.select(); }catch(_){ /* not focusable */ } };
     // focus fires before the browser places the caret from the tap, so this
     // has to run after the current task rather than inline.
-    priceEl.addEventListener("focus", () => setTimeout(caretToEnd, 0));
-    priceEl.addEventListener("click", caretToEnd);
-    priceEl.addEventListener("pointerup", caretToEnd);
+    priceEl.addEventListener("focus", () => setTimeout(selectPrice, 0));
+    priceEl.addEventListener("click", selectPrice);
+    priceEl.addEventListener("pointerup", selectPrice);
     // Reformat on every keystroke so the value is always a well-formed
     // amount.
     priceEl.addEventListener("input", () => {
