@@ -1192,30 +1192,37 @@ function qtyOf(it){
   const q = Number(it.quantity);
   return Number.isFinite(q) && q > 0 ? q : 1;
 }
-// A price as typed on a phone. Both separators are accepted because both
-// appear on Brazilian keyboards; thousand separators are not, since a
-// shopping-list price never needs them. Returns null for blank (unknown
-// price, which is not the same as free) and undefined for unusable input,
-// so the caller can tell the two apart.
-function parsePriceInput(raw){
-  const s = String(raw ?? "").trim();
-  if(!s) return null;
-  if(!/^\d+([.,]\d+)?$/.test(s)) return undefined;
-  const n = Number(s.replace(",", "."));
-  if(!Number.isFinite(n) || n < 0) return undefined;
-  // Rounded to centavos here, not just when displaying, so the stored value
-  // and the shown one are the same number and the totals reconcile.
-  return Math.round(n * 100) / 100;
+// Cents-first currency input: the user types digits only and they fill in
+// from the right — 1 → 0,01, 12 → 0,12, 123 → 1,23 — so no separator key is
+// ever needed, which is what makes it quick on a phone keypad. Everything
+// that is not a digit is discarded, which also means the thousand
+// separators the formatter adds are ignored on the way back in.
+const PRICE_MAX_DIGITS = 9;
+function priceDigits(raw){
+  return String(raw ?? "")
+    .replace(/\D/g, "")
+    .slice(0, PRICE_MAX_DIGITS)
+    // ALL leading zeros go, not just the ones followed by a digit: that is
+    // what lets backspacing walk 0,01 down to an empty field instead of
+    // getting stuck on 0,00. It also means a price of exactly zero can't be
+    // typed, which is fine — blank already means "unknown", and a free item
+    // is not a thing this list needs to record.
+    .replace(/^0+/, "");
+}
+// Blank stays blank: an unknown price is not the same as a free item.
+function centsToPrice(digits){
+  return digits === "" ? null : Number(digits) / 100;
 }
 
-// Always written back as "5,50": comma separator, two decimals. This is why
-// the field is type=text with inputmode=decimal rather than type=number —
-// a number input's value must be a dot-decimal float, so assigning "5,50"
-// to one silently blanks it.
+// Written back as "5,50" / "1.234,56". This is why the field is type=text
+// rather than type=number — a number input's value must be a dot-decimal
+// float, so assigning "5,50" to one silently blanks it.
 function fmtPriceInput(v){
   if(v === null || v === undefined || v === "") return "";
   const n = Number(v);
-  return Number.isFinite(n) ? n.toFixed(2).replace(".", ",") : "";
+  if(!Number.isFinite(n)) return "";
+  return n.toLocaleString("pt-BR",
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // Quantity for display: "2", not "2,00" — but "1,5" stays "1,5" (kg happens).
@@ -1376,7 +1383,7 @@ function itemRowHtml(it){
       '</span>' +
       '<span class="field"><span class="prefix">R$</span>' +
         '<input class="num-input price-input" type="text" ' +
-          'inputmode="decimal" aria-label="Preço unitário" placeholder="0,00" value="' +
+          'inputmode="numeric" aria-label="Preço unitário" placeholder="0,00" value="' +
           esc(fmtPriceInput(it.price)) + '"></span>' +
       '<span class="subtotal" data-subtotal>' + esc(lineTotal(it)) + '</span>' +
     '</div>' +
@@ -1461,13 +1468,19 @@ function renderItems(list, items){
         alert("Não foi possível salvar. Tente novamente.");
       }
     });
-    row.querySelector(".price-input").addEventListener("change", async (e) => {
-      const newPrice = parsePriceInput(e.target.value);
-      // Unusable input is put back rather than saved, so a slip never wipes
-      // a price that was already there.
-      if(newPrice === undefined){ e.target.value = fmtPriceInput(it.price); return; }
-      // Normalized on the way out: "5.5" and "5,5" both come back as "5,50".
-      e.target.value = fmtPriceInput(newPrice);
+    const priceEl = row.querySelector(".price-input");
+    // Reformat on every keystroke so the value is always a well-formed
+    // amount; the caret goes back to the end because the digits shift left
+    // as they are typed and any other position would be meaningless.
+    priceEl.addEventListener("input", () => {
+      priceEl.value = fmtPriceInput(centsToPrice(priceDigits(priceEl.value)));
+      const end = priceEl.value.length;
+      try{ priceEl.setSelectionRange(end, end); }catch(_){ /* not focusable */ }
+    });
+    priceEl.addEventListener("change", async () => {
+      const newPrice = centsToPrice(priceDigits(priceEl.value));
+      priceEl.value = fmtPriceInput(newPrice);
+      if(newPrice === it.price) return;
       const prevPrice = it.price;
       it.price = newPrice;
       refreshLineTotal(row, it);
@@ -1477,7 +1490,7 @@ function renderItems(list, items){
       }catch(err){
         if(err.unauthorized){ handleAuthError(err, loadLists); return; }
         it.price = prevPrice;
-        e.target.value = fmtPriceInput(prevPrice);
+        priceEl.value = fmtPriceInput(prevPrice);
         refreshLineTotal(row, it);
         recomputeTotals();
         alert("Não foi possível salvar. Tente novamente.");
