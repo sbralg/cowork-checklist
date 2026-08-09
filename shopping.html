@@ -236,6 +236,23 @@
   .scan-actions button:active{transform:scale(.97)}
   .scan-actions .ghost{background:rgba(255,255,255,.2);color:#fff;padding:14px 16px}
   .scan-actions .ghost.on{background:#fde68a;color:#111}
+
+  /* Status pill over the list. The camera closes as soon as a code is read,
+     so by the time the lookup answers there's no overlay left to report in. */
+  .toast{
+    position:fixed;left:16px;right:16px;
+    bottom:max(16px,env(safe-area-inset-bottom));
+    margin:0 auto;max-width:420px;text-align:center;z-index:95;
+    background:var(--text);color:var(--bg);
+    font-size:14px;font-weight:600;padding:12px 14px;border-radius:12px;
+    opacity:0;transform:translateY(8px);pointer-events:none;
+    transition:opacity .2s ease,transform .2s ease;
+  }
+  .toast.show{opacity:1;transform:translateY(0)}
+  .toast.err{background:var(--danger);color:#fff}
+  /* A scanned row lights up briefly so it's obvious what just landed. */
+  @keyframes rowFlash{from{background:rgba(37,99,235,.22)} to{background:transparent}}
+  .row.flash{animation:rowFlash 1.4s ease-out}
 </style>
 </head>
 <body>
@@ -377,10 +394,11 @@ function scanningSupported(){
   return typeof window.BarcodeDetector === "function";
 }
 
-// Opens the camera and calls handleCode(code, toast) for each new barcode,
-// staying open so a whole shop can be scanned in one go. Resolves when the
-// user closes it.
-async function openScanner(handleCode){
+// Opens the camera and resolves with the FIRST barcode read, or null if the
+// user closed it without scanning. One read per opening: the camera closing
+// is itself the confirmation that the scan landed, and it puts the list back
+// in front of you straight away.
+async function openScanner(){
   return new Promise(async (resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "scan-overlay";
@@ -391,7 +409,7 @@ async function openScanner(handleCode){
       '<div class="scan-toast"></div>' +
       '<div class="scan-actions">' +
         '<button class="ghost" id="scan-torch" title="Lanterna">🔦</button>' +
-        '<button id="scan-close">Concluir</button>' +
+        '<button id="scan-close">Cancelar</button>' +
       '</div>';
     document.body.appendChild(overlay);
 
@@ -401,15 +419,14 @@ async function openScanner(handleCode){
     const torchBtn = overlay.querySelector("#scan-torch");
     let stream = null, stopped = false, toastTimer = null;
 
-    const toast = (msg, isErr) => {
+    const toast = (msg) => {
       toastEl.textContent = msg;
-      toastEl.classList.toggle("err", !!isErr);
       toastEl.classList.add("show");
       clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toastEl.classList.remove("show"), 2600);
+      toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1400);
     };
 
-    const close = () => {
+    const close = (code) => {
       if(stopped) return;
       stopped = true;
       clearTimeout(toastTimer);
@@ -420,19 +437,28 @@ async function openScanner(handleCode){
       overlay.remove();
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("visibilitychange", onHide);
-      resolve();
+      resolve(code || null);
     };
-    function onKey(e){ if(e.key === "Escape") close(); }
+    function onKey(e){ if(e.key === "Escape") close(null); }
     // Backgrounding the page (a call, the home button) should free the
     // camera rather than leave it held by a page nobody is looking at.
-    function onHide(){ if(document.hidden) close(); }
+    function onHide(){ if(document.hidden) close(null); }
     document.addEventListener("keydown", onKey);
     document.addEventListener("visibilitychange", onHide);
-    overlay.querySelector("#scan-close").addEventListener("click", close);
+    overlay.querySelector("#scan-close").addEventListener("click", () => close(null));
 
     try{
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } }, audio: false
+        // Only facingMode really matters; the resolution is `ideal` so a
+        // device that can't manage it degrades quietly instead of throwing
+        // OverconstrainedError. The extra pixels help a lot when the
+        // barcode is small in frame.
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
       });
     }catch(err){
       // Denied, already in use, or no camera at all — all land here.
@@ -447,6 +473,54 @@ async function openScanner(handleCode){
 
     const track = stream.getVideoTracks()[0];
     const caps = track && track.getCapabilities ? track.getCapabilities() : {};
+
+    // ---- focus ----
+    // Focus is requested AFTER the stream exists, never inside the
+    // getUserMedia constraints: as a constraint, a device without focus
+    // control would reject the whole request instead of ignoring the hint.
+    const focusModes = caps.focusMode || [];
+    const canFocus = focusModes.length > 0 || !!caps.pointsOfInterest;
+
+    async function setFocus(mode, point){
+      const advanced = {};
+      if(mode && focusModes.includes(mode)) advanced.focusMode = mode;
+      if(point && caps.pointsOfInterest) advanced.pointsOfInterest = [point];
+      if(!Object.keys(advanced).length) return false;
+      try{ await track.applyConstraints({ advanced: [advanced] }); return true; }
+      catch(_){ return false; }
+    }
+
+    // Continuous autofocus is what stops the picture sitting locked at
+    // whatever distance the camera happened to open at.
+    await setFocus("continuous");
+
+    if(canFocus){
+      hintEl.textContent = "Aponte para o código de barras · toque para focar";
+      overlay.addEventListener("click", async (e) => {
+        if(e.target.closest(".scan-actions")) return;
+        const r = video.getBoundingClientRect();
+        // Normalized 0..1 inside the displayed video. The element is
+        // object-fit:cover, so this drifts a little at the cropped edges —
+        // close enough to aim a focus point, which is all it has to do.
+        const point = {
+          x: Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1),
+          y: Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1)
+        };
+        // single-shot drives one focus sweep at that point; where it isn't
+        // offered, re-applying continuous still nudges most cameras out of
+        // a stuck lock.
+        const ok = await setFocus(
+          focusModes.includes("single-shot") ? "single-shot" : "continuous",
+          point
+        );
+        if(ok){
+          toast("Focando…");
+          // Hand control back so the camera keeps tracking afterwards.
+          setTimeout(() => { if(!stopped) setFocus("continuous"); }, 2200);
+        }
+      });
+    }
+
     if(!caps.torch){
       torchBtn.style.display = "none";
     }else{
@@ -476,31 +550,46 @@ async function openScanner(handleCode){
       return;
     }
 
-    // Same code re-read every frame while the box sits in front of the lens
-    // is one scan, not thirty — but a deliberate re-scan after a couple of
-    // seconds is a real "one more of these".
-    let lastCode = "", lastAt = 0, busy = false;
     const tick = async () => {
       if(stopped) return;
-      if(!busy && video.readyState >= 2){
+      if(video.readyState >= 2){
         try{
           const found = await detector.detect(video);
           const code = found && found.length ? found[0].rawValue : "";
-          const now = Date.now();
-          if(code && (code !== lastCode || now - lastAt > 2500)){
-            lastCode = code;
-            busy = true;
+          if(code){
             if(navigator.vibrate) navigator.vibrate(40);
-            try{ await handleCode(code, toast); }
-            catch(_){ toast("Falha ao adicionar", true); }
-            finally{ busy = false; lastAt = Date.now(); }
+            close(code);
+            return;
           }
         }catch(_){ /* detect() throws transiently between frames */ }
       }
-      if(!stopped) setTimeout(tick, 220);
+      if(!stopped) setTimeout(tick, 200);
     };
     tick();
   });
+}
+
+// Transient status pill over the list. The camera closes on a read, so
+// there's no overlay left to report into by the time the API answers.
+let listToastTimer = null;
+function listToast(msg, isErr){
+  let el = document.getElementById("list-toast");
+  if(!el){
+    el = document.createElement("div");
+    el.id = "list-toast";
+    el.className = "toast";
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.toggle("err", !!isErr);
+  el.classList.add("show");
+  clearTimeout(listToastTimer);
+  listToastTimer = setTimeout(() => el.classList.remove("show"), 2600);
+}
+function hideListToast(){
+  const el = document.getElementById("list-toast");
+  if(el) el.classList.remove("show");
+  clearTimeout(listToastTimer);
 }
 
 // Informational dialog — confirmModal's red/Cancel pair reads as a warning
@@ -1021,38 +1110,58 @@ function renderItems(list, items){
     recomputeTotals();
   }
 
+  // Briefly light up the row that just changed and bring it into view — the
+  // camera is gone by now, so this is what tells you the scan landed.
+  function flashRow(id){
+    const row = root.querySelector('.row[data-id="' + id + '"]');
+    if(!row) return;
+    row.scrollIntoView({ block: "center", behavior: "smooth" });
+    row.classList.remove("flash");
+    void row.offsetWidth; // restart the animation if it's still running
+    row.classList.add("flash");
+    setTimeout(() => row.classList.remove("flash"), 1600);
+  }
+
   // One scanned barcode: resolve it, and only stop to ask when neither the
   // local catalogue nor Open Food Facts knows the code. The name typed then
   // is stored against the barcode, so the next scan of it never asks again.
-  async function handleScannedCode(code, toast){
+  async function handleScannedCode(code){
+    // A local hit is instant, but a code that has to go out to Open Food
+    // Facts can take a couple of seconds — long enough to need saying so.
+    listToast("Buscando produto…");
     let data;
     try{
       data = await api("shopping_item_scan", { list_id: list.id, gtin: code });
     }catch(err){
+      hideListToast();
       if(err.unauthorized){ handleAuthError(err, loadLists); return; }
-      toast("Falha de conexão", true);
+      listToast("Falha de conexão", true);
       return;
     }
     if(data.needs_name){
+      hideListToast();
       const typed = await promptModal(
         "Produto novo",
         "Código " + code + " não encontrado. Qual é o nome?",
         ""
       );
-      if(typed === null || !typed.trim()){ toast("Ignorado", true); return; }
+      if(typed === null || !typed.trim()) return;
+      listToast("Salvando…");
       try{
         data = await api("shopping_item_scan", {
           list_id: list.id, gtin: code, name: typed.trim()
         });
       }catch(err){
+        hideListToast();
         if(err.unauthorized){ handleAuthError(err, loadLists); return; }
-        toast("Falha ao salvar", true);
+        listToast("Falha ao salvar", true);
         return;
       }
     }
-    if(!data.item){ toast("Não foi possível adicionar", true); return; }
+    if(!data.item){ listToast("Não foi possível adicionar", true); return; }
     applyScannedItem(data.item);
-    toast(data.merged
+    flashRow(data.item.id);
+    listToast(data.merged
       ? data.item.name + "  ×" + fmtQty(data.item.quantity)
       : "＋ " + data.item.name);
   }
@@ -1065,7 +1174,8 @@ function renderItems(list, items){
       );
       return;
     }
-    await openScanner(handleScannedCode);
+    const code = await openScanner();
+    if(code) await handleScannedCode(code);
   });
 }
 
