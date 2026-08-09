@@ -444,10 +444,20 @@ function validScan(raw, format){
 // per origin once camera permission has been granted.
 const CAM_KEY = "scan_camera_id";
 
+// THE rule for "does this lens actually focus": `manual` on its own is a
+// fixed-focus lens exposing a no-op knob. Only `continuous` / `single-shot`
+// mean real autofocus. A phone in use reported focusMode:["manual"] on its
+// ultra-wide and the full set on its main lens — reading any non-empty
+// focusMode as "focuses" is what made a fixed-focus lens look usable.
+const AUTOFOCUS_MODES = ["continuous", "single-shot"];
+function hasAutofocusModes(modes){
+  return (modes || []).some(m => AUTOFOCUS_MODES.indexOf(m) >= 0);
+}
+
 // Opens one camera just long enough to read what it can do, then releases
 // it. This is the only way to learn a lens's capabilities — enumerateDevices
 // reports names, never abilities.
-async function probeCamera(deviceId){
+async function probeCameraInfo(deviceId){
   let s = null;
   try{
     s = await navigator.mediaDevices.getUserMedia({
@@ -456,24 +466,41 @@ async function probeCamera(deviceId){
     const t = s.getVideoTracks()[0];
     const c = (t && t.getCapabilities) ? t.getCapabilities() : {};
     const st = (t && t.getSettings) ? t.getSettings() : {};
-    const bits = [];
-    // focusMode present is NOT proof the lens focuses — a fixed-focus
-    // ultra-wide has been seen reporting it. Absence is the reliable half,
-    // so that's what gets stated plainly.
-    bits.push((c.focusMode && c.focusMode.length)
-      ? "foco: " + c.focusMode.join(", ")
-      : "SEM controle de foco");
-    if(c.torch) bits.push("lanterna");
-    if(c.zoom) bits.push("zoom " + c.zoom.min + "–" + c.zoom.max);
-    const w = (c.width && c.width.max) || st.width;
-    const h = (c.height && c.height.max) || st.height;
-    if(w && h) bits.push(w + "×" + h);
-    return bits.join(" · ");
+    const modes = c.focusMode || [];
+    return {
+      ok: true,
+      modes,
+      auto: hasAutofocusModes(modes),
+      torch: !!c.torch,
+      zoom: c.zoom ? (c.zoom.min + "–" + c.zoom.max) : "",
+      w: (c.width && c.width.max) || st.width || 0,
+      h: (c.height && c.height.max) || st.height || 0
+    };
   }catch(err){
-    return "indisponível (" + ((err && err.name) || "erro") + ")";
+    return { ok: false, error: (err && err.name) || "erro",
+             modes: [], auto: false, torch: false, zoom: "", w: 0, h: 0 };
   }finally{
     if(s) s.getTracks().forEach(t => t.stop());
   }
+}
+
+function describeCamera(info){
+  if(!info.ok) return "indisponível (" + info.error + ")";
+  const bits = [];
+  bits.push(info.auto
+    ? "autofoco: " + info.modes.filter(m => m !== "manual").join(", ")
+    : "SEM autofoco" + (info.modes.length ? " (só " + info.modes.join(", ") + ")" : ""));
+  if(info.torch) bits.push("lanterna");
+  if(info.zoom) bits.push("zoom " + info.zoom);
+  if(info.w && info.h) bits.push(info.w + "×" + info.h);
+  return bits.join(" · ");
+}
+
+// Autofocus is decisive; the torch in practice marks the main lens (the
+// flash sits next to it); sensor size breaks any remaining tie.
+function cameraScore(info){
+  return (info.auto ? 1000 : 0) + (info.torch ? 100 : 0) +
+    Math.min((info.w || 0) / 1000, 99);
 }
 
 // Lists every video input the browser exposes and lets one be chosen.
@@ -532,8 +559,8 @@ function cameraPickerModal(devices, activeId){
         const btn = listEl.querySelector('.cam-item[data-cam="' + CSS.escape(d.deviceId) + '"]');
         const capsEl = btn && btn.querySelector("[data-caps]");
         if(capsEl) capsEl.textContent = "testando…";
-        const caps = await probeCamera(d.deviceId);
-        if(capsEl) capsEl.textContent = caps;
+        const info = await probeCameraInfo(d.deviceId);
+        if(capsEl) capsEl.textContent = describeCamera(info);
       }
       probeBtn.disabled = false;
       probeBtn.textContent = "Testar de novo";
@@ -570,7 +597,7 @@ async function openScanner(){
     let stream = null, track = null, caps = {}, focusModes = [];
     // `cameras` is the rear-facing subset used by the auto-pick; the picker
     // shows `allCameras` so the diagnostic hides nothing.
-    let cameras = [], allCameras = [], camIndex = 0, activeId = "";
+    let cameras = [], allCameras = [], activeId = "";
     let stopped = false, toastTimer = null, torchOn = false;
 
     const toast = (msg) => {
@@ -619,22 +646,10 @@ async function openScanner(){
       catch(_){ return false; }
     }
 
-    function canFocus(){ return focusModes.length > 0 || !!caps.pointsOfInterest; }
-
-    // "Câmera 2/3", plus the raw device label when there is one — cryptic
-    // ("camera2 2, facing back") but it's the only thing that distinguishes
-    // one rear lens from another, and it's stable across openings.
-    //
-    // Deliberately NOT claiming a lens focuses. A phone in real use reported
-    // focusMode on its ultra-wide, which is fixed-focus glass — the
-    // capability can lie, and there is no web API that can catch it out. The
-    // ABSENCE of focusMode is trustworthy, so only that is reported.
-    function camLabel(i){
-      const raw = ((cameras[i] && cameras[i].label) || "").trim();
-      return "Câmera " + (i + 1) + "/" + cameras.length +
-        (raw ? " · " + raw : "") +
-        (canFocus() ? "" : " · sem foco");
-    }
+    // Only real autofocus counts. `manual` alone is a fixed-focus lens with
+    // a knob that does nothing, and pointsOfInterest without autofocus has
+    // nothing to aim.
+    function canFocus(){ return hasAutofocusModes(focusModes); }
 
     function refreshChrome(){
       torchBtn.style.display = caps.torch ? "" : "none";
@@ -685,8 +700,6 @@ async function openScanner(){
         allCameras = vids;
         cameras = rear.length ? rear : vids;
       }catch(_){ cameras = []; allCameras = []; }
-      const i = cameras.findIndex(d => d.deviceId === activeId);
-      camIndex = i >= 0 ? i : 0;
     }
 
     try{
@@ -718,18 +731,33 @@ async function openScanner(){
     // hardware, so no constraint and no amount of tapping will ever sharpen
     // it. When the lens we landed on reports no focus control at all, walk
     // the other rear cameras and keep the first one that does.
-    if(!localStorage.getItem(CAM_KEY) && !canFocus() && cameras.length > 1){
-      for(let i = 0; i < cameras.length && i < 4; i++){
-        if(cameras[i].deviceId === activeId) continue;
-        try{ await startStream(cameras[i].deviceId); }catch(_){ continue; }
-        if(canFocus()){
-          camIndex = i;
-          localStorage.setItem(CAM_KEY, cameras[i].deviceId);
-          toast(camLabel(i));
-          break;
+    // Runs once per device; the winner is remembered, and a choice made by
+    // hand in the picker always outranks it.
+    if(!localStorage.getItem(CAM_KEY) && cameras.length > 1){
+      // Shortcut for the common case: the lens we opened on already has
+      // autofocus and the torch, so it IS the main camera. Skipping the
+      // probe here avoids a black flicker on every first scan.
+      if(canFocus() && caps.torch){
+        localStorage.setItem(CAM_KEY, activeId);
+      }else{
+        // Probing opens each lens in turn, so the current one has to be
+        // released first — Android generally allows only one at a time.
+        const current = activeId;
+        stopStream();
+        let best = null;
+        for(const d of cameras.slice(0, 4)){
+          const info = await probeCameraInfo(d.deviceId);
+          if(!info.ok) continue;
+          const score = cameraScore(info);
+          if(!best || score > best.score) best = { score, id: d.deviceId };
+        }
+        try{
+          await startStream((best && best.id) || current || null);
+          if(best) localStorage.setItem(CAM_KEY, best.id);
+        }catch(_){
+          try{ await startStream(null); }catch(_){ /* reported below */ }
         }
       }
-      if(!canFocus()) await loadCameras();
       refreshChrome();
     }
 
@@ -746,11 +774,7 @@ async function openScanner(){
       if(stopped) return;
       try{
         await startStream(chosen || previous || null);
-        if(chosen){
-          localStorage.setItem(CAM_KEY, chosen);
-          const i = cameras.findIndex(d => d.deviceId === chosen);
-          if(i >= 0) camIndex = i;
-        }
+        if(chosen) localStorage.setItem(CAM_KEY, chosen);
       }catch(_){
         // The chosen lens refused; fall back rather than leave a dead view.
         try{ await startStream(null); }catch(_){ toast("Câmera indisponível"); }
