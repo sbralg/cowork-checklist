@@ -5,16 +5,19 @@ Context file for Claude Code / Claude sessions working on this repo.
 ## What this is
 
 The public GitHub Pages front end deployed from this repo's `main` branch,
-served at https://sbralg.github.io/cowork-checklist/. Two independent
+served at https://sbralg.github.io/cowork-checklist/. Three independent
 pages, no build step, no framework:
 
 - `index.html` — the daily-task checklist (pending actions, done-tasks
   history with undo, manual task creation, edit/delete).
 - `shopping.html` — the shopping-list manager (multiple named lists,
-  per-item price + purchased toggle, running totals).
+  per-item price + quantity, purchased toggle, running totals, barcode
+  scanning against the product catalogue).
+- `hoje.html` — "Hoje": the morning summary rendered for the browser,
+  read from `public.daily_reports`.
 
-Both are data-free shells: no Supabase keys, no data baked in. Each asks
-for a shared passphrase (stored in `localStorage`, prompted once per
+All three are data-free shells: no Supabase keys, no data baked in. Each
+asks for a shared passphrase (stored in `localStorage`, prompted once per
 device) and talks only to one Supabase Edge Function, `checklist-api`
 (deployed in project `opehbckfmfschpvbhxvo`), which holds the
 service-role key and checks the passphrase server-side. See
@@ -22,34 +25,38 @@ service-role key and checks the passphrase server-side. See
 Function's source, the Supabase schema, the scheduled task that
 populates `index.html`'s data every morning, and this whole project's
 full change history — that repo is the source of truth for everything
-except what's actually deployed here.
+except what's actually deployed here, plus `shopping.html`, which is
+sourced here (see below).
 
 ## Master-copy relationship
 
-**All three pages** — `index.html`, `shopping.html` and `hoje.html` — in
-THIS repo are synced copies of `web/*.html` in
-`sbralg/cowork-personal-daily-summary` (that repo is the master; this
-one is what's actually live). Any change to a page must be made in the
-master copy first, then copied over here byte-for-byte before committing
-— never edit a page here directly without also updating the master, or
-the next sync will silently overwrite the change.
+**`shopping.html` lives ONLY here.** It has one copy, in this repo, and
+so does its test — edit it directly, there is nothing to sync. It was
+briefly mirrored into `sbralg/cowork-personal-daily-summary` (2026-08-01
+to 2026-08-11) and that mirror immediately did what mirrors do: this
+file went stale about it and a change was one sync away from being
+silently overwritten. The mirror is gone; do not recreate it.
 
-`shopping.html` was Pages-repo-only until 2026-08-01 and this file said
-so for a while after it stopped being true; that stale note is exactly
-the trap it describes, so re-check the master repo rather than trusting
-this paragraph if the two ever look out of step.
+**`index.html` and `hoje.html` are different** — those two ARE synced
+copies of `web/*.html` in `sbralg/cowork-personal-daily-summary` (that
+repo is the master; this one is what's actually live). A change to
+either must be made in the master copy first, then copied here
+byte-for-byte before committing, or the next sync silently overwrites
+it. Two rules coexist, so check which page you are touching.
 
-The master repo also holds `test/shopping.test.js`, a headless Chromium
-test covering the scanner, the barcode validation and the scan
-confirmation dialog. There is no CI — run `node test/shopping.test.js`
-there by hand after changing `shopping.html`.
+`test/shopping.test.js` is a headless Chromium test covering the
+scanner, the barcode validation, the scan confirm dialog (including its
+layout) and the add/edit/merge paths. It serves the repo root on an
+ephemeral port and answers `checklist-api` from an in-memory fake, so it
+never touches Supabase and holds no passphrase. There is no CI — run
+`node test/shopping.test.js` by hand after changing `shopping.html`.
 
 ## Conventions
 
 - **No build step.** Each `.html` file is a single, complete, static
   page — HTML/CSS/JS all inline in one file. Deploy is `git push` to
   `main`; GitHub Pages serves it directly, no CI.
-- **No shared JS module between the two pages.** Logic both pages need
+- **No shared JS module between the pages.** Logic more than one page needs
   (the hamburger menu, `esc()`, `confirmModal()`/`promptModal()`, the
   emoji-grapheme helpers, etc.) is duplicated verbatim in both files
   rather than factored into a shared script — a deliberate choice, not

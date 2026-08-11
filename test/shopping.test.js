@@ -1,0 +1,783 @@
+// Headless UI test for shopping.html — the scanner, the barcode validation,
+// the camera/lens picker, the price and quantity fields, and the scan
+// confirmation dialog.
+//
+//   node test/shopping.test.js          # exits non-zero on any failure
+//   KEEP_SHOTS=1 node test/...          # also prints where screenshots went
+//
+// It lives in this repo rather than in cowork-personal-daily-summary because
+// shopping.html does too: the page has exactly one copy, and the test that
+// guards it sits next to it.
+//
+// It serves the repo root over http rather than using file://, because that
+// is what GitHub Pages does and localStorage/permissions behave differently
+// on a file: origin. checklist-api is intercepted and answered from an
+// in-memory fake, so the test never touches Supabase and never needs the
+// passphrase.
+//
+// Two things HAVE to be stubbed and it is worth knowing why:
+//   * BarcodeDetector — headless Linux Chromium has no platform barcode API
+//     at all, so the real one can never run here. The stub feeds a queue of
+//     codes, cycled forever, which is what lets a misread be simulated as a
+//     steady stream of the same bad read.
+//   * getUserMedia/enumerateDevices — Chromium's fake camera gives a video
+//     feed but exposes no focusMode or torch, so the lens-picking logic
+//     would have nothing to choose between. The stub reports the capability
+//     sets copied from a real Android phone, including the ultra-wide that
+//     advertises focusMode:["manual"] while being fixed-focus glass.
+//
+// The camera itself is real (Chromium's synthetic feed), so getUserMedia,
+// track teardown and the overlay lifecycle are genuinely exercised.
+const http = require('http');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+// Prefer a locally installed playwright, fall back to a global one.
+function loadPlaywright() {
+  for (const id of ['playwright', '/opt/node22/lib/node_modules/playwright']) {
+    try { return require(id); } catch (_) { /* try the next */ }
+  }
+  console.error('playwright not found — npm i -D playwright, or set NODE_PATH');
+  process.exit(2);
+}
+const { chromium } = loadPlaywright();
+
+// The pages sit at the repo root here — this repo IS the deploy target, so
+// serving the root is serving exactly what GitHub Pages serves.
+const WEB_DIR = path.resolve(__dirname, '..');
+const SHOTS = fs.mkdtempSync(path.join(os.tmpdir(), 'shopping-test-'));
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript',
+                '.css': 'text/css', '.png': 'image/png' };
+
+// A static server for the repo root, on an ephemeral port so parallel runs
+// don't clash.
+function serve() {
+  return new Promise(resolve => {
+    const server = http.createServer((req, res) => {
+      const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '');
+      const file = path.join(WEB_DIR, rel || 'shopping.html');
+      // Refuse anything that escapes the served root, even in a test.
+      if (!file.startsWith(WEB_DIR)) { res.writeHead(403).end(); return; }
+      fs.readFile(file, (err, body) => {
+        if (err) { res.writeHead(404).end(); return; }
+        res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
+        res.end(body);
+      });
+    });
+    server.listen(0, '127.0.0.1', () => resolve(server));
+  });
+}
+
+
+const state = {
+  items: [
+    { id: 'I1', name: 'Café', price: 12.5, quantity: 1, purchased: false, gtin: null,
+      created_at: '2026-08-01T10:00:00Z', products: null },
+  ],
+  seq: 1,
+  upserts: [],
+};
+
+function handleScan(body) {
+  const known = { '7891000100103': 'Leite Condensado Integral moça' };
+  const name = body.name || known[body.gtin];
+  if (!name) return { needs_name: true, found: false, gtin: body.gtin };
+  const existing = state.items.find(i => i.gtin === body.gtin && !i.purchased);
+  if (existing) {
+    existing.quantity = Number(existing.quantity) + Number(body.quantity ?? 1);
+    if (body.price != null) existing.price = body.price;
+    return { item: { ...existing }, merged: true, found: true };
+  }
+  const item = {
+    id: 'S' + (++state.seq), name,
+    price: body.price ?? null, quantity: body.quantity ?? 1,
+    purchased: false, gtin: body.gtin, created_at: '2026-08-09T10:00:00Z',
+    // Brand deliberately SHOUTED, to prove it is tidied at render.
+    products: body.gtin === '7891000100103'
+      ? { brand: 'CASA DE BENTO', net_qty: 1000, net_unit: 'ml' }
+      : null,
+  };
+  state.items.push(item);
+  return { item: { ...item }, merged: false, found: true };
+}
+
+(async () => {
+  const failures = [];
+  const server = await serve();
+  const PAGE = 'http://127.0.0.1:' + server.address().port + '/shopping.html';
+  const browser = await chromium.launch({
+    // Honour an explicit browser path when one is provided (this sandbox
+    // ships Chromium outside playwright's own cache); otherwise let
+    // playwright resolve it.
+    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+    args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+  });
+  const ctx = await browser.newContext({
+    viewport: { width: 414, height: 860 },
+    permissions: ['camera'],
+  });
+
+  const errors = [];
+  ctx.on('weberror', e => errors.push('pageerror: ' + e.error().message));
+
+  await ctx.addInitScript(() => {
+    try { localStorage.setItem('checklist_pass', 'x'); } catch (_) {}
+    window.__vibrations = 0;
+    // navigator.vibrate is absent in headless Chromium; define a counter so
+    // "must not buzz on a misread" is actually assertable.
+    Object.defineProperty(navigator, 'vibrate', {
+      configurable: true,
+      value: () => { window.__vibrations++; return true; },
+    });
+    // Simulate a three-lens Android phone where facingMode:environment
+    // lands on the fixed-focus ultra-wide, which is the reported problem.
+    window.__opened = [];
+    // addInitScript also runs on the opaque pre-navigation document, which
+    // has no navigator.mediaDevices at all — that's the harness, not the page.
+    if (navigator.mediaDevices) {
+    const realGUM = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.enumerateDevices = async () => ([
+      { kind: 'videoinput', deviceId: 'wide', label: 'camera2 2, facing back' },
+      { kind: 'videoinput', deviceId: 'main', label: 'camera2 0, facing back' },
+      { kind: 'videoinput', deviceId: 'tele', label: 'camera2 3, facing back' },
+      // A rear lens whose label says nothing about which way it points —
+      // the old "must match /back/" filter dropped this one from the cycle.
+      { kind: 'videoinput', deviceId: 'odd', label: 'Camera 3' },
+      { kind: 'videoinput', deviceId: 'selfie', label: 'camera2 1, facing front' },
+    ]);
+    navigator.mediaDevices.getUserMedia = async (c) => {
+      const want = c && c.video && c.video.deviceId && c.video.deviceId.exact;
+      const id = want || 'wide';
+      window.__opened.push(id);
+      const s = await realGUM({ video: true });
+      const t = s.getVideoTracks()[0];
+      // Capability sets copied from a real phone: the ultra-wide reports
+      // focusMode ["manual"] — a knob that does nothing on fixed-focus
+      // glass — while the main lens reports the full set plus the torch.
+      const CAPS = {
+        wide: { focusMode: ['manual'], zoom: { min: 1, max: 8 },
+                width: { max: 4000 }, height: { max: 3000 } },
+        main: { focusMode: ['manual', 'single-shot', 'continuous'], torch: true,
+                zoom: { min: 1, max: 10 }, width: { max: 4080 }, height: { max: 3060 } },
+        tele: { width: { max: 3000 }, height: { max: 2250 } },
+        odd: { width: { max: 2000 }, height: { max: 1500 } },
+        selfie: { focusMode: ['manual', 'single-shot', 'continuous'],
+                  width: { max: 3392 }, height: { max: 2544 } },
+      };
+      t.getCapabilities = () => (CAPS[id] || {});
+      t.getSettings = () => ({ deviceId: id });
+      t.applyConstraints = async () => {};
+      return s;
+    };
+    }
+
+    // What the decoder "sees", cycled forever: a one-element list is a
+    // steady read, a multi-element list flaps between values indefinitely.
+    window.__setCodes = list => { window.__q = list ? list.slice() : null; };
+    window.BarcodeDetector = class {
+      constructor() {}
+      static getSupportedFormats() {
+        return Promise.resolve(['ean_13', 'ean_8', 'upc_a', 'upc_e']);
+      }
+      detect() {
+        const q = window.__q;
+        if (!q || !q.length) return Promise.resolve([]);
+        const v = q.shift();
+        q.push(v);
+        return Promise.resolve(v ? [{ rawValue: v, format: 'ean_13' }] : []);
+      }
+    };
+  });
+
+  const page = await ctx.newPage();
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+
+  await page.route('**/functions/v1/checklist-api', async route => {
+    const body = route.request().postDataJSON();
+    let resp;
+    if (body.action === 'shopping_lists') {
+      resp = { lists: [{ id: 'L1', name: 'Mercado', emoji: '🛒', item_count: state.items.length,
+        purchased_count: 0, total_all: 12.5, total_cart: 0, created_at: '2026-08-01T10:00:00Z' }] };
+    } else if (body.action === 'shopping_items') {
+      resp = { items: state.items.map(i => ({ ...i })) };
+    } else if (body.action === 'product_lookup') {
+      const known = {
+        '7891000100103': { gtin: body.gtin, name: 'Leite Condensado Integral moça',
+          brand: 'CASA DE BENTO', net_qty: 1000, net_unit: 'ml' },
+      };
+      resp = known[body.gtin]
+        ? { found: true, gtin: body.gtin, product: known[body.gtin], origin: 'local' }
+        : { found: false, gtin: body.gtin };
+    } else if (body.action === 'product_price_history') {
+      resp = { gtin: body.gtin, prices: body.gtin === '7891000100103'
+        ? [{ price: 5.5, quantity: 1, store: null, captured_at: '2026-08-01T10:00:00Z' }]
+        : [] };
+    } else if (body.action === 'shopping_item_scan') {
+      resp = handleScan(body);
+    } else if (body.action === 'product_upsert') {
+      // The size the user typed in the scan dialog lands here, against the
+      // barcode rather than the row. Recorded so the test can assert both
+      // that it is sent when edited and that it is NOT sent otherwise.
+      state.upserts.push({ ...body });
+      resp = { product: { gtin: body.gtin, name: body.name,
+        net_qty: body.net_qty ?? null, net_unit: body.net_unit ?? null } };
+    } else if (body.action === 'shopping_item_add') {
+      // Mirrors the API: net_text is parsed into a normalized pair, and
+      // unreadable text is a 400 rather than a silent drop.
+      let net = { net_qty: null, net_unit: null };
+      const t = (body.net_text || '').trim();
+      if (t) {
+        const m = t.match(/^([\d.,]+)\s*(kg|g|ml|l)$/i);
+        if (!m) { await route.fulfill({ status: 400, contentType: 'application/json',
+          body: JSON.stringify({ error: 'invalid net quantity' }) }); return; }
+        const n = Number(m[1].replace(',', '.'));
+        const u = m[2].toLowerCase();
+        net = u === 'kg' ? { net_qty: n * 1000, net_unit: 'g' }
+            : u === 'l' ? { net_qty: n * 1000, net_unit: 'ml' }
+            : { net_qty: n, net_unit: u };
+      }
+      const item = { id: 'M' + (++state.seq), name: body.name, price: null,
+        quantity: body.quantity || 1, purchased: false, gtin: null,
+        brand: (body.brand || '').trim() || null, products: null,
+        created_at: '2026-08-09T12:00:00Z', ...net };
+      state.items.push(item);
+      resp = { item };
+    } else if (body.action === 'shopping_item_update' && 'price' in body) {
+      const it = state.items.find(i => i.id === body.id);
+      if (it) it.price = body.price;
+      resp = { ok: true, item: it ? { ...it } : null };
+    } else if (body.action === 'shopping_item_update' && 'name' in body) {
+      const it = state.items.find(i => i.id === body.id);
+      Object.assign(it, { name: body.name, brand: (body.brand || '').trim() || null });
+      const t = (body.net_text || '').trim();
+      const m = t ? t.match(/^([\d.,]+)\s*(kg|g|ml|l)$/i) : null;
+      it.net_qty = m ? Number(m[1].replace(',', '.')) * (/^(kg|l)$/i.test(m[2]) ? 1000 : 1) : null;
+      it.net_unit = m ? (/^(kg|g)$/i.test(m[2]) ? 'g' : 'ml') : null;
+      // Only a CHANGED code re-resolves; an unchanged one leaves the edits
+      // above standing as overrides.
+      if ('gtin' in body && (body.gtin || null) !== (it.gtin || null)) {
+        const g = (body.gtin || '').trim();
+        it.gtin = g || null;
+        if (g === '7891000100103') {
+          it.name = 'Leite Condensado Integral moça';
+          it.brand = null; it.net_qty = null; it.net_unit = null;
+          it.products = { brand: 'Nestlé', net_qty: 395, net_unit: 'g' };
+        }
+      }
+      resp = { ok: true, item: { ...it } };
+    } else {
+      resp = { ok: true };
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) });
+  });
+
+  await page.goto(PAGE);
+  await page.waitForSelector('.card');
+  await page.evaluate(() => openList('L1'));
+  await page.waitForSelector('#scan-item-btn');
+
+  const check = (label, cond) => { if (!cond) failures.push(label); };
+  const rows = async () => (await page.$$('.row[data-id]')).length;
+  const overlayOpen = async () => (await page.$$('.scan-overlay')).length === 1;
+  const vibrations = () => page.evaluate(() => window.__vibrations);
+
+  // --- the reported failure: a 13-digit EAN read with the first digit
+  // missing. Checksum-invalid, so it must never buzz or close. ---
+  await page.evaluate(() => window.__setCodes(['891000100103']));
+  await page.click('#scan-item-btn');
+  await page.waitForSelector('.scan-overlay');
+  await page.waitForTimeout(1500);
+
+  // --- lens selection: must walk off the fixed-focus ultra-wide ---
+  const opened = await page.evaluate(() => window.__opened);
+  check('tried the default lens first, got: ' + opened.join(','), opened[0] === 'wide');
+  check('switched to the lens that has autofocus, got: ' + opened.join(','),
+    opened.includes('main'));
+  check('remembered the focusable lens',
+    await page.evaluate(() => localStorage.getItem('scan_camera_id')) === 'main');
+  check('hint offers tap-to-focus once on a focusable lens',
+    /focar/.test(await page.textContent('.scan-hint')));
+  check('lens switch button visible with several cameras',
+    await page.isVisible('#scan-cam'));
+  check('front camera excluded from the rear list',
+    !opened.includes('selfie'));
+
+  check('misread does NOT close the camera', await overlayOpen());
+  check('misread does NOT vibrate', await vibrations() === 0);
+  check('misread adds no row', await rows() === 1);
+
+  // it should say so rather than leaving the user holding the phone there
+  await page.waitForFunction(
+    () => { const t = document.querySelector('.scan-toast'); return t && /ilegível/.test(t.textContent); },
+    null, { timeout: 8000 });
+  check('unreadable-code hint shown', /ilegível/.test(await page.textContent('.scan-toast')));
+
+  // --- recovers without reopening: feed it the correct code ---
+  await page.evaluate(() => window.__setCodes(['7891000100103']));
+  await page.waitForFunction(() => !document.querySelector('.scan-overlay'), null, { timeout: 6000 });
+  check('valid code closes the camera', !(await overlayOpen()));
+  check('valid code vibrates once', await vibrations() === 1);
+  // --- the scan dialog confirms the product and collects qty + price ---
+  await page.waitForSelector('#scan-price', { timeout: 6000 });
+  check('dialog names the resolved product',
+    /Leite Condensado/.test(await page.textContent('.scan-product')));
+  // The size lives in its own editable field now, so the meta line is brand
+  // only — repeating it in both would read as the dialog contradicting itself.
+  check('dialog shows the brand, got: ' + await page.textContent('.scan-meta'),
+    (await page.textContent('.scan-meta')).trim() === 'Casa de Bento');
+  check('package size is prefilled from the catalogue, got: ' +
+      await page.inputValue('#scan-net'),
+    (await page.inputValue('#scan-net')) === '1 L');
+  check('known product has no name field', (await page.$$('#scan-name')).length === 0);
+  check('cursor starts in the price field',
+    await page.evaluate(() => document.activeElement.id) === 'scan-price');
+  check('quantity defaults to 1', (await page.inputValue('#scan-qty')) === '1');
+  // Several .hint lines share the dialog now (size, price), so this has to
+  // look across all of them rather than at whichever one happens to be first.
+  const dialogHints = (await page.locator('.modal-card .hint').allTextContents()).join(' | ');
+  check('last paid price is shown, got: ' + dialogHints, /5,50/.test(dialogHints));
+
+  // Geometry, not just behaviour: the price and quantity inputs are type=text
+  // (a number input can't hold "5,50"), so the modal's generic
+  // input[type=text] rule outranks .num-input and once stretched the price
+  // field past the card, detached from its R$ chip and out of line with the
+  // stepper. Cheap to assert, invisible to every behavioural check.
+  const geom = await page.evaluate(() => {
+    const box = s => document.querySelector(s).getBoundingClientRect();
+    const card = box('.modal-card'), price = box('#scan-price'),
+          prefix = box('.scan-fields .prefix'), qty = box('#scan-qty');
+    return {
+      insideCard: price.right <= card.right && price.left >= card.left,
+      joinedToPrefix: Math.abs(price.left - prefix.right) < 1,
+      // The chip and the input have to read as ONE control: same height, same
+      // top. This is the half that survives the input merely overflowing.
+      matchesPrefix: Math.abs(price.top - prefix.top) < 3
+                  && Math.abs(price.height - prefix.height) < 3,
+      alignedWithQty: Math.abs(price.bottom - qty.bottom) < 3,
+      // .num-input is a flex child with min-width:0 here, so it can in
+      // principle collapse rather than overflow.
+      fillsColumn: price.width > 80,
+    };
+  });
+  check('price field stays inside the dialog', geom.insideCard);
+  check('price field is flush against its R$ prefix', geom.joinedToPrefix);
+  check('price field and its R$ chip read as one control', geom.matchesPrefix);
+  check('price and quantity sit on one line', geom.alignedWithQty);
+  check('price field fills the rest of the row', geom.fillsColumn);
+
+  await page.click('.scan-fields .step-btn[data-step="1"]');
+  await page.waitForTimeout(100);
+  check('dialog stepper raises the quantity', (await page.inputValue('#scan-qty')) === '2');
+  await page.locator('#scan-price').pressSequentially('675');
+  await page.waitForTimeout(100);
+  check('dialog price is cents-first, got: ' + await page.inputValue('#scan-price'),
+    (await page.inputValue('#scan-price')) === '6,75');
+  await page.click('#scan-ok');
+
+  await page.waitForFunction(() => document.querySelectorAll('.row[data-id]').length === 2,
+    null, { timeout: 6000 });
+  check('quantity from the dialog is saved',
+    (await page.inputValue('.row[data-id="S2"] .qty-input')) === '2');
+  // The size was prefilled and left alone, so the catalogue row must not be
+  // rewritten — otherwise every scan of a known product costs a needless write.
+  check('untouched size does not rewrite the product, got: ' +
+      JSON.stringify(state.upserts),
+    state.upserts.length === 0);
+  check('price from the dialog is saved, got: ' +
+      await page.inputValue('.row[data-id="S2"] .price-input'),
+    (await page.inputValue('.row[data-id="S2"] .price-input')) === '6,75');
+  const addedName = await page.textContent('.row[data-id="S2"] .txt');
+  check('row has OFF name, got: ' + addedName, addedName === 'Leite Condensado Integral moça');
+  const metaText = (await page.textContent('.row[data-id="S2"] .meta')).trim();
+  check('brand and size shown under the name, got: ' + metaText,
+    metaText === 'Casa de Bento · 1 L');
+  check('hand-typed row has no meta line',
+    (await page.$$('.row[data-id="I1"] .meta')).length === 0);
+
+  // --- two DIFFERENT valid codes alternating never agree, so never accept ---
+  await page.evaluate(() => window.__setCodes(
+    ['7891000100103', '7899999999999', '7891000100103', '7899999999999',
+     '7891000100103', '7899999999999', '7891000100103', '7899999999999']));
+  await page.click('#scan-item-btn');
+  await page.waitForSelector('.scan-overlay');
+  await page.waitForTimeout(1400);
+  check('flapping reads are not accepted', await overlayOpen());
+  check('flapping adds no row', await rows() === 2);
+
+  // --- camera picker lists every input, including the front one ---
+  await page.click('#scan-cam');
+  await page.waitForSelector('#cam-list .cam-item');
+  const names = await page.$$eval('#cam-list .cam-name', els => els.map(e => e.textContent.trim()));
+  check('picker lists every video input, got: ' + names.length, names.length === 5);
+  check('neutrally-labelled rear lens is listed', names.some(n => /Camera 3/.test(n)));
+  check('front camera listed and marked', names.some(n => /frontal/.test(n)));
+  check('active lens marked', names.some(n => n.startsWith('●') && /camera2 0/.test(n)));
+
+  // --- "Testar todas" reports real capabilities per lens ---
+  await page.click('#cam-probe');
+  await page.waitForFunction(
+    () => document.querySelector('#cam-probe').textContent.includes('de novo'),
+    null, { timeout: 15000 });
+  const caps = await page.$$eval('#cam-list .cam-item', els => els.map(e => ({
+    id: e.getAttribute('data-cam'),
+    caps: e.querySelector('[data-caps]').textContent.trim(),
+  })));
+  const capOf = id => (caps.find(c => c.id === id) || {}).caps || '';
+  check('probe reports autofocus on the main lens, got: ' + capOf('main'),
+    /autofoco: single-shot, continuous/.test(capOf('main')));
+  // The whole point: focusMode:["manual"] must NOT read as having autofocus.
+  check('manual-only lens reported as having NO autofocus, got: ' + capOf('wide'),
+    /SEM autofoco \(só manual\)/.test(capOf('wide')));
+  check('lens with no focusMode at all reported too, got: ' + capOf('tele'),
+    /^SEM autofoco/.test(capOf('tele')));
+  check('probe reports the torch on the main lens', /lanterna/.test(capOf('main')));
+  check('probe reports resolution, got: ' + capOf('main'), /4080×3060/.test(capOf('main')));
+
+  // --- picking a lens switches to it and persists ---
+  await page.click('#cam-list .cam-item[data-cam="tele"]');
+  await page.waitForTimeout(500);
+  check('picker closed', (await page.$$('#cam-list')).length === 0);
+  check('chosen lens persisted',
+    await page.evaluate(() => localStorage.getItem('scan_camera_id')) === 'tele');
+  check('camera restarted on the chosen lens',
+    (await page.evaluate(() => window.__opened)).slice(-1)[0] === 'tele');
+  check('scanner still open after switching', await overlayOpen());
+
+  await page.click('#scan-close');
+  await page.waitForTimeout(200);
+  // Put the good lens back for the remaining scenarios.
+  await page.evaluate(() => localStorage.setItem('scan_camera_id', 'main'));
+
+  // --- steady valid code still merges, through the dialog ---
+  await page.evaluate(() => window.__setCodes(['7891000100103']));
+  await page.click('#scan-item-btn');
+  await page.waitForSelector('#scan-price', { timeout: 6000 });
+  check('a product already on the list still opens the dialog',
+    /Leite Condensado/.test(await page.textContent('.scan-product')));
+  await page.click('#scan-ok');            // quantity 1, no price
+  await page.waitForFunction(
+    () => document.querySelector('.row[data-id="S2"] .qty-input').value === '3',
+    null, { timeout: 6000 });
+  check('merge adds the dialog quantity to the existing row',
+    await page.inputValue('.row[data-id="S2"] .qty-input') === '3');
+  check('still 2 rows after merge', await rows() === 2);
+  check('a blank price leaves the existing one alone, got: ' +
+      await page.inputValue('.row[data-id="S2"] .price-input'),
+    (await page.inputValue('.row[data-id="S2"] .price-input')) === '6,75');
+
+  // --- unknown but VALID code still prompts, after the camera closes ---
+  await page.evaluate(() => window.__setCodes(['7899999999999']));
+  await page.click('#scan-item-btn');
+  await page.waitForSelector('#scan-name', { timeout: 6000 });
+  check('overlay gone before the dialog', !(await overlayOpen()));
+  check('unknown code focuses the name field first',
+    await page.evaluate(() => document.activeElement.id) === 'scan-name');
+  check('unknown code cannot be saved without a name',
+    await (async () => {
+      await page.click('#scan-ok');
+      await page.waitForTimeout(200);
+      return (await page.$$('#scan-name')).length === 1;
+    })());
+  check('unknown code offers an empty size field',
+    (await page.inputValue('#scan-net')) === '');
+  await page.fill('#scan-name', 'Pão caseiro');
+
+  // A size that can't be read stops the dialog rather than being dropped —
+  // the whole point of asking is that the recipe side gets a usable number.
+  await page.fill('#scan-net', 'meia dúzia');
+  page.once('dialog', d => d.dismiss());
+  await page.click('#scan-ok');
+  await page.waitForTimeout(250);
+  check('unreadable size keeps the dialog open', (await page.$$('#scan-net')).length === 1);
+  check('unreadable size is never sent', state.upserts.length === 0);
+
+  await page.fill('#scan-net', '1,5 kg');
+  await page.click('#scan-ok');
+  await page.waitForFunction(() => document.querySelectorAll('.row[data-id]').length === 3,
+    null, { timeout: 6000 });
+  check('typed-name row added', await rows() === 3);
+  // Normalized to the g/ml/un pair on the way out, and written against the
+  // BARCODE, so the next scan of this code already knows the size.
+  // Fired in the background after the row lands, so it needs a moment.
+  for (let i = 0; i < 40 && state.upserts.length === 0; i++) await page.waitForTimeout(50);
+  check('size stored against the barcode, got: ' + JSON.stringify(state.upserts),
+    state.upserts.length === 1 && state.upserts[0].gtin === '7899999999999' &&
+    state.upserts[0].net_qty === 1500 && state.upserts[0].net_unit === 'g');
+  check('new size shows on the row without a refetch, got: ' +
+      (await page.textContent('.row[data-id="S3"] .meta')).trim(),
+    /1,5 kg/.test(await page.textContent('.row[data-id="S3"] .meta')));
+
+  // --- quick add: name and quantity only, one row ---
+  check('quick-add form has no brand field', (await page.$$('#new-item-brand')).length === 0);
+  check('quick-add form has no size field', (await page.$$('#new-item-net')).length === 0);
+  check('quick-add form has no price field', (await page.$$('#new-item-price')).length === 0);
+  check('quick-add placeholder renamed',
+    (await page.getAttribute('#new-item-name', 'placeholder')) === 'Novo item rápido');
+  // One visual line: the row is only as tall as a single control, and the
+  // three sit left-to-right rather than stacked.
+  const rowLayout = await page.evaluate(() => {
+    const r = document.querySelector('.addrow.additem');
+    const b = el => el.getBoundingClientRect();
+    const row = b(r), name = b(r.querySelector('#new-item-name'));
+    const qty = b(r.querySelector('#new-item-qty')), add = b(r.querySelector('#add-item-btn'));
+    return { h: Math.round(row.height), ordered: name.right <= qty.left && qty.right <= add.left };
+  });
+  check('quick-add row is a single line, height ' + rowLayout.h, rowLayout.h < 60);
+  check('name, quantity and buttons sit side by side', rowLayout.ordered);
+
+  await page.fill('#new-item-name', 'Pão francês');
+  await page.fill('#new-item-qty', '3');
+  await page.click('#add-item-btn');
+  await page.waitForFunction(() => document.querySelectorAll('.row[data-id]').length === 4,
+    null, { timeout: 6000 });
+  check('quick add keeps the typed quantity',
+    (await page.inputValue('.row[data-id="M4"] .qty-input')) === '3');
+  check('quick-add fields cleared after adding',
+    (await page.inputValue('#new-item-name')) === '' &&
+    (await page.inputValue('#new-item-qty')) === '');
+
+  // --- per-item quantity steppers ---
+  await page.click('.row[data-id="M4"] .step-btn[data-step="1"]');
+  await page.waitForFunction(
+    () => document.querySelector('.row[data-id="M4"] .qty-input').value === '4',
+    null, { timeout: 5000 });
+  check('+ steps the quantity up',
+    (await page.inputValue('.row[data-id="M4"] .qty-input')) === '4');
+  for (let i = 0; i < 5; i++) {
+    await page.click('.row[data-id="M4"] .step-btn[data-step="-1"]');
+    await page.waitForTimeout(120);
+  }
+  check('− steps down but never below 1, got: ' +
+      (await page.inputValue('.row[data-id="M4"] .qty-input')),
+    (await page.inputValue('.row[data-id="M4"] .qty-input')) === '1');
+  check('stepping updates the list total',
+    /R\$/.test(await page.textContent('.total-bar')));
+
+  // --- quantity: digits only, and tapping selects what's there ---
+  const qtySel = '.row[data-id="M4"] .qty-input';
+  const qtyBox = page.locator(qtySel);
+  await qtyBox.fill('');
+  await qtyBox.pressSequentially('a2e-b5');
+  await page.waitForTimeout(120);
+  check('quantity keeps only digits, got: ' + await page.inputValue(qtySel),
+    (await page.inputValue(qtySel)) === '25');
+  await qtyBox.fill('');
+  await qtyBox.pressSequentially('1,5,5');
+  await page.waitForTimeout(120);
+  check('quantity keeps a single separator, got: ' + await page.inputValue(qtySel),
+    (await page.inputValue(qtySel)) === '1,55');
+
+  await qtyBox.fill('7');
+  await qtyBox.blur();
+  await page.waitForTimeout(200);
+  // tapping selects the whole value, so the next digit replaces it
+  const qtyBoxRect = await qtyBox.boundingBox();
+  await page.mouse.click(qtyBoxRect.x + qtyBoxRect.width - 6, qtyBoxRect.y + qtyBoxRect.height / 2);
+  await page.waitForTimeout(150);
+  const qtySelection = await page.$eval(qtySel,
+    el => [el.selectionStart, el.selectionEnd, el.value.length]);
+  check('tapping the quantity selects all of it, got: ' + JSON.stringify(qtySelection),
+    qtySelection[0] === 0 && qtySelection[1] === qtySelection[2]);
+  await page.keyboard.type('3');
+  await page.waitForTimeout(120);
+  check('typing after the tap replaces rather than appends, got: ' +
+      await page.inputValue(qtySel), (await page.inputValue(qtySel)) === '3');
+  await qtyBox.blur();
+  await page.waitForTimeout(200);
+
+  // --- brand and size now live only in the edit dialog ---
+  await page.click('.row[data-id="M4"] [data-action="rename-item"]');
+  await page.waitForSelector('#edit-name');
+  await page.fill('#edit-name', 'Pão de forma');
+  await page.fill('#edit-brand', 'Wickbold');
+  await page.fill('#edit-net', '500 g');
+  await page.click('#edit-ok');
+  await page.waitForFunction(
+    () => /Wickbold/.test((document.querySelector('.row[data-id="M4"] .meta') || {}).textContent || ''),
+    null, { timeout: 6000 });
+  check('name updated', (await page.textContent('.row[data-id="M4"] .txt')).trim() === 'Pão de forma');
+  check('meta updated, got: ' + (await page.textContent('.row[data-id="M4"] .meta')).trim(),
+    (await page.textContent('.row[data-id="M4"] .meta')).trim() === 'Wickbold · 500 g');
+
+  // --- clearing both removes the line entirely ---
+  await page.click('.row[data-id="M4"] [data-action="rename-item"]');
+  await page.waitForSelector('#edit-name');
+  await page.fill('#edit-brand', '');
+  await page.fill('#edit-net', '');
+  await page.click('#edit-ok');
+  await page.waitForFunction(() => !document.querySelector('.row[data-id="M4"] .meta'),
+    null, { timeout: 6000 });
+  check('meta line removed when both cleared',
+    (await page.$$('.row[data-id="M4"] .meta')).length === 0);
+
+  // --- missing-barcode marker ---
+  check('hand-typed row flags the missing barcode',
+    await page.isVisible('.row[data-id="M4"] [data-action="fix-gtin"]'));
+  check('scanned row does not flag it',
+    !(await page.isVisible('.row[data-id="S2"] [data-nobc]')));
+
+  // --- attaching a known barcode replaces what was typed ---
+  await page.click('.row[data-id="M4"] [data-action="fix-gtin"]');
+  await page.waitForSelector('#edit-gtin');
+  check('barcode field starts empty for a hand-typed item',
+    (await page.inputValue('#edit-gtin')) === '');
+  await page.fill('#edit-gtin', '789 1000 100103');   // spaces must be tolerated
+  await page.click('#edit-ok');
+  await page.waitForFunction(
+    () => document.querySelector('.row[data-id="M4"] .txt').textContent.includes('Condensado'),
+    null, { timeout: 6000 });
+  check('name replaced by the catalogue',
+    (await page.textContent('.row[data-id="M4"] .txt')).trim() === 'Leite Condensado Integral moça');
+  check('brand and size replaced by the catalogue, got: ' +
+      (await page.textContent('.row[data-id="M4"] .meta')).trim(),
+    (await page.textContent('.row[data-id="M4"] .meta')).trim() === 'Nestlé · 395 g');
+  check('missing-barcode marker cleared once linked',
+    !(await page.isVisible('.row[data-id="M4"] [data-action="fix-gtin"]')));
+  check('barcode prefilled on reopen',
+    await (async () => {
+      await page.click('.row[data-id="M4"] [data-action="rename-item"]');
+      await page.waitForSelector('#edit-gtin');
+      const v = await page.inputValue('#edit-gtin');
+      await page.click('#edit-cancel');
+      return v === '7891000100103';
+    })());
+
+  // --- price: cents-first, digits fill in from the right ---
+  const priceSel = '.row[data-id="I1"] .price-input';
+  const priceBox = page.locator(priceSel);
+  check('existing price rendered with comma and two decimals, got: ' +
+      await page.inputValue(priceSel), (await page.inputValue(priceSel)) === '12,50');
+
+  // Focus once, then type: re-focusing between digits would re-select the
+  // whole amount and make each digit a replace instead of an append.
+  await priceBox.fill('');
+  await priceBox.focus();
+  await page.waitForTimeout(80);
+  const progression = [];
+  for (const digit of '12345') {
+    await page.keyboard.type(digit);
+    await page.waitForTimeout(60);
+    progression.push(await page.inputValue(priceSel));
+  }
+  check('digits fill from the right, got: ' + progression.join(' '),
+    progression.join(' ') === '0,01 0,12 1,23 12,34 123,45');
+
+  // Intl currency formatting puts a non-breaking space after "R$".
+  const subtotal = async () =>
+    (await page.textContent('.row[data-id="I1"] [data-subtotal]'))
+      .replace(/[\u00a0\u202f]/g, ' ').trim();
+  await priceBox.blur();
+  await page.waitForTimeout(200);
+  check('line total follows the typed price, got: ' + await subtotal(),
+    (await subtotal()) === 'R$ 123,45');
+
+  // Backspacing must walk all the way back to empty, not stall on 0,00.
+  // No re-focusing inside the loop: a tap selects the whole amount, so
+  // focus-then-backspace deliberately clears it in one go (tested below).
+  await priceBox.fill('');
+  await priceBox.pressSequentially('12345');
+  await page.waitForTimeout(80);
+  const backwards = [];
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(60);
+    backwards.push(await page.inputValue(priceSel));
+  }
+  check('backspacing clears down to empty, got: ' + JSON.stringify(backwards.join(' ')),
+    backwards.join(' ') === '12,34 1,23 0,12 0,01 ');
+
+  // ...and because a tap selects everything, one backspace after tapping
+  // wipes the amount, which is the same "replace this" promise.
+  await priceBox.fill('');
+  await priceBox.pressSequentially('999');
+  await page.waitForTimeout(80);
+  await priceBox.blur();
+  await priceBox.focus();
+  await page.waitForTimeout(150);
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(80);
+  check('tap then backspace clears the whole amount, got: ' +
+      JSON.stringify(await page.inputValue(priceSel)),
+    (await page.inputValue(priceSel)) === '');
+
+  await priceBox.blur();
+  await page.waitForTimeout(200);
+  check('cleared price shows no line total', (await subtotal()) === '');
+
+  // thousands are grouped, and a stray non-digit is simply ignored
+  await priceBox.fill('');
+  await priceBox.pressSequentially('123456');
+  await page.waitForTimeout(80);
+  check('thousands grouped, got: ' + await page.inputValue(priceSel),
+    (await page.inputValue(priceSel)) === '1.234,56');
+  await priceBox.pressSequentially('a');
+  await page.waitForTimeout(80);
+  check('non-digits ignored, got: ' + await page.inputValue(priceSel),
+    (await page.inputValue(priceSel)) === '1.234,56');
+  // --- tapping selects the whole amount, wherever you tap ---
+  const caret = () => page.$eval(priceSel, el => [el.selectionStart, el.selectionEnd, el.value.length]);
+  const box = await priceBox.boundingBox();
+  // tap near the LEFT edge, i.e. in the middle of "1.234,56"
+  await page.mouse.click(box.x + 8, box.y + box.height / 2);
+  await page.waitForTimeout(150);
+  const afterLeftTap = await caret();
+  check('tapping the left of the number selects all of it, got: ' +
+      JSON.stringify(afterLeftTap),
+    afterLeftTap[0] === 0 && afterLeftTap[1] === afterLeftTap[2] && afterLeftTap[2] > 0);
+
+  // typing over that selection restarts the amount cents-first
+  await page.keyboard.type('7');
+  await page.waitForTimeout(100);
+  check('typing after the tap restarts the amount, got: ' + await page.inputValue(priceSel),
+    (await page.inputValue(priceSel)) === '0,07');
+  // and the digits keep filling from the right afterwards
+  await page.keyboard.type('5');
+  await page.waitForTimeout(100);
+  check('digits keep filling from the right after a replace, got: ' +
+      await page.inputValue(priceSel), (await page.inputValue(priceSel)) === '0,75');
+
+  // re-focusing from elsewhere selects everything too
+  await priceBox.blur();
+  await page.waitForTimeout(80);
+  await priceBox.focus();
+  await page.waitForTimeout(150);
+  const afterRefocus = await caret();
+  check('re-focusing selects the whole amount, got: ' + JSON.stringify(afterRefocus),
+    afterRefocus[0] === 0 && afterRefocus[1] === afterRefocus[2]);
+
+  await priceBox.fill('');
+  await priceBox.blur();
+  await page.waitForTimeout(200);
+
+  // --- REGRESSION: editing an item that already has a barcode, without
+  // changing the code, must store overrides rather than reset to the
+  // catalogue. This used to silently discard every edit. ---
+  await page.click('.row[data-id="M4"] [data-action="rename-item"]');
+  await page.waitForSelector('#edit-name');
+  await page.fill('#edit-name', 'Leite Moça lata');
+  await page.fill('#edit-brand', 'Nestlé BR');
+  await page.fill('#edit-net', '800 g');
+  await page.click('#edit-ok');
+  await page.waitForFunction(
+    () => /800/.test((document.querySelector('.row[data-id="M4"] .meta') || {}).textContent || ''),
+    null, { timeout: 6000 });
+  check('edit of a barcoded item keeps the new name',
+    (await page.textContent('.row[data-id="M4"] .txt')).trim() === 'Leite Moça lata');
+  check('edit of a barcoded item stores brand/size overrides, got: ' +
+      (await page.textContent('.row[data-id="M4"] .meta')).trim(),
+    (await page.textContent('.row[data-id="M4"] .meta')).trim() === 'Nestlé BR · 800 g');
+  check('the barcode survives the edit',
+    !(await page.isVisible('.row[data-id="M4"] [data-action="fix-gtin"]')));
+
+  await page.screenshot({ path: path.join(SHOTS, 'after_scan.png'), fullPage: true });
+  await browser.close();
+  server.close();
+  if (process.env.KEEP_SHOTS) console.log('screenshots: ' + SHOTS);
+
+  console.log('--- JS errors ---');
+  console.log(errors.length ? errors.join('\n') : '(none)');
+  console.log('--- failures ---');
+  console.log(failures.length ? failures.join('\n') : '(none)');
+  process.exit(failures.length || errors.length ? 1 : 0);
+})();
