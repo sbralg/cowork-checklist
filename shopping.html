@@ -957,15 +957,18 @@ function hideListToast(){
 // Shown after every scan, before anything is written. It confirms WHICH
 // product the barcode resolved to — the safety check that matters when the
 // name comes from a shared external catalogue — and collects the things only
-// the person holding the box knows: how many, what it costs here, and (when
-// the catalogue can't say) how much is IN one box.
+// the person holding the box knows: how many, what it costs here, and how
+// much is IN one box.
 // Capturing the price at scan time is also what makes the price history
 // worth graphing; relying on it being typed later left it almost empty.
-// Resolves with {name, size, quantity, price} or null.
+// Resolves with {name, size, quantity, price} or null; `size` is null unless
+// the package size was actually edited.
 function scanConfirmModal(opts){
   const known = !!opts.product;
   const p = opts.product || {};
-  const meta = productMeta({ products: p, brand: null, net_qty: null });
+  // Brand only: the size sits in its own editable field below, so repeating
+  // it here would just look like the dialog disagreeing with itself.
+  const meta = tidyShouted(p.brand || "");
   return new Promise(resolve => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -979,16 +982,18 @@ function scanConfirmModal(opts){
           : '<label for="scan-name">Nome do produto</label>' +
             '<input type="text" id="scan-name" placeholder="ex: Arroz 5 kg">' +
             '<p class="scan-meta">Código ' + esc(opts.gtin) + ' — ainda não conhecido.</p>') +
-        // Asked whenever the catalogue has no size for this code — a brand new
-        // product, but also an Open Food Facts entry whose `quantity` field was
-        // empty or unparseable. Without it a barcode can never answer "quanto
-        // disso eu tenho?", because the row's quantity counts PACKAGES.
-        (p.net_qty == null
-          ? '<label for="scan-net">Peso / volume do pacote (opcional)</label>' +
-            '<input type="text" id="scan-net" placeholder="ex: 1,5 kg, 500 ml, 6 un">' +
-            '<p class="hint">Quanto vem em UM pacote — é o que permite somar o ' +
-              'total disponível para as receitas.</p>'
-          : '') +
+        // Always shown, prefilled from the catalogue when it knows. Blank for
+        // a brand new code, and also for an Open Food Facts entry whose
+        // `quantity` field was empty or unparseable. Without it a barcode can
+        // never answer "quanto disso eu tenho?", because the row's quantity
+        // counts PACKAGES. Editable even when prefilled because OFF's sizes
+        // are crowd-typed and never re-checked once cached — the person
+        // holding the box is the only one who can catch a shrunk package.
+        '<label for="scan-net">Peso / volume do pacote (opcional)</label>' +
+        '<input type="text" id="scan-net" placeholder="ex: 1,5 kg, 500 ml, 6 un" ' +
+          'value="' + esc(fmtNetQty(p.net_qty, p.net_unit)) + '">' +
+        '<p class="hint">Quanto vem em UM pacote — é o que permite somar o ' +
+          'total disponível para as receitas. Corrija se estiver errado.</p>' +
         '<div class="scan-fields">' +
           '<div class="col">' +
             '<label for="scan-qty">Quantidade</label>' +
@@ -1018,6 +1023,7 @@ function scanConfirmModal(opts){
 
     const nameEl = backdrop.querySelector("#scan-name");
     const netEl = backdrop.querySelector("#scan-net");
+    const netWas = netEl.value.trim(); // what the catalogue said, to spot an edit
     const qtyEl = backdrop.querySelector("#scan-qty");
     const priceEl = backdrop.querySelector("#scan-price");
     wireQtyInput(qtyEl);
@@ -1040,9 +1046,14 @@ function scanConfirmModal(opts){
       // Leaving the size blank is fine — standing in an aisle is no place to
       // be blocked. Typing one that can't be read is a mistake worth stopping
       // on, though, rather than silently dropping the thing they just typed.
+      // Only a CHANGED value counts, so re-scanning a product whose size is
+      // already right doesn't rewrite the catalogue row on every scan.
+      // Emptying the field means "leave it as it was", not "erase it" — the
+      // way to fix a wrong size is to type the right one.
       let size = null;
-      if(netEl && netEl.value.trim()){
-        size = parseNetText(netEl.value);
+      const netNow = netEl.value.trim();
+      if(netNow && netNow !== netWas){
+        size = parseNetText(netNow);
         if(!size){
           alert("não entendi o peso/volume — use algo como 1,5 kg, 500 ml ou 6 un");
           netEl.focus();
@@ -1950,8 +1961,9 @@ function renderItems(list, items){
     // row: stored against the barcode it's typed once ever, and it's what
     // lets "3 pacotes" become 4,5 kg for the recipe side. Written after the
     // item lands, and best-effort — a failed size write must never read as a
-    // failed scan. (product_upsert stamps source=manual; for a product Open
-    // Food Facts knew but had no size for, that's the honest label now.)
+    // failed scan. What the user types wins over the catalogue, without any
+    // record of which is which: a wrong size is wrong whoever typed it, and
+    // the product module is where it gets corrected.
     if(confirmed.size){
       api("product_upsert", {
         gtin: code,

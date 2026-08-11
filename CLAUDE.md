@@ -26,15 +26,23 @@ except what's actually deployed here.
 
 ## Master-copy relationship
 
-`index.html` in THIS repo is a synced copy of `web/index.html` in
+**All three pages** — `index.html`, `shopping.html` and `hoje.html` — in
+THIS repo are synced copies of `web/*.html` in
 `sbralg/cowork-personal-daily-summary` (that repo is the master; this
-one is what's actually live). Any change to the checklist page must be
-made in the master copy first, then copied over here byte-for-byte
-before committing — never edit `index.html` here directly without also
-updating the master, or the next sync will silently overwrite the change.
+one is what's actually live). Any change to a page must be made in the
+master copy first, then copied over here byte-for-byte before committing
+— never edit a page here directly without also updating the master, or
+the next sync will silently overwrite the change.
 
-`shopping.html` has no master copy elsewhere — it's edited directly in
-this repo.
+`shopping.html` was Pages-repo-only until 2026-08-01 and this file said
+so for a while after it stopped being true; that stale note is exactly
+the trap it describes, so re-check the master repo rather than trusting
+this paragraph if the two ever look out of step.
+
+The master repo also holds `test/shopping.test.js`, a headless Chromium
+test covering the scanner, the barcode validation and the scan
+confirmation dialog. There is no CI — run `node test/shopping.test.js`
+there by hand after changing `shopping.html`.
 
 ## Conventions
 
