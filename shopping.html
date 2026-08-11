@@ -199,7 +199,12 @@
   .modal-card h3{margin:0 0 14px;font-size:16px}
   .modal-card p{font-size:15px;line-height:1.4;margin:0 0 18px}
   .modal-card label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
-  .modal-card input[type=text]{
+  /* Deliberately excludes .num-input: the compact quantity/price controls are
+     type=text too (a number input can't hold "5,50" — see wirePriceInput), and
+     this rule outranks .num-input on specificity, so without the :not() it
+     stretched the price field past the card, rounded both ends off the R$ chip
+     and pushed it out of line with a stray margin-bottom. */
+  .modal-card input[type=text]:not(.num-input){
     width:100%;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
     border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:14px;
   }
@@ -215,7 +220,11 @@
   .scan-fields .col.grow{flex:1}
   .scan-fields label{margin:0;font-size:13px;color:var(--muted)}
   .scan-fields .field{display:flex;align-items:center;flex:none}
-  .scan-fields .num-input{width:100%;min-width:0}
+  /* The price takes whatever the quantity leaves — it's the only field here
+     whose content can get long. The quantity keeps the fixed width its
+     stepper is built around. */
+  .scan-fields .col.grow .field{width:100%}
+  .scan-fields .col.grow .num-input{flex:1 1 auto;width:auto;min-width:0}
   .scan-fields .qty-field .num-input{width:44px}
   .modal-actions{display:flex;gap:8px;justify-content:flex-end}
   .modal-actions button{
