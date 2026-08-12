@@ -24,25 +24,30 @@ service-role key and checks the passphrase server-side. See
 `sbralg/cowork-personal-daily-summary`'s `CLAUDE.md` for the Edge
 Function's source, the Supabase schema, the scheduled task that
 populates `index.html`'s data every morning, and this whole project's
-full change history — that repo is the source of truth for everything
-except what's actually deployed here, plus `shopping.html`, which is
-sourced here (see below).
+full change history — that repo is the source of truth for the backend,
+this one for the front end.
 
 ## Master-copy relationship
 
-**`shopping.html` lives ONLY here.** It has one copy, in this repo, and
-so does its test — edit it directly, there is nothing to sync. It was
-briefly mirrored into `sbralg/cowork-personal-daily-summary` (2026-08-01
-to 2026-08-11) and that mirror immediately did what mirrors do: this
-file went stale about it and a change was one sync away from being
-silently overwritten. The mirror is gone; do not recreate it.
+**Every page lives ONLY here — there are no mirrors anywhere.** All
+three pages and the test have exactly one copy, in this repo. Edit them
+directly; there is nothing to sync and no master copy to update first.
 
-**`index.html` and `hoje.html` are different** — those two ARE synced
-copies of `web/*.html` in `sbralg/cowork-personal-daily-summary` (that
-repo is the master; this one is what's actually live). A change to
-either must be made in the master copy first, then copied here
-byte-for-byte before committing, or the next sync silently overwrites
-it. Two rules coexist, so check which page you are touching.
+This is a deliberate reversal, not an accident of history. The pages
+used to be mastered in `sbralg/cowork-personal-daily-summary` under
+`web/` and copied here, and that arrangement failed exactly the way
+duplication does: `shopping.html` was mirrored there on 2026-08-01, this
+file went stale about it, and a change made by following the stale note
+was one sync away from being silently overwritten. Mirroring traded a
+stale-copy risk for a forgot-to-sync risk and collected on it within ten
+days. **Do not recreate a mirror in the other repo** — that repo is the
+backend (Edge Function, scheduled task, `release/`); this one is the
+front end; no file exists in both.
+
+What still lives in `sbralg/cowork-personal-daily-summary`, and is worth
+reading before changing anything here: the `checklist-api` Edge Function
+source, the Supabase schema, the scheduled task, and the project's full
+dated change history in its `CLAUDE.md`.
 
 `test/shopping.test.js` is a headless Chromium test covering the
 scanner, the barcode validation, the scan confirm dialog (including its

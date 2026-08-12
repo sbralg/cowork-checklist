@@ -23,6 +23,5 @@ For the full architecture (Supabase schema, Edge Function source, the
 scheduled task that populates the checklist every morning, and the
 project's change history) see the sibling repo
 [`cowork-personal-daily-summary`](https://github.com/sbralg/cowork-personal-daily-summary),
-specifically its `CLAUDE.md`. That repo holds the master copies of
-`index.html` and `hoje.html`; `shopping.html` is sourced here and has no
-mirror.
+specifically its `CLAUDE.md`. That repo is the backend half and holds no
+copy of these pages — the front end lives only here.
