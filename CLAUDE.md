@@ -5,43 +5,63 @@ Context file for Claude Code / Claude sessions working on this repo.
 ## What this is
 
 The public GitHub Pages front end deployed from this repo's `main` branch,
-served at https://sbralg.github.io/cowork-checklist/. Two independent
+served at https://sbralg.github.io/cowork-checklist/. Three independent
 pages, no build step, no framework:
 
 - `index.html` — the daily-task checklist (pending actions, done-tasks
   history with undo, manual task creation, edit/delete).
 - `shopping.html` — the shopping-list manager (multiple named lists,
-  per-item price + purchased toggle, running totals).
+  per-item price + quantity, purchased toggle, running totals, barcode
+  scanning against the product catalogue).
+- `hoje.html` — "Hoje": the morning summary rendered for the browser,
+  read from `public.daily_reports`.
 
-Both are data-free shells: no Supabase keys, no data baked in. Each asks
-for a shared passphrase (stored in `localStorage`, prompted once per
+All three are data-free shells: no Supabase keys, no data baked in. Each
+asks for a shared passphrase (stored in `localStorage`, prompted once per
 device) and talks only to one Supabase Edge Function, `checklist-api`
 (deployed in project `opehbckfmfschpvbhxvo`), which holds the
 service-role key and checks the passphrase server-side. See
 `sbralg/cowork-personal-daily-summary`'s `CLAUDE.md` for the Edge
 Function's source, the Supabase schema, the scheduled task that
 populates `index.html`'s data every morning, and this whole project's
-full change history — that repo is the source of truth for everything
-except what's actually deployed here.
+full change history — that repo is the source of truth for the backend,
+this one for the front end.
 
 ## Master-copy relationship
 
-`index.html` in THIS repo is a synced copy of `web/index.html` in
-`sbralg/cowork-personal-daily-summary` (that repo is the master; this
-one is what's actually live). Any change to the checklist page must be
-made in the master copy first, then copied over here byte-for-byte
-before committing — never edit `index.html` here directly without also
-updating the master, or the next sync will silently overwrite the change.
+**Every page lives ONLY here — there are no mirrors anywhere.** All
+three pages and the test have exactly one copy, in this repo. Edit them
+directly; there is nothing to sync and no master copy to update first.
 
-`shopping.html` has no master copy elsewhere — it's edited directly in
-this repo.
+This is a deliberate reversal, not an accident of history. The pages
+used to be mastered in `sbralg/cowork-personal-daily-summary` under
+`web/` and copied here, and that arrangement failed exactly the way
+duplication does: `shopping.html` was mirrored there on 2026-08-01, this
+file went stale about it, and a change made by following the stale note
+was one sync away from being silently overwritten. Mirroring traded a
+stale-copy risk for a forgot-to-sync risk and collected on it within ten
+days. **Do not recreate a mirror in the other repo** — that repo is the
+backend (Edge Function, scheduled task, `release/`); this one is the
+front end; no file exists in both.
+
+What still lives in `sbralg/cowork-personal-daily-summary`, and is worth
+reading before changing anything here: the `checklist-api` Edge Function
+source, the Supabase schema, the scheduled task, and the project's full
+dated change history in its `CLAUDE.md`.
+
+`test/shopping.test.js` is a headless Chromium test covering the
+scanner, the barcode validation, the scan confirm dialog (including its
+layout) and the add/edit/merge paths. It serves the repo root on an
+ephemeral port and answers `checklist-api` from an in-memory fake, so it
+never touches Supabase and holds no passphrase. There is no CI — run
+`node test/shopping.test.js` by hand after changing `shopping.html`.
 
 ## Conventions
 
 - **No build step.** Each `.html` file is a single, complete, static
   page — HTML/CSS/JS all inline in one file. Deploy is `git push` to
   `main`; GitHub Pages serves it directly, no CI.
-- **No shared JS module between the two pages.** Logic both pages need
+- **No shared JS module between the pages.** Logic more than one page needs
   (the hamburger menu, `esc()`, `confirmModal()`/`promptModal()`, the
   emoji-grapheme helpers, etc.) is duplicated verbatim in both files
   rather than factored into a shared script — a deliberate choice, not

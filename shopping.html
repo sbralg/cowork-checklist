@@ -956,15 +956,19 @@ function hideListToast(){
 
 // Shown after every scan, before anything is written. It confirms WHICH
 // product the barcode resolved to — the safety check that matters when the
-// name comes from a shared external catalogue — and collects the two things
-// only the person holding the box knows: how many, and what it costs here.
+// name comes from a shared external catalogue — and collects the things only
+// the person holding the box knows: how many, what it costs here, and how
+// much is IN one box.
 // Capturing the price at scan time is also what makes the price history
 // worth graphing; relying on it being typed later left it almost empty.
-// Resolves with {name, quantity, price} or null.
+// Resolves with {name, size, quantity, price} or null; `size` is null unless
+// the package size was actually edited.
 function scanConfirmModal(opts){
   const known = !!opts.product;
   const p = opts.product || {};
-  const meta = productMeta({ products: p, brand: null, net_qty: null });
+  // Brand only: the size sits in its own editable field below, so repeating
+  // it here would just look like the dialog disagreeing with itself.
+  const meta = tidyShouted(p.brand || "");
   return new Promise(resolve => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -978,6 +982,18 @@ function scanConfirmModal(opts){
           : '<label for="scan-name">Nome do produto</label>' +
             '<input type="text" id="scan-name" placeholder="ex: Arroz 5 kg">' +
             '<p class="scan-meta">Código ' + esc(opts.gtin) + ' — ainda não conhecido.</p>') +
+        // Always shown, prefilled from the catalogue when it knows. Blank for
+        // a brand new code, and also for an Open Food Facts entry whose
+        // `quantity` field was empty or unparseable. Without it a barcode can
+        // never answer "quanto disso eu tenho?", because the row's quantity
+        // counts PACKAGES. Editable even when prefilled because OFF's sizes
+        // are crowd-typed and never re-checked once cached — the person
+        // holding the box is the only one who can catch a shrunk package.
+        '<label for="scan-net">Peso / volume do pacote (opcional)</label>' +
+        '<input type="text" id="scan-net" placeholder="ex: 1,5 kg, 500 ml, 6 un" ' +
+          'value="' + esc(fmtNetQty(p.net_qty, p.net_unit)) + '">' +
+        '<p class="hint">Quanto vem em UM pacote — é o que permite somar o ' +
+          'total disponível para as receitas. Corrija se estiver errado.</p>' +
         '<div class="scan-fields">' +
           '<div class="col">' +
             '<label for="scan-qty">Quantidade</label>' +
@@ -1006,6 +1022,8 @@ function scanConfirmModal(opts){
     document.body.appendChild(backdrop);
 
     const nameEl = backdrop.querySelector("#scan-name");
+    const netEl = backdrop.querySelector("#scan-net");
+    const netWas = netEl.value.trim(); // what the catalogue said, to spot an edit
     const qtyEl = backdrop.querySelector("#scan-qty");
     const priceEl = backdrop.querySelector("#scan-price");
     wireQtyInput(qtyEl);
@@ -1025,8 +1043,26 @@ function scanConfirmModal(opts){
       const name = nameEl ? nameEl.value.trim() : "";
       // An unknown code has to be named before it can be stored.
       if(nameEl && !name){ nameEl.focus(); return; }
+      // Leaving the size blank is fine — standing in an aisle is no place to
+      // be blocked. Typing one that can't be read is a mistake worth stopping
+      // on, though, rather than silently dropping the thing they just typed.
+      // Only a CHANGED value counts, so re-scanning a product whose size is
+      // already right doesn't rewrite the catalogue row on every scan.
+      // Emptying the field means "leave it as it was", not "erase it" — the
+      // way to fix a wrong size is to type the right one.
+      let size = null;
+      const netNow = netEl.value.trim();
+      if(netNow && netNow !== netWas){
+        size = parseNetText(netNow);
+        if(!size){
+          alert("não entendi o peso/volume — use algo como 1,5 kg, 500 ml ou 6 un");
+          netEl.focus();
+          return;
+        }
+      }
       close({
         name,
+        size,
         quantity: parseQtyInput(qtyEl.value) ?? 1,
         price: centsToPrice(priceDigits(priceEl.value))
       });
@@ -1415,6 +1451,29 @@ function fmtNetQty(qty, unit){
   if(unit === "g" && n >= 1000) return (n / 1000).toLocaleString("pt-BR") + " kg";
   if(unit === "ml" && n >= 1000) return (n / 1000).toLocaleString("pt-BR") + " L";
   return n.toLocaleString("pt-BR") + " " + unit;
+}
+
+// The inverse of fmtNetQty: free text as typed on a phone — "380 g", "1,5 L",
+// "6 un" — normalized to the g / ml / un pair the catalogue stores. Parsed
+// here rather than server-side because product_upsert takes the pair, not the
+// text; the grammar is deliberately identical to checklist-api's
+// parseNetQuantity (unit required, comma or dot) so the same string is
+// accepted by this dialog and by the item edit dialog, which sends its text
+// to the API to parse. Returns null when it can't be read.
+function parseNetText(raw){
+  const m = String(raw || "").trim()
+    .match(/^(\d+(?:[.,]\d+)?)\s*(kg|g|mg|l|ml|cl|un|unid\.?|unidades?)\b/i);
+  if(!m) return null;
+  const n = Number(m[1].replace(",", "."));
+  if(!Number.isFinite(n) || n <= 0) return null;
+  const unit = m[2].toLowerCase();
+  if(unit === "kg") return { net_qty: n * 1000, net_unit: "g" };
+  if(unit === "mg") return { net_qty: n / 1000, net_unit: "g" };
+  if(unit === "g")  return { net_qty: n, net_unit: "g" };
+  if(unit === "l")  return { net_qty: n * 1000, net_unit: "ml" };
+  if(unit === "cl") return { net_qty: n * 10, net_unit: "ml" };
+  if(unit === "ml") return { net_qty: n, net_unit: "ml" };
+  return { net_qty: n, net_unit: "un" };
 }
 
 // Same SHOUTED-name rule checklist-api applies to product names, used here
@@ -1897,6 +1956,27 @@ function renderItems(list, items){
       return;
     }
     if(!data.item){ listToast("Não foi possível adicionar", true); return; }
+
+    // The size describes the BOX, so it belongs on the product, not on this
+    // row: stored against the barcode it's typed once ever, and it's what
+    // lets "3 pacotes" become 4,5 kg for the recipe side. Written after the
+    // item lands, and best-effort — a failed size write must never read as a
+    // failed scan. What the user types wins over the catalogue, without any
+    // record of which is which: a wrong size is wrong whoever typed it, and
+    // the product module is where it gets corrected.
+    if(confirmed.size){
+      api("product_upsert", {
+        gtin: code,
+        name: (data.product && data.product.name) || confirmed.name,
+        net_qty: confirmed.size.net_qty,
+        net_unit: confirmed.size.net_unit
+      }).catch(() => { /* the row is already in the list; retry by editing */ });
+      // The response above predates that write, so fill the size in locally
+      // rather than refetching just to show it.
+      data.item.products = Object.assign({}, data.item.products, {
+        net_qty: confirmed.size.net_qty, net_unit: confirmed.size.net_unit
+      });
+    }
     applyScannedItem(data.item);
     flashRow(data.item.id);
     listToast(data.merged
