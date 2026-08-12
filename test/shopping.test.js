@@ -252,7 +252,8 @@ function handleScan(body) {
         created_at: '2026-08-09T12:00:00Z', ...net };
       state.items.push(item);
       resp = { item };
-    } else if (body.action === 'shopping_item_update' && 'price' in body) {
+    } else if (body.action === 'shopping_item_update' && !('name' in body) &&
+               ('price' in body)) {
       const it = state.items.find(i => i.id === body.id);
       if (it) it.price = body.price;
       resp = { ok: true, item: it ? { ...it } : null };
@@ -271,6 +272,7 @@ function handleScan(body) {
       // full edit modal sends all of them together, but a scan-dialog
       // correction can send just the name, so a field's absence has to mean
       // "leave it alone", not "clear it".
+      if ('price' in body) it.price = body.price;
       if ('brand' in body) it.brand = (body.brand ?? '').trim() || null;
       if ('net_text' in body) {
         const t = (body.net_text || '').trim();
@@ -663,29 +665,21 @@ function handleScan(body) {
   await qtyBox.blur();
   await page.waitForTimeout(200);
 
-  // --- brand and size now live only in the edit dialog ---
+  // --- a quick-add item's edit dialog has no room for brand/size: it is a
+  // reminder to buy something, not a catalogue entry, until it is scanned ---
   await page.click('.row[data-id="M4"] [data-action="rename-item"]');
   await page.waitForSelector('#edit-name');
+  check('brand/size hidden for a barcode-less item',
+    await page.isHidden('#edit-product-fields'));
+  check('hint explains why, got: ' + await page.textContent('#edit-gtin-hint'),
+    /lembrança de compra/.test(await page.textContent('#edit-gtin-hint')));
   await page.fill('#edit-name', 'Pão de forma');
-  await page.fill('#edit-brand', 'Wickbold');
-  await page.fill('#edit-net', '500 g');
   await page.click('#edit-ok');
   await page.waitForFunction(
-    () => /Wickbold/.test((document.querySelector('.row[data-id="M4"] .meta') || {}).textContent || ''),
+    () => document.querySelector('.row[data-id="M4"] .txt').textContent.trim() === 'Pão de forma',
     null, { timeout: 6000 });
   check('name updated', (await page.textContent('.row[data-id="M4"] .txt')).trim() === 'Pão de forma');
-  check('meta updated, got: ' + (await page.textContent('.row[data-id="M4"] .meta')).trim(),
-    (await page.textContent('.row[data-id="M4"] .meta')).trim() === 'Wickbold · 500 g');
-
-  // --- clearing both removes the line entirely ---
-  await page.click('.row[data-id="M4"] [data-action="rename-item"]');
-  await page.waitForSelector('#edit-name');
-  await page.fill('#edit-brand', '');
-  await page.fill('#edit-net', '');
-  await page.click('#edit-ok');
-  await page.waitForFunction(() => !document.querySelector('.row[data-id="M4"] .meta'),
-    null, { timeout: 6000 });
-  check('meta line removed when both cleared',
+  check('still no meta line — there is no product behind a hand-typed row',
     (await page.$$('.row[data-id="M4"] .meta')).length === 0);
 
   // --- missing-barcode marker ---
@@ -694,12 +688,16 @@ function handleScan(body) {
   check('scanned row does not flag it',
     !(await page.isVisible('.row[data-id="S2"] [data-nobc]')));
 
-  // --- attaching a known barcode replaces what was typed ---
+  // --- typing a barcode reveals brand/size, and on save the catalogue wins ---
   await page.click('.row[data-id="M4"] [data-action="fix-gtin"]');
   await page.waitForSelector('#edit-gtin');
   check('barcode field starts empty for a hand-typed item',
     (await page.inputValue('#edit-gtin')) === '');
+  check('brand/size still hidden before a code is entered',
+    await page.isHidden('#edit-product-fields'));
   await page.fill('#edit-gtin', '789 1000 100103');   // spaces must be tolerated
+  check('typing a code reveals brand/size',
+    await page.isVisible('#edit-product-fields'));
   await page.click('#edit-ok');
   await page.waitForFunction(
     () => document.querySelector('.row[data-id="M4"] .txt').textContent.includes('Condensado'),
@@ -711,14 +709,60 @@ function handleScan(body) {
     (await page.textContent('.row[data-id="M4"] .meta')).trim() === 'Nestlé · 395 g');
   check('missing-barcode marker cleared once linked',
     !(await page.isVisible('.row[data-id="M4"] [data-action="fix-gtin"]')));
-  check('barcode prefilled on reopen',
+  check('barcode prefilled on reopen, brand/size shown now that there is a code',
     await (async () => {
       await page.click('.row[data-id="M4"] [data-action="rename-item"]');
       await page.waitForSelector('#edit-gtin');
       const v = await page.inputValue('#edit-gtin');
+      const shown = await page.isVisible('#edit-product-fields');
       await page.click('#edit-cancel');
-      return v === '7891000100103';
+      return v === '7891000100103' && shown;
     })());
+
+  // --- scanning FROM the edit dialog shows the resolved product live, right
+  // in the fields — not just after the save round-trips ---
+  await page.click('.row[data-id="M4"] [data-action="rename-item"]');
+  await page.waitForSelector('#edit-gtin');
+  await page.evaluate(() => window.__setCodes(['7896004700236']));
+  await page.click('#edit-scan');
+  await page.waitForSelector('.scan-overlay');
+  await page.waitForFunction(
+    () => document.querySelector('#edit-name').value === 'Bolacha Maria',
+    null, { timeout: 6000 });
+  check('scan-from-edit fills the resolved name',
+    (await page.inputValue('#edit-name')) === 'Bolacha Maria');
+  check('scan-from-edit fills the resolved brand, got: ' + await page.inputValue('#edit-brand'),
+    (await page.inputValue('#edit-brand')) === 'Adria');
+  check('scan-from-edit fills the resolved code',
+    (await page.inputValue('#edit-gtin')) === '7896004700236');
+  check('scan-from-edit leaves size blank — this product has none on file',
+    (await page.inputValue('#edit-net')) === '');
+  check('brand/size visible now that a code just resolved',
+    await page.isVisible('#edit-product-fields'));
+  // Cancelled on purpose: M4 stays as the Leite Condensado row the rest of
+  // the test still relies on.
+  await page.click('#edit-cancel');
+
+  // --- price is editable from the pencil too, not just the row's own field ---
+  await page.click('.row[data-id="M4"] [data-action="rename-item"]');
+  await page.waitForSelector('#edit-price');
+  check('price field starts blank for an item with no price yet',
+    (await page.inputValue('#edit-price')) === '');
+  await page.locator('#edit-price').pressSequentially('999');
+  await page.waitForTimeout(80);
+  check('edit-modal price is cents-first too, got: ' + await page.inputValue('#edit-price'),
+    (await page.inputValue('#edit-price')) === '9,99');
+  await page.click('#edit-ok');
+  await page.waitForFunction(
+    () => document.querySelector('.row[data-id="M4"] .price-input').value === '9,99',
+    null, { timeout: 6000 });
+  check('price set through the edit dialog shows on the row',
+    (await page.inputValue('.row[data-id="M4"] .price-input')) === '9,99');
+  // M4's quantity was set to 3 earlier in this test, so the total follows it.
+  const m4Subtotal = (await page.textContent('.row[data-id="M4"] [data-subtotal]'))
+    .replace(/[  ]/g, ' ').trim();
+  check('line total follows the edit-dialog price too, got: ' + m4Subtotal,
+    m4Subtotal === 'R$ 29,97');
 
   // --- price: cents-first, digits fill in from the right ---
   const priceSel = '.row[data-id="I1"] .price-input';

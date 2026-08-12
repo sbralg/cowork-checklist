@@ -1586,9 +1586,10 @@ function netTextOf(it){
                    hasOwnSize ? it.net_unit : p.net_unit);
 }
 
-// Name + brand + size in one dialog. Resolves with the fields, or null if
-// dismissed. `net_text` goes to the API as typed and is parsed there.
+// Name + price + brand + size in one dialog. Resolves with the fields, or
+// null if dismissed. `net_text` goes to the API as typed and is parsed there.
 function itemEditModal(it){
+  const hasProduct = !!it.gtin;
   return new Promise(resolve => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -1597,12 +1598,28 @@ function itemEditModal(it){
         '<h3>Editar item</h3>' +
         '<label for="edit-name">Nome</label>' +
         '<input type="text" id="edit-name" value="' + esc(it.name || "") + '">' +
-        '<label for="edit-brand">Marca (opcional)</label>' +
-        '<input type="text" id="edit-brand" value="' +
-          esc((it.brand || (it.products && it.products.brand) || "")) + '">' +
-        '<label for="edit-net">Peso / volume (opcional)</label>' +
-        '<input type="text" id="edit-net" placeholder="ex: 380 g, 1 kg, 500 ml" value="' +
-          esc(netTextOf(it)) + '">' +
+        '<label for="edit-price">Preço</label>' +
+        '<div class="scan-fields">' +
+          '<div class="col grow">' +
+            '<span class="field"><span class="prefix">R$</span>' +
+              '<input class="num-input price-input" type="text" inputmode="numeric" ' +
+                'id="edit-price" aria-label="Preço unitário" placeholder="0,00" value="' +
+                esc(fmtPriceInput(it.price)) + '"></span>' +
+          '</div>' +
+        '</div>' +
+        // Brand and size only mean something once the row is tied to a
+        // barcode — a quick-add item is just a reminder to buy something,
+        // not a catalogue entry, so these stay out of the way until a code
+        // is attached (typed or scanned), matching the scan dialog's own
+        // "no product yet" shape.
+        '<div id="edit-product-fields"' + (hasProduct ? '' : ' hidden') + '>' +
+          '<label for="edit-brand">Marca (opcional)</label>' +
+          '<input type="text" id="edit-brand" value="' +
+            esc((it.brand || (it.products && it.products.brand) || "")) + '">' +
+          '<label for="edit-net">Peso / volume (opcional)</label>' +
+          '<input type="text" id="edit-net" placeholder="ex: 380 g, 1 kg, 500 ml" value="' +
+            esc(netTextOf(it)) + '">' +
+        '</div>' +
         '<label for="edit-gtin">Código de barras</label>' +
         '<div class="gtin-row">' +
           '<input type="text" id="edit-gtin" inputmode="numeric" ' +
@@ -1610,8 +1627,7 @@ function itemEditModal(it){
           '<button type="button" class="primary small alt" id="edit-scan" ' +
             'title="Ler código de barras">📷</button>' +
         '</div>' +
-        '<p class="hint">Ao reconhecer o código, nome, marca e peso passam a vir do ' +
-          'catálogo.</p>' +
+        '<p class="hint" id="edit-gtin-hint"></p>' +
         '<div class="modal-actions">' +
           '<button class="cancel" id="edit-cancel">Cancelar</button>' +
           '<button class="save" id="edit-ok">Salvar</button>' +
@@ -1620,6 +1636,28 @@ function itemEditModal(it){
     document.body.appendChild(backdrop);
 
     const nameEl = backdrop.querySelector("#edit-name");
+    const priceEl = backdrop.querySelector("#edit-price");
+    const brandEl = backdrop.querySelector("#edit-brand");
+    const netEl = backdrop.querySelector("#edit-net");
+    const gtinEl = backdrop.querySelector("#edit-gtin");
+    const productFieldsEl = backdrop.querySelector("#edit-product-fields");
+    const hintEl = backdrop.querySelector("#edit-gtin-hint");
+    wirePriceInput(priceEl);
+
+    // Marca/Peso show or hide as the code field goes from empty to not, in
+    // either direction — typing or scanning one in reveals them, clearing it
+    // goes back to "just a reminder". The hint follows the same state.
+    function syncProductFields(){
+      const has = !!gtinEl.value.trim();
+      productFieldsEl.hidden = !has;
+      hintEl.textContent = has
+        ? "Ao reconhecer o código, nome, marca e peso passam a vir do catálogo."
+        : "Sem código de barras — é só uma lembrança de compra. Leia o código " +
+          "para trazer nome, marca e peso do catálogo.";
+    }
+    syncProductFields();
+    gtinEl.addEventListener("input", syncProductFields);
+
     const close = (result) => {
       backdrop.remove();
       document.removeEventListener("keydown", onKey);
@@ -1630,10 +1668,11 @@ function itemEditModal(it){
       if(!name){ nameEl.focus(); return; }
       close({
         name,
-        brand: backdrop.querySelector("#edit-brand").value.trim(),
-        net_text: backdrop.querySelector("#edit-net").value.trim(),
+        price: centsToPrice(priceDigits(priceEl.value)),
+        brand: brandEl.value.trim(),
+        net_text: netEl.value.trim(),
         // Digits only: a barcode pasted with spaces or dashes still works.
-        gtin: backdrop.querySelector("#edit-gtin").value.replace(/\D/g, "")
+        gtin: gtinEl.value.replace(/\D/g, "")
       });
     };
     function onKey(e){
@@ -1655,7 +1694,20 @@ function itemEditModal(it){
       // The camera overlay sits above this dialog, which stays open
       // underneath so nothing typed so far is lost.
       const code = await openScanner();
-      if(code) backdrop.querySelector("#edit-gtin").value = code;
+      if(!code) return;
+      gtinEl.value = code;
+      syncProductFields();
+      // Best-effort: show exactly what will be saved, right here, rather
+      // than leaving the fields as whatever was typed before and letting
+      // the catalogue silently win only once the save round-trips.
+      try{
+        const found = await api("product_lookup", { gtin: code });
+        if(found.found){
+          nameEl.value = found.product.name || "";
+          brandEl.value = tidyShouted(found.product.brand || "");
+          netEl.value = fmtNetQty(found.product.net_qty, found.product.net_unit);
+        }
+      }catch(_){ /* the save-time lookup still resolves it either way */ }
     });
     nameEl.focus();
     nameEl.select();
@@ -1833,7 +1885,7 @@ function renderItems(list, items){
       if(edited === null) return;
       try{
         const data = await api("shopping_item_update", {
-          id: it.id, name: edited.name, brand: edited.brand,
+          id: it.id, name: edited.name, price: edited.price, brand: edited.brand,
           net_text: edited.net_text, gtin: edited.gtin
         });
         // The API returns the stored row, with the size normalized out of
@@ -1841,6 +1893,9 @@ function renderItems(list, items){
         // input values.
         if(data.item) Object.assign(it, data.item);
         redrawItemText(row, it);
+        const priceEl = row.querySelector(".price-input");
+        if(priceEl) priceEl.value = fmtPriceInput(it.price);
+        refreshLineTotal(row, it);
         recomputeTotals();
       }catch(err){
         if(err.unauthorized){ handleAuthError(err, loadLists); return; }
