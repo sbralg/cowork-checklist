@@ -267,6 +267,17 @@ function handleScan(body) {
       state.items.push(item);
       resp = { item };
     } else if (body.action === 'shopping_item_update' && !('name' in body) &&
+               !('price' in body) && ('quantity' in body)) {
+      // A bare quantity bump: the steppers, and the "one more of that" a
+      // repeat scan or a merge sends.
+      const it = state.items.find(i => i.id === body.id);
+      if (it) it.quantity = body.quantity;
+      resp = { ok: true, item: it ? { ...it } : null };
+    } else if (body.action === 'shopping_item_delete') {
+      const idx = state.items.findIndex(i => i.id === body.id);
+      if (idx !== -1) state.items.splice(idx, 1);
+      resp = { ok: true };
+    } else if (body.action === 'shopping_item_update' && !('name' in body) &&
                ('price' in body)) {
       const it = state.items.find(i => i.id === body.id);
       if (it) it.price = body.price;
@@ -517,35 +528,35 @@ function handleScan(body) {
   // Put the good lens back for the remaining scenarios.
   await page.evaluate(() => localStorage.setItem('scan_camera_id', 'main'));
 
-  // --- steady valid code still merges, through the dialog ---
+  // --- a code already on the list is "one more of that": the unit lands on
+  // the existing row with NO dialog at all. A product that has already been
+  // confirmed once has nothing left to confirm, and asking again on every
+  // repeat scan is what made picking up a second box feel like adding a
+  // stranger. ---
   await page.evaluate(() => window.__setCodes(['7891000100103']));
   await page.click('#scan-item-btn');
-  await page.waitForSelector('#scan-price', { timeout: 6000 });
-  check('a product already on the list still opens the dialog, got: ' +
-      await page.inputValue('#scan-name'),
-    (await page.inputValue('#scan-name')) === 'Leite Condensado Integral moça');
-  // --- correcting the brand of a KNOWN product, while merging ---
-  await page.fill('#scan-brand', 'Nestlé');
-  await page.click('#scan-ok');
   await page.waitForFunction(
     () => document.querySelector('.row[data-id="S2"] .qty-input').value === '3',
     null, { timeout: 6000 });
-  check('merge adds the dialog quantity to the existing row',
+  check('repeat scan adds a unit to the existing row',
     await page.inputValue('.row[data-id="S2"] .qty-input') === '3');
-  check('still 2 rows after merge', await rows() === 2);
-  check('a blank price leaves the existing one alone, got: ' +
+  check('no dialog at all for a repeat scan', (await page.$$('.modal-card')).length === 0);
+  check('still 2 rows after the repeat scan', await rows() === 2);
+  check('the repeat scan leaves the existing price alone, got: ' +
       await page.inputValue('.row[data-id="S2"] .price-input'),
     (await page.inputValue('.row[data-id="S2"] .price-input')) === '6,75');
-  // The corrected brand is an override on THIS row (not a catalogue
-  // rewrite), same as the pencil-edit dialog would make — shown without a
-  // refetch, and sent as its own patch rather than the full edit-modal shape.
-  check('corrected brand shows on the merged row without a refetch, got: ' +
-      (await page.textContent('.row[data-id="S2"] .meta')).trim(),
-    (await page.textContent('.row[data-id="S2"] .meta')).trim() === 'Nestlé · 1 L');
-  check('exactly one item-level patch sent for the merge correction, got: ' +
-      JSON.stringify(state.itemUpdates),
+  // The row can be anywhere, including off-screen, so a silent bump would
+  // read as "my scan did nothing" — it gets scrolled to, lit up, and the
+  // toast spells out the before → after.
+  check('the row is lit up so the change is visible',
+    await page.locator('.row[data-id="S2"]').evaluate(el => el.classList.contains('flash')));
+  check('the toast names the before → after, got: ' + await page.textContent('#list-toast'),
+    /2 → 3/.test(await page.textContent('#list-toast')) &&
+    /Leite Condensado/.test(await page.textContent('#list-toast')));
+  check('only the quantity is patched, got: ' + JSON.stringify(state.itemUpdates),
     state.itemUpdates.length === 1 && state.itemUpdates[0].id === 'S2' &&
-    state.itemUpdates[0].brand === 'Nestlé' && !('name' in state.itemUpdates[0]));
+    state.itemUpdates[0].quantity === 3 &&
+    !('name' in state.itemUpdates[0]) && !('brand' in state.itemUpdates[0]));
   state.itemUpdates.length = 0;
 
   // --- unknown but VALID code still prompts, after the camera closes ---

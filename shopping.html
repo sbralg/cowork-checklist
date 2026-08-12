@@ -976,7 +976,7 @@ function hideListToast(){
   clearTimeout(listToastTimer);
 }
 
-// Shared by the scan-confirm dialog (adding or merging a scanned product)
+// Shared by the scan-confirm dialog (adding a newly scanned product)
 // and the pencil/rescan edit dialog (editing an existing row) — same fields,
 // same order, so the two can never drift into feeling like different tools.
 // Confirms WHICH product a barcode resolved to — the safety check that
@@ -1941,29 +1941,22 @@ function renderItems(list, items){
         );
         if(!merge) return true;
       }
+      // Same scroll-flash-and-toast a plain repeat scan gets — this row is
+      // about to vanish, so the feedback has to be on the row that survives.
+      // Its whole quantity moves over when it never had a code of its own
+      // (nothing was decided about it, so nothing is lost); a row that DID
+      // have one contributes a single unit, matching what the prompt above
+      // offered.
+      if(!(await addUnitsToRow(existing, hadOwnCode ? 1 : qtyOf(it)))) return true;
       try{
-        const addQty = hadOwnCode ? 1 : qtyOf(it);
-        const newQty = qtyOf(existing) + addQty;
-        await api("shopping_item_update", { id: existing.id, quantity: newQty });
-        existing.quantity = newQty;
-        const existingRow = root.querySelector('.row[data-id="' + existing.id + '"]');
-        if(existingRow){
-          existingRow.querySelector(".qty-input").value = fmtQty(qtyOf(existing));
-          refreshLineTotal(existingRow, existing);
-        }
         await api("shopping_item_delete", { id: it.id });
         const idx = items.indexOf(it);
         if(idx !== -1) items.splice(idx, 1);
         row.remove();
         recomputeTotals();
-        // Scrolled into view and lit up so the quantity that just changed
-        // is obvious, plus a toast spelling out why this row changed
-        // instead of a new one showing up.
-        flashRow(existing.id);
-        listToast("Já estava na lista — " + existing.name + "  ×" + fmtQty(existing.quantity));
       }catch(err){
         if(err.unauthorized){ handleAuthError(err, loadLists); return true; }
-        alert("Não foi possível salvar. Tente novamente.");
+        alert("Não foi possível remover o item duplicado. Tente novamente.");
       }
       return true;
     }
@@ -2154,10 +2147,56 @@ function renderItems(list, items){
     setTimeout(() => row.classList.remove("flash"), 1600);
   }
 
+  // The shared tail of every "this is one more of that" path: re-scanning a
+  // code already on the list, and attaching a code that turns out to belong
+  // to a different row. Updates the row in place and fires the API behind
+  // it, reverting on failure, like every other mutating action here.
+  // Scrolls to the row, lights it up, and names the before → after in a
+  // toast — the quantity can easily change off-screen, and a silent bump
+  // reads as "my scan did nothing". Resolves true once it's saved.
+  async function addUnitsToRow(target, addQty){
+    const prevQty = qtyOf(target);
+    const newQty = prevQty + addQty;
+    const targetRow = root.querySelector('.row[data-id="' + target.id + '"]');
+    const paint = (qty) => {
+      target.quantity = qty;
+      if(targetRow){
+        targetRow.querySelector(".qty-input").value = fmtQty(qty);
+        refreshLineTotal(targetRow, target);
+      }
+      recomputeTotals();
+    };
+    paint(newQty);
+    flashRow(target.id);
+    listToast("Já estava na lista — " + target.name + "  " +
+      fmtQty(prevQty) + " → " + fmtQty(newQty));
+    try{
+      await api("shopping_item_update", { id: target.id, quantity: newQty });
+      return true;
+    }catch(err){
+      if(err.unauthorized){ handleAuthError(err, loadLists); return false; }
+      paint(prevQty);
+      listToast("Falha ao salvar", true);
+      return false;
+    }
+  }
+
   // One scanned barcode: resolve it, and only stop to ask when neither the
   // local catalogue nor Open Food Facts knows the code. The name typed then
   // is stored against the barcode, so the next scan of it never asks again.
   async function handleScannedCode(code){
+    // Already on the list? Then this is "one more of that", not a new line.
+    // Add the unit right here: no dialog, no lookup — a row already
+    // carrying this code has nothing left to resolve, and in an aisle a
+    // silent +1 beats confirming a product that's demonstrably already
+    // been confirmed once. Correcting its name, brand or price is still a
+    // tap away on the pencil; asking for them on every repeat scan is what
+    // made picking up a second box feel like adding a stranger.
+    // A purchased row is deliberately not matched — that one is in the
+    // cart already, so scanning it again is a genuinely new line.
+    const already = items.find(i => i.gtin === code && !i.purchased);
+    if(already){ await addUnitsToRow(already, 1); return; }
+
     // Resolve FIRST and write nothing yet: the dialog needs to show which
     // product this is before anything lands in the list. A local hit is
     // instant; a code that has to go out to Open Food Facts can take a
@@ -2235,8 +2274,11 @@ function renderItems(list, items){
       const patch = { id: data.item.id };
       // A brand-new row already carries the corrected name — it was sent as
       // `name` above, and the insert used it verbatim. Only a MERGE leaves it
-      // stale, since that path only ever touches quantity and price. Brand
-      // needs the write either way: shopping_item_scan never sets it at all.
+      // stale, since that path only ever touches quantity and price. Reaching
+      // here at all means the API merged into a row this page didn't know
+      // about (added on another device since the list loaded) — a local
+      // match never gets this far, having been handled before the dialog.
+      // Brand needs the write either way: shopping_item_scan never sets it.
       if(data.merged && confirmed.name !== (product.name || "")) patch.name = confirmed.name;
       if(confirmed.brand !== tidyShouted(product.brand || "")) patch.brand = confirmed.brand;
       if("name" in patch || "brand" in patch){
