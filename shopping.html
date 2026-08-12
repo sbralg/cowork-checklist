@@ -1742,12 +1742,13 @@ function itemRowHtml(it){
         (meta ? '<p class="meta">' + esc(meta) + '</p>' : '') +
       '</span>' +
     '</label>' +
-    // Always present, not just when the code is missing: the same camera
-    // opens straight to the scanner either way, to attach a first barcode
-    // or to rescan and correct a wrong one. Small and muted until there's a
-    // code to fix — once there is, it's a deliberate action, not a nudge.
-    '<button class="icon-btn' + (it.gtin ? '' : ' nobc') + '" data-action="scan-item" title="' +
-      (it.gtin ? 'Reescanear código de barras' : 'Ler código de barras') + '">📷</button>' +
+    // Only for a row with no code of its own yet — opens the scanner
+    // straight away to attach one. A row that's already linked keeps its
+    // code the same way any other decided field does: through the pencil,
+    // whose dialog has its own scan button for a deliberate rescan.
+    '<button class="icon-btn nobc" data-action="scan-item"' +
+      (it.gtin ? ' hidden' : '') +
+      ' title="Ler código de barras">📷</button>' +
     '<button class="icon-btn" data-action="rename-item" title="Editar">✎</button>' +
     '<button class="icon-btn danger" data-action="delete-item" title="Remover">✕</button>' +
     '<div class="fields">' +
@@ -1813,10 +1814,7 @@ function renderItems(list, items){
   function redrawItemText(row, it){
     row.querySelector(".txt").textContent = it.name;
     const scanBtn = row.querySelector('[data-action="scan-item"]');
-    if(scanBtn){
-      scanBtn.classList.toggle("nobc", !it.gtin);
-      scanBtn.title = it.gtin ? "Reescanear código de barras" : "Ler código de barras";
-    }
+    if(scanBtn) scanBtn.hidden = !!it.gtin;
     const meta = productMeta(it);
     let metaEl = row.querySelector(".meta");
     if(!meta){ if(metaEl) metaEl.remove(); return; }
@@ -1903,9 +1901,57 @@ function renderItems(list, items){
         const step = Number(btn.getAttribute("data-step"));
         setQty(Math.max(qtyOf(it) + step, 1));
       }));
+    // A code that just got attached (typed, scanned from the row icon, or
+    // rescanned from inside the dialog) might belong to a DIFFERENT row
+    // already in the list — two rows can't share a barcode. This item had
+    // no code of its own yet is exactly what a fresh scan from the "＋" flow
+    // would merge on sight, so it merges the same way, silently. One that
+    // already had its OWN different code is a correction to something
+    // already decided, so it asks before folding it into the other row and
+    // discarding this one. Returns true if it handled the save (merged,
+    // asked-and-declined, or asked-and-failed) — false means the caller
+    // should save normally.
+    async function mergeIntoExistingIfCollision(edited){
+      if(!edited.gtin || edited.gtin === it.gtin) return false;
+      const existing = items.find(i =>
+        i.id !== it.id && i.gtin === edited.gtin && !i.purchased);
+      if(!existing) return false;
+
+      const hadOwnCode = !!it.gtin;
+      if(hadOwnCode){
+        const merge = await confirmModal(
+          'O código lido já é de "' + existing.name + '" (' + fmtQty(qtyOf(existing)) +
+            ' na lista). Somar 1 unidade a esse item e remover "' + it.name + '"?',
+          "Somar e remover"
+        );
+        if(!merge) return true;
+      }
+      try{
+        const addQty = hadOwnCode ? 1 : qtyOf(it);
+        const newQty = qtyOf(existing) + addQty;
+        await api("shopping_item_update", { id: existing.id, quantity: newQty });
+        existing.quantity = newQty;
+        const existingRow = root.querySelector('.row[data-id="' + existing.id + '"]');
+        if(existingRow){
+          existingRow.querySelector(".qty-input").value = fmtQty(qtyOf(existing));
+          refreshLineTotal(existingRow, existing);
+        }
+        await api("shopping_item_delete", { id: it.id });
+        const idx = items.indexOf(it);
+        if(idx !== -1) items.splice(idx, 1);
+        row.remove();
+        recomputeTotals();
+        flashRow(existing.id);
+      }catch(err){
+        if(err.unauthorized){ handleAuthError(err, loadLists); return true; }
+        alert("Não foi possível salvar. Tente novamente.");
+      }
+      return true;
+    }
     // Shared by the pencil and the camera below: both end in the same edit
     // dialog, so both save the result the same way.
     async function saveItemEdit(edited){
+      if(await mergeIntoExistingIfCollision(edited)) return;
       try{
         const patch = {
           id: it.id, name: edited.name, price: edited.price,

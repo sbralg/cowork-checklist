@@ -233,6 +233,12 @@ function handleScan(body) {
       // Recorded so the test can assert both that it is sent when edited and
       // that it is NOT sent otherwise.
       state.upserts.push({ ...body });
+      // Mirrors the real products table: product_lookup reads from the same
+      // place this writes to, so a barcode registered here has to become
+      // resolvable by product_lookup too — otherwise a later rescan of it
+      // would see "unknown" here when the real API would not.
+      KNOWN_PRODUCTS[body.gtin] = { name: body.name, brand: body.brand ?? '',
+        net_qty: body.net_qty ?? null, net_unit: body.net_unit ?? null };
       resp = { product: { gtin: body.gtin, name: body.name, brand: body.brand ?? null,
         net_qty: body.net_qty ?? null, net_unit: body.net_unit ?? null } };
     } else if (body.action === 'shopping_item_add') {
@@ -692,15 +698,13 @@ function handleScan(body) {
   check('still no meta line — there is no product behind a hand-typed row',
     (await page.$$('.row[data-id="M4"] .meta')).length === 0);
 
-  // --- the camera icon replaces the old warning triangle, on every row —
-  // small and muted until there's a code to fix, full weight once there is
-  // one, since it's then a deliberate correction rather than a nudge ---
-  check('barcode-less row shows a muted camera with an "attach" title',
-    await page.locator('.row[data-id="M4"] [data-action="scan-item"]').evaluate(el =>
-      el.classList.contains('nobc') && el.title === 'Ler código de barras'));
-  check('a scanned row shows the same icon, full weight, with a "rescan" title',
-    await page.locator('.row[data-id="S2"] [data-action="scan-item"]').evaluate(el =>
-      !el.classList.contains('nobc') && el.title === 'Reescanear código de barras'));
+  // --- the camera icon replaces the old warning triangle, but only for a
+  // row with no code of its own yet — a linked row keeps its code through
+  // the pencil, whose dialog has its own scan button for a rescan ---
+  check('barcode-less row shows the camera',
+    await page.isVisible('.row[data-id="M4"] [data-action="scan-item"]'));
+  check('a scanned row hides it',
+    !(await page.isVisible('.row[data-id="S2"] [data-action="scan-item"]')));
 
   // --- tapping the camera opens the scanner immediately, no dialog first —
   // and whatever it resolves to lands prefilled in the same review dialog
@@ -727,9 +731,8 @@ function handleScan(body) {
     (await page.textContent('.row[data-id="M4"] .txt')).trim() === 'Suco de Uva Aurora');
   check('brand shown on the row, got: ' + (await page.textContent('.row[data-id="M4"] .meta')).trim(),
     (await page.textContent('.row[data-id="M4"] .meta')).trim() === 'Aurora');
-  check('camera un-mutes once linked, title becomes "rescan"',
-    await page.locator('.row[data-id="M4"] [data-action="scan-item"]').evaluate(el =>
-      !el.classList.contains('nobc') && el.title === 'Reescanear código de barras'));
+  check('camera hides once the row is linked to a code',
+    !(await page.isVisible('.row[data-id="M4"] [data-action="scan-item"]')));
 
   // --- rescanning from INSIDE the edit dialog (opened via the pencil, not
   // the row's own camera) shows the newly resolved product live too — the
@@ -905,9 +908,8 @@ function handleScan(body) {
   check('edit of a barcoded item stores brand/size overrides, got: ' +
       (await page.textContent('.row[data-id="M4"] .meta')).trim(),
     (await page.textContent('.row[data-id="M4"] .meta')).trim() === 'Nestlé BR · 800 g');
-  check('the barcode survives the edit, camera still reads "rescan"',
-    await page.locator('.row[data-id="M4"] [data-action="scan-item"]').evaluate(el =>
-      el.title === 'Reescanear código de barras'));
+  check('the barcode survives the edit, camera stays hidden',
+    !(await page.isVisible('.row[data-id="M4"] [data-action="scan-item"]')));
 
   // --- correcting a KNOWN product on its very FIRST scan (a fresh insert,
   // not a merge) — the name goes through as part of the insert itself, so
@@ -947,6 +949,83 @@ function handleScan(body) {
     state.itemUpdates[0].brand === 'Piraquê' && !('name' in state.itemUpdates[0]));
   check('no catalogue write for a correction on a product that already exists',
     state.upserts.every(u => u.gtin !== '7896004700236'));
+
+  // --- two rows can't share a barcode: a code that resolves to ANOTHER
+  // row already in the list merges into it instead of creating a
+  // duplicate. I1 ("Café") has no code of its own yet, so attaching one
+  // that turns out to already be S2's merges SILENTLY — the same way a
+  // fresh scan from the "+" flow already merges on sight. ---
+  check('I1 shows the camera — it has no code yet',
+    await page.isVisible('.row[data-id="I1"] [data-action="scan-item"]'));
+  const rowsBeforeSilentMerge = await rows();
+  await page.evaluate(() => window.__setCodes(['7891000100103']));
+  await page.click('.row[data-id="I1"] [data-action="scan-item"]');
+  await page.waitForSelector('.scan-overlay');
+  await page.waitForSelector('#edit-name', { timeout: 6000 });
+  check('resolved product shown before saving, got: ' + await page.inputValue('#edit-name'),
+    (await page.inputValue('#edit-name')) === 'Leite Condensado Integral moça');
+  await page.click('#edit-ok');
+  await page.waitForFunction(
+    (n) => document.querySelectorAll('.row[data-id]').length === n,
+    rowsBeforeSilentMerge - 1, { timeout: 6000 });
+  check('no confirm dialog for an item that had no code of its own',
+    (await page.$$('.modal-card')).length === 0);
+  check('I1 is gone, merged away', (await page.$$('.row[data-id="I1"]')).length === 0);
+  check('its quantity landed on the existing item, got: ' +
+      await page.inputValue('.row[data-id="S2"] .qty-input'),
+    (await page.inputValue('.row[data-id="S2"] .qty-input')) === '4');
+
+  // --- a row that already has ITS OWN code, rescanned (from inside the edit
+  // dialog) to one that turns out to belong to someone else: a correction
+  // to something already decided, so it asks before merging rather than
+  // merging silently ---
+  await page.click('.row[data-id="M4"] [data-action="rename-item"]');
+  await page.waitForSelector('#edit-gtin');
+  await page.evaluate(() => window.__setCodes(['7899999999999']));
+  await page.click('#edit-scan');
+  await page.waitForSelector('.scan-overlay');
+  await page.waitForFunction(
+    () => document.querySelector('#edit-name').value === 'Pão caseiro',
+    null, { timeout: 6000 });
+  await page.click('#edit-ok');
+  await page.waitForSelector('.modal-card p', { timeout: 6000 });
+  const warnText = await page.textContent('.modal-card p');
+  check('warns which item the code belongs to, got: ' + warnText,
+    /Pão caseiro/.test(warnText) && /Leite Moça lata/.test(warnText));
+
+  // Cancelling leaves both rows exactly as they were — including M4's OWN
+  // code, which the scan never got to apply.
+  const rowsBeforeCancel = await rows();
+  await page.click('#confirm-cancel');
+  await page.waitForTimeout(200);
+  check('cancelling the merge changes the row count not at all, got: ' + await rows(),
+    (await rows()) === rowsBeforeCancel);
+  check('M4 keeps its own name',
+    (await page.textContent('.row[data-id="M4"] .txt')).trim() === 'Leite Moça lata');
+  check('M4 keeps its own code, camera stays hidden',
+    !(await page.isVisible('.row[data-id="M4"] [data-action="scan-item"]')));
+  check('S3 quantity unchanged', (await page.inputValue('.row[data-id="S3"] .qty-input')) === '1');
+
+  // Same scan again, this time accepted.
+  await page.click('.row[data-id="M4"] [data-action="rename-item"]');
+  await page.waitForSelector('#edit-gtin');
+  await page.evaluate(() => window.__setCodes(['7899999999999']));
+  await page.click('#edit-scan');
+  await page.waitForSelector('.scan-overlay');
+  await page.waitForFunction(
+    () => document.querySelector('#edit-name').value === 'Pão caseiro',
+    null, { timeout: 6000 });
+  const rowsBeforeAccept = await rows();
+  await page.click('#edit-ok');
+  await page.waitForSelector('#confirm-ok', { timeout: 6000 });
+  await page.click('#confirm-ok');
+  await page.waitForFunction(
+    (n) => document.querySelectorAll('.row[data-id]').length === n,
+    rowsBeforeAccept - 1, { timeout: 6000 });
+  check('M4 is gone, merged away', (await page.$$('.row[data-id="M4"]')).length === 0);
+  check('one unit added to the item the code actually belongs to, got: ' +
+      await page.inputValue('.row[data-id="S3"] .qty-input'),
+    (await page.inputValue('.row[data-id="S3"] .qty-input')) === '2');
 
   await page.screenshot({ path: path.join(SHOTS, 'after_scan.png'), fullPage: true });
   await browser.close();
