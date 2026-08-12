@@ -326,9 +326,13 @@ function handleScan(body) {
   // only — repeating it in both would read as the dialog contradicting itself.
   check('dialog shows the brand, got: ' + await page.textContent('.scan-meta'),
     (await page.textContent('.scan-meta')).trim() === 'Casa de Bento');
+  // 1000 ml is stored, but the box says 1 L — the prefill has to read like the
+  // packaging, not like our storage units, or every scan looks wrong.
   check('package size is prefilled from the catalogue, got: ' +
-      await page.inputValue('#scan-net'),
-    (await page.inputValue('#scan-net')) === '1 L');
+      await page.inputValue('#scan-net-qty') + ' / ' +
+      await page.inputValue('#scan-net-unit'),
+    (await page.inputValue('#scan-net-qty')) === '1' &&
+    (await page.inputValue('#scan-net-unit')) === 'L');
   check('known product has no name field', (await page.$$('#scan-name')).length === 0);
   check('cursor starts in the price field',
     await page.evaluate(() => document.activeElement.id) === 'scan-price');
@@ -365,6 +369,27 @@ function handleScan(body) {
   check('price field and its R$ chip read as one control', geom.matchesPrefix);
   check('price and quantity sit on one line', geom.alignedWithQty);
   check('price field fills the rest of the row', geom.fillsColumn);
+
+  // Same exposure for the package-size row: its amount box is a .num-input
+  // inside a rule set that also styles full-width text inputs, and the unit
+  // picker is the first <select> on the page, so nothing else would notice a
+  // specificity clash wrapping them onto two lines or collapsing the select.
+  const packGeom = await page.evaluate(() => {
+    const box = s => document.querySelector(s).getBoundingClientRect();
+    const card = box('.modal-card'), amt = box('#scan-net-qty'), unit = box('#scan-net-unit');
+    return {
+      insideCard: unit.right <= card.right && amt.left >= card.left,
+      oneLine: Math.abs(amt.bottom - unit.bottom) < 3,
+      unitVisible: unit.width > 40,
+      amountVisible: amt.width > 40,
+      notOverlapping: amt.right <= unit.left + 1,
+    };
+  });
+  check('package size row stays inside the dialog', packGeom.insideCard);
+  check('package amount and unit sit on one line', packGeom.oneLine);
+  check('unit picker is not collapsed', packGeom.unitVisible);
+  check('package amount field is not collapsed', packGeom.amountVisible);
+  check('package amount does not overlap the unit picker', packGeom.notOverlapping);
 
   await page.click('.scan-fields .step-btn[data-step="1"]');
   await page.waitForTimeout(100);
@@ -479,20 +504,29 @@ function handleScan(body) {
       await page.waitForTimeout(200);
       return (await page.$$('#scan-name')).length === 1;
     })());
-  check('unknown code offers an empty size field',
-    (await page.inputValue('#scan-net')) === '');
+  check('unknown code offers empty size fields',
+    (await page.inputValue('#scan-net-qty')) === '' &&
+    (await page.inputValue('#scan-net-unit')) === '');
   await page.fill('#scan-name', 'Pão caseiro');
 
-  // A size that can't be read stops the dialog rather than being dropped —
-  // the whole point of asking is that the recipe side gets a usable number.
-  await page.fill('#scan-net', 'meia dúzia');
+  // The amount field takes digits and one separator only, like the item
+  // quantity — a package size is a decimal, not free prose.
+  await page.fill('#scan-net-qty', '');
+  await page.locator('#scan-net-qty').pressSequentially('1a,5x');
+  await page.waitForTimeout(120);
+  check('size amount keeps only digits, got: ' + await page.inputValue('#scan-net-qty'),
+    (await page.inputValue('#scan-net-qty')) === '1,5');
+
+  // An amount with no unit is refused rather than guessed: "1,5" could be
+  // grams or kilos, and guessing corrupts the number the recipes add up.
   page.once('dialog', d => d.dismiss());
   await page.click('#scan-ok');
   await page.waitForTimeout(250);
-  check('unreadable size keeps the dialog open', (await page.$$('#scan-net')).length === 1);
-  check('unreadable size is never sent', state.upserts.length === 0);
+  check('amount without a unit keeps the dialog open',
+    (await page.$$('#scan-net-qty')).length === 1);
+  check('amount without a unit is never sent', state.upserts.length === 0);
 
-  await page.fill('#scan-net', '1,5 kg');
+  await page.selectOption('#scan-net-unit', 'kg');
   await page.click('#scan-ok');
   await page.waitForFunction(() => document.querySelectorAll('.row[data-id]').length === 3,
     null, { timeout: 6000 });

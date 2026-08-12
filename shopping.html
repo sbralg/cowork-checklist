@@ -226,6 +226,14 @@
   .scan-fields .col.grow .field{width:100%}
   .scan-fields .col.grow .num-input{flex:1 1 auto;width:auto;min-width:0}
   .scan-fields .qty-field .num-input{width:44px}
+  /* Unit picker beside the package amount. Matched to .num-input's box rather
+     than the full-width text-input rule so the pair reads as one control, and
+     sized for a thumb (a native select opens the platform picker on a phone). */
+  .modal-card select{
+    font:inherit;font-size:15px;padding:9px 10px;border-radius:10px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+  }
+  .scan-fields .unit-col select{width:84px}
   .modal-actions{display:flex;gap:8px;justify-content:flex-end}
   .modal-actions button{
     font:inherit;font-weight:600;font-size:14px;padding:10px 16px;border-radius:10px;
@@ -966,9 +974,13 @@ function hideListToast(){
 function scanConfirmModal(opts){
   const known = !!opts.product;
   const p = opts.product || {};
-  // Brand only: the size sits in its own editable field below, so repeating
+  // Brand only: the size sits in its own editable fields below, so repeating
   // it here would just look like the dialog disagreeing with itself.
   const meta = tidyShouted(p.brand || "");
+  // The stored pair, split back into what the label on the box actually says
+  // (1500 g reads as 1,5 kg), so a prefilled value looks like the packaging
+  // rather than like our storage units.
+  const pack = netQtyToFields(p.net_qty, p.net_unit);
   return new Promise(resolve => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -982,16 +994,31 @@ function scanConfirmModal(opts){
           : '<label for="scan-name">Nome do produto</label>' +
             '<input type="text" id="scan-name" placeholder="ex: Arroz 5 kg">' +
             '<p class="scan-meta">Código ' + esc(opts.gtin) + ' — ainda não conhecido.</p>') +
-        // Always shown, prefilled from the catalogue when it knows. Blank for
-        // a brand new code, and also for an Open Food Facts entry whose
-        // `quantity` field was empty or unparseable. Without it a barcode can
-        // never answer "quanto disso eu tenho?", because the row's quantity
-        // counts PACKAGES. Editable even when prefilled because OFF's sizes
-        // are crowd-typed and never re-checked once cached — the person
-        // holding the box is the only one who can catch a shrunk package.
-        '<label for="scan-net">Peso / volume do pacote (opcional)</label>' +
-        '<input type="text" id="scan-net" placeholder="ex: 1,5 kg, 500 ml, 6 un" ' +
-          'value="' + esc(fmtNetQty(p.net_qty, p.net_unit)) + '">' +
+        // Amount + unit as two controls, mirroring how the pair is STORED
+        // (net_qty + net_unit) instead of asking for prose and parsing it
+        // back. Always shown, prefilled from the catalogue when it knows —
+        // blank for a brand new code, and also for an Open Food Facts entry
+        // whose `quantity` field was empty or unparseable. Without it a
+        // barcode can never answer "quanto disso eu tenho?", because the
+        // row's quantity counts PACKAGES. Editable even when prefilled
+        // because OFF's sizes are crowd-typed and never re-checked once
+        // cached — the person holding the box is the only one who can catch
+        // a shrunk package.
+        '<label for="scan-net-qty">Peso / volume do pacote (opcional)</label>' +
+        '<div class="scan-fields">' +
+          '<div class="col grow">' +
+            '<span class="field">' +
+              '<input class="num-input" type="text" inputmode="decimal" id="scan-net-qty" ' +
+                'aria-label="Quantidade do pacote" placeholder="0" ' +
+                'value="' + esc(pack.qty) + '">' +
+            '</span>' +
+          '</div>' +
+          '<div class="col unit-col">' +
+            '<select id="scan-net-unit" aria-label="Unidade do pacote">' +
+              unitOptions(pack.unit) +
+            '</select>' +
+          '</div>' +
+        '</div>' +
         '<p class="hint">Quanto vem em UM pacote — é o que permite somar o ' +
           'total disponível para as receitas. Corrija se estiver errado.</p>' +
         '<div class="scan-fields">' +
@@ -1022,11 +1049,14 @@ function scanConfirmModal(opts){
     document.body.appendChild(backdrop);
 
     const nameEl = backdrop.querySelector("#scan-name");
-    const netEl = backdrop.querySelector("#scan-net");
-    const netWas = netEl.value.trim(); // what the catalogue said, to spot an edit
+    const netQtyEl = backdrop.querySelector("#scan-net-qty");
+    const netUnitEl = backdrop.querySelector("#scan-net-unit");
     const qtyEl = backdrop.querySelector("#scan-qty");
     const priceEl = backdrop.querySelector("#scan-price");
     wireQtyInput(qtyEl);
+    // Same digits-and-one-separator rule as the item quantity: a package size
+    // is a decimal amount too, and type=number would let "e"/"+"/"-" through.
+    wireQtyInput(netQtyEl);
     wirePriceInput(priceEl);
     backdrop.querySelectorAll(".step-btn").forEach(btn =>
       btn.addEventListener("click", () => {
@@ -1044,19 +1074,22 @@ function scanConfirmModal(opts){
       // An unknown code has to be named before it can be stored.
       if(nameEl && !name){ nameEl.focus(); return; }
       // Leaving the size blank is fine — standing in an aisle is no place to
-      // be blocked. Typing one that can't be read is a mistake worth stopping
-      // on, though, rather than silently dropping the thing they just typed.
-      // Only a CHANGED value counts, so re-scanning a product whose size is
-      // already right doesn't rewrite the catalogue row on every scan.
-      // Emptying the field means "leave it as it was", not "erase it" — the
-      // way to fix a wrong size is to type the right one.
+      // be blocked. An amount with no unit is NOT fine: "1" could be a gram
+      // or a kilo, and guessing would corrupt exactly the number the recipe
+      // side exists to add up. Only a CHANGED pair counts, so re-scanning a
+      // product whose size is already right doesn't rewrite the catalogue row
+      // on every scan; clearing the amount means "leave it as it was", not
+      // "erase it" — the way to fix a wrong size is to enter the right one.
       let size = null;
-      const netNow = netEl.value.trim();
-      if(netNow && netNow !== netWas){
-        size = parseNetText(netNow);
+      const netQtyNow = netQtyEl.value.trim();
+      const netUnitNow = netUnitEl.value;
+      if(netQtyNow && (netQtyNow !== pack.qty || netUnitNow !== pack.unit)){
+        size = fieldsToNetQty(netQtyNow, netUnitNow);
         if(!size){
-          alert("não entendi o peso/volume — use algo como 1,5 kg, 500 ml ou 6 un");
-          netEl.focus();
+          alert(netUnitNow
+            ? "quantidade do pacote inválida"
+            : "escolha a unidade do pacote (kg, g, L, ml ou un)");
+          (netUnitNow ? netQtyEl : netUnitEl).focus();
           return;
         }
       }
@@ -1453,27 +1486,50 @@ function fmtNetQty(qty, unit){
   return n.toLocaleString("pt-BR") + " " + unit;
 }
 
-// The inverse of fmtNetQty: free text as typed on a phone — "380 g", "1,5 L",
-// "6 un" — normalized to the g / ml / un pair the catalogue stores. Parsed
-// here rather than server-side because product_upsert takes the pair, not the
-// text; the grammar is deliberately identical to checklist-api's
-// parseNetQuantity (unit required, comma or dot) so the same string is
-// accepted by this dialog and by the item edit dialog, which sends its text
-// to the API to parse. Returns null when it can't be read.
-function parseNetText(raw){
-  const m = String(raw || "").trim()
-    .match(/^(\d+(?:[.,]\d+)?)\s*(kg|g|mg|l|ml|cl|un|unid\.?|unidades?)\b/i);
-  if(!m) return null;
-  const n = Number(m[1].replace(",", "."));
-  if(!Number.isFinite(n) || n <= 0) return null;
-  const unit = m[2].toLowerCase();
-  if(unit === "kg") return { net_qty: n * 1000, net_unit: "g" };
-  if(unit === "mg") return { net_qty: n / 1000, net_unit: "g" };
-  if(unit === "g")  return { net_qty: n, net_unit: "g" };
-  if(unit === "l")  return { net_qty: n * 1000, net_unit: "ml" };
-  if(unit === "cl") return { net_qty: n * 10, net_unit: "ml" };
-  if(unit === "ml") return { net_qty: n, net_unit: "ml" };
-  return { net_qty: n, net_unit: "un" };
+// The units the scan dialog offers, and what each one means in the g/ml/un
+// pair the catalogue stores. Deliberately shorter than the list
+// checklist-api's parseNetQuantity ACCEPTS (it also takes mg and cl): those
+// two never appear on a supermarket package here, and every extra row is
+// another thing to scroll past on a phone. A value that arrives from Open
+// Food Facts in mg or cl is still normalized to g/ml by the API before it
+// ever reaches this dialog, so nothing is lost by not offering them.
+const PACK_UNITS = [
+  { value: "kg", label: "kg", mult: 1000, unit: "g"  },
+  { value: "g",  label: "g",  mult: 1,    unit: "g"  },
+  { value: "L",  label: "L",  mult: 1000, unit: "ml" },
+  { value: "ml", label: "ml", mult: 1,    unit: "ml" },
+  { value: "un", label: "un", mult: 1,    unit: "un" },
+];
+
+// The blank option is the default for a product nothing is known about, and
+// it is deliberately NOT a silent "g": typing 1 while the box says 1 kg would
+// store a gram of rice and nobody would notice until a recipe did the maths.
+function unitOptions(selected){
+  return '<option value=""' + (selected ? "" : " selected") + '>—</option>' +
+    PACK_UNITS.map(u =>
+      '<option value="' + u.value + '"' +
+      (u.value === selected ? " selected" : "") + '>' + esc(u.label) + '</option>'
+    ).join("");
+}
+
+// Stored pair -> the two fields, in the unit the packaging would use: 1500 g
+// comes back as 1,5 + kg, not 1500 + g. Same thresholds as fmtNetQty, which
+// renders the same value as one string elsewhere.
+function netQtyToFields(qty, unit){
+  const n = Number(qty);
+  if(!Number.isFinite(n) || n <= 0 || !unit) return { qty: "", unit: "" };
+  if(unit === "g"  && n >= 1000) return { qty: fmtQty(n / 1000), unit: "kg" };
+  if(unit === "ml" && n >= 1000) return { qty: fmtQty(n / 1000), unit: "L" };
+  return { qty: fmtQty(n), unit: unit };
+}
+
+// The two fields -> the stored pair. Returns null when there is nothing usable
+// to store, so "blank" and "invalid" are one case for the caller.
+function fieldsToNetQty(rawQty, rawUnit){
+  const n = parseQtyInput(rawQty);
+  const u = PACK_UNITS.find(x => x.value === rawUnit);
+  if(n === null || !u) return null;
+  return { net_qty: n * u.mult, net_unit: u.unit };
 }
 
 // Same SHOUTED-name rule checklist-api applies to product names, used here
