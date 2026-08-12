@@ -1002,6 +1002,12 @@ function hideListToast(){
 //                 camera icon, applied as soon as the dialog opens — the
 //                 same live catalogue fill the embedded scan button does,
 //                 without asking the camera to open a second time
+//   onScanned     edit dialog only: async (code) => bool, called with a code
+//                 the embedded scan button just read, BEFORE it's applied to
+//                 the fields — a chance for the caller to resolve a
+//                 collision with a different row first. Returning true means
+//                 it already took over (merged, or the user declined), so
+//                 the dialog closes instead of showing the scan's result.
 //   focusPrice    true to focus the price field instead of the name field
 function productFieldsModal(opts){
   const p = opts.idPrefix;
@@ -1171,7 +1177,13 @@ function productFieldsModal(opts){
         // The camera overlay sits above this dialog, which stays open
         // underneath so nothing typed so far is lost.
         const code = await openScanner();
-        if(code) await applyScannedGtin(code);
+        if(!code) return;
+        // A collision with a different row is resolved by the caller
+        // (confirmed first, if this row already had its own code) BEFORE
+        // anything about the scan reaches these fields — the dialog closes
+        // rather than showing a result that's about to be undone.
+        if(opts.onScanned && await opts.onScanned(code)){ close(null); return; }
+        await applyScannedGtin(code);
       });
       if(opts.presetGtin) applyScannedGtin(opts.presetGtin);
     }
@@ -1729,6 +1741,7 @@ function itemEditModal(it, opts){
     gtin: (it && it.gtin) || "",
     gtinEditable: true,
     presetGtin: opts.presetGtin,
+    onScanned: opts.onScanned,
     focusPrice: false
   });
 }
@@ -1901,20 +1914,22 @@ function renderItems(list, items){
         const step = Number(btn.getAttribute("data-step"));
         setQty(Math.max(qtyOf(it) + step, 1));
       }));
-    // A code that just got attached (typed, scanned from the row icon, or
-    // rescanned from inside the dialog) might belong to a DIFFERENT row
-    // already in the list — two rows can't share a barcode. This item had
-    // no code of its own yet is exactly what a fresh scan from the "＋" flow
-    // would merge on sight, so it merges the same way, silently. One that
-    // already had its OWN different code is a correction to something
-    // already decided, so it asks before folding it into the other row and
-    // discarding this one. Returns true if it handled the save (merged,
-    // asked-and-declined, or asked-and-failed) — false means the caller
-    // should save normally.
-    async function mergeIntoExistingIfCollision(edited){
-      if(!edited.gtin || edited.gtin === it.gtin) return false;
-      const existing = items.find(i =>
-        i.id !== it.id && i.gtin === edited.gtin && !i.purchased);
+    // A code might already belong to a DIFFERENT row in the list — two rows
+    // can't share a barcode. Checked as soon as the code is known, right
+    // after the scan and before any dialog shows it, so a collision is
+    // resolved on the spot rather than undone after the fact; also the
+    // fallback when saving, for a code typed in by hand rather than
+    // scanned. An item with no code of its own yet merges into the
+    // existing row SILENTLY, the same way a fresh scan from the "＋" flow
+    // already merges on sight — its identity here was never decided, so
+    // there's nothing to ask about. One that already had its own different
+    // code is a correction to something already decided, so it asks FIRST,
+    // before anything about the scan is shown. Returns true if it took
+    // over (merged, or the user declined) — false means the caller should
+    // go on and apply the code normally.
+    async function mergeIfColliding(code){
+      if(!code || code === it.gtin) return false;
+      const existing = items.find(i => i.id !== it.id && i.gtin === code && !i.purchased);
       if(!existing) return false;
 
       const hadOwnCode = !!it.gtin;
@@ -1941,7 +1956,11 @@ function renderItems(list, items){
         if(idx !== -1) items.splice(idx, 1);
         row.remove();
         recomputeTotals();
+        // Scrolled into view and lit up so the quantity that just changed
+        // is obvious, plus a toast spelling out why this row changed
+        // instead of a new one showing up.
         flashRow(existing.id);
+        listToast("Já estava na lista — " + existing.name + "  ×" + fmtQty(existing.quantity));
       }catch(err){
         if(err.unauthorized){ handleAuthError(err, loadLists); return true; }
         alert("Não foi possível salvar. Tente novamente.");
@@ -1951,7 +1970,7 @@ function renderItems(list, items){
     // Shared by the pencil and the camera below: both end in the same edit
     // dialog, so both save the result the same way.
     async function saveItemEdit(edited){
-      if(await mergeIntoExistingIfCollision(edited)) return;
+      if(await mergeIfColliding(edited.gtin)) return;
       try{
         const patch = {
           id: it.id, name: edited.name, price: edited.price,
@@ -1979,14 +1998,19 @@ function renderItems(list, items){
     }
     row.querySelector('[data-action="rename-item"]').addEventListener("click", async () => {
       const lastPrice = it.gtin ? await lastPriceFor(it.gtin) : null;
-      const edited = await itemEditModal(it, { lastPrice });
+      // A rescan from the embedded scan button inside the dialog itself is
+      // checked for a collision the same way, before its result ever
+      // reaches the fields.
+      const edited = await itemEditModal(it, { lastPrice, onScanned: mergeIfColliding });
       if(edited === null) return;
       await saveItemEdit(edited);
     });
-    // The camera opens the scanner right away — no dialog first — for both
-    // a fresh attach and a rescan to fix a wrong match. Whatever it resolves
-    // to then shows up prefilled in the same review dialog editing already
-    // uses, so a bad read still gets caught before anything is saved.
+    // The camera opens the scanner right away — no dialog first. A code
+    // that collides with a different row is resolved right here, before any
+    // dialog opens at all — this button only shows for a row with no code
+    // of its own, so that collision always merges silently. Anything else
+    // shows up prefilled in the same review dialog editing already uses, so
+    // a bad read still gets caught before anything is saved.
     row.querySelector('[data-action="scan-item"]').addEventListener("click", async () => {
       if(!scanningSupported()){
         await alertModal(
@@ -1997,8 +2021,9 @@ function renderItems(list, items){
       }
       const code = await openScanner();
       if(!code) return;
+      if(await mergeIfColliding(code)) return;
       const lastPrice = await lastPriceFor(code);
-      const edited = await itemEditModal(it, { presetGtin: code, lastPrice });
+      const edited = await itemEditModal(it, { presetGtin: code, lastPrice, onScanned: mergeIfColliding });
       if(edited === null) return;
       await saveItemEdit(edited);
     });

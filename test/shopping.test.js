@@ -91,6 +91,10 @@ const KNOWN_PRODUCTS = {
   // 7896004700236 is reserved for the later "fresh insert" scenario, which
   // needs that gtin to still be unused by any row when it runs.
   '7897001234564': { name: 'Suco de Uva Aurora', brand: 'AURORA', net_qty: null, net_unit: null },
+  // A fourth, never-put-on-a-row barcode, so a plain rescan-live-fill test
+  // can use a code that resolves to a real product WITHOUT colliding with
+  // any row already in the list (every other fixture above ends up on one).
+  '7891234567895': { name: 'Manteiga com Sal', brand: 'AVIAÇÃO', net_qty: 200, net_unit: 'g' },
 };
 
 function handleScan(body) {
@@ -736,24 +740,26 @@ function handleScan(body) {
 
   // --- rescanning from INSIDE the edit dialog (opened via the pencil, not
   // the row's own camera) shows the newly resolved product live too — the
-  // "wrong one got scanned" case — without saving over the row yet ---
+  // "wrong one got scanned" case — without saving over the row yet. Uses a
+  // code no other row has, so this is testing the live-fill on its own,
+  // separate from the collision handling covered further down. ---
   await page.click('.row[data-id="M4"] [data-action="rename-item"]');
   await page.waitForSelector('#edit-gtin');
-  await page.evaluate(() => window.__setCodes(['7891000100103']));
+  await page.evaluate(() => window.__setCodes(['7891234567895']));
   await page.click('#edit-scan');
   await page.waitForSelector('.scan-overlay');
   await page.waitForFunction(
-    () => document.querySelector('#edit-name').value === 'Leite Condensado Integral moça',
+    () => document.querySelector('#edit-name').value === 'Manteiga com Sal',
     null, { timeout: 6000 });
   check('rescan-from-edit fills the newly resolved name',
-    (await page.inputValue('#edit-name')) === 'Leite Condensado Integral moça');
+    (await page.inputValue('#edit-name')) === 'Manteiga com Sal');
   check('rescan-from-edit fills the newly resolved brand, got: ' + await page.inputValue('#edit-brand'),
-    (await page.inputValue('#edit-brand')) === 'Casa de Bento');
+    (await page.inputValue('#edit-brand')) === 'Aviação');
   check('rescan-from-edit fills the newly resolved size, got: ' +
       await page.inputValue('#edit-net-qty') + ' / ' + await page.inputValue('#edit-net-unit'),
-    (await page.inputValue('#edit-net-qty')) === '1' && (await page.inputValue('#edit-net-unit')) === 'L');
+    (await page.inputValue('#edit-net-qty')) === '200' && (await page.inputValue('#edit-net-unit')) === 'g');
   check('rescan-from-edit fills the newly resolved code',
-    (await page.inputValue('#edit-gtin')) === '7891000100103');
+    (await page.inputValue('#edit-gtin')) === '7891234567895');
   // Cancelled on purpose: M4 stays the Suco de Uva Aurora row the rest of the
   // test still relies on — this only proves the rescan is caught before
   // anything saves, which is the whole point of reviewing it here first.
@@ -950,55 +956,57 @@ function handleScan(body) {
   check('no catalogue write for a correction on a product that already exists',
     state.upserts.every(u => u.gtin !== '7896004700236'));
 
-  // --- two rows can't share a barcode: a code that resolves to ANOTHER
-  // row already in the list merges into it instead of creating a
-  // duplicate. I1 ("Café") has no code of its own yet, so attaching one
-  // that turns out to already be S2's merges SILENTLY — the same way a
-  // fresh scan from the "+" flow already merges on sight. ---
+  // --- two rows can't share a barcode: a code that resolves to ANOTHER row
+  // already in the list merges into it instead of creating a duplicate,
+  // with no dialog in the way. I1 ("Café") has no code of its own yet, so
+  // attaching one that turns out to already be S2's merges SILENTLY, right
+  // when the code is read — the same way a fresh scan from the "+" flow
+  // already merges on sight — and no "Adicionar item" dialog ever shows. ---
   check('I1 shows the camera — it has no code yet',
     await page.isVisible('.row[data-id="I1"] [data-action="scan-item"]'));
   const rowsBeforeSilentMerge = await rows();
   await page.evaluate(() => window.__setCodes(['7891000100103']));
   await page.click('.row[data-id="I1"] [data-action="scan-item"]');
   await page.waitForSelector('.scan-overlay');
-  await page.waitForSelector('#edit-name', { timeout: 6000 });
-  check('resolved product shown before saving, got: ' + await page.inputValue('#edit-name'),
-    (await page.inputValue('#edit-name')) === 'Leite Condensado Integral moça');
-  await page.click('#edit-ok');
   await page.waitForFunction(
     (n) => document.querySelectorAll('.row[data-id]').length === n,
     rowsBeforeSilentMerge - 1, { timeout: 6000 });
-  check('no confirm dialog for an item that had no code of its own',
+  check('no dialog ever shown for a silent merge',
     (await page.$$('.modal-card')).length === 0);
   check('I1 is gone, merged away', (await page.$$('.row[data-id="I1"]')).length === 0);
   check('its quantity landed on the existing item, got: ' +
       await page.inputValue('.row[data-id="S2"] .qty-input'),
     (await page.inputValue('.row[data-id="S2"] .qty-input')) === '4');
+  check('a toast explains what happened, got: ' + await page.textContent('#list-toast'),
+    /estava na lista/i.test(await page.textContent('#list-toast')) &&
+    /Leite Condensado/.test(await page.textContent('#list-toast')));
 
   // --- a row that already has ITS OWN code, rescanned (from inside the edit
-  // dialog) to one that turns out to belong to someone else: a correction
-  // to something already decided, so it asks before merging rather than
-  // merging silently ---
+  // dialog) to one that turns out to belong to someone else: a correction to
+  // something already decided, so the warning shows FIRST — before the scan
+  // result ever reaches the dialog's fields — rather than after reviewing
+  // and saving it. ---
   await page.click('.row[data-id="M4"] [data-action="rename-item"]');
   await page.waitForSelector('#edit-gtin');
+  const nameBeforeScan = await page.inputValue('#edit-name');
   await page.evaluate(() => window.__setCodes(['7899999999999']));
   await page.click('#edit-scan');
   await page.waitForSelector('.scan-overlay');
-  await page.waitForFunction(
-    () => document.querySelector('#edit-name').value === 'Pão caseiro',
-    null, { timeout: 6000 });
-  await page.click('#edit-ok');
-  await page.waitForSelector('.modal-card p', { timeout: 6000 });
-  const warnText = await page.textContent('.modal-card p');
+  await page.waitForSelector('#confirm-ok', { timeout: 6000 });
+  const warnText = await page.locator('.modal-backdrop').last().locator('p').first().textContent();
   check('warns which item the code belongs to, got: ' + warnText,
     /Pão caseiro/.test(warnText) && /Leite Moça lata/.test(warnText));
+  check('the dialog underneath still shows its OWN, unscanned name — the ' +
+      'scan never reached the fields, got: ' + await page.inputValue('#edit-name'),
+    (await page.inputValue('#edit-name')) === nameBeforeScan);
 
-  // Cancelling leaves both rows exactly as they were — including M4's OWN
-  // code, which the scan never got to apply.
+  // Declining leaves both rows exactly as they were — including M4's OWN
+  // code, which the scan never got to apply — and closes the edit dialog too.
   const rowsBeforeCancel = await rows();
   await page.click('#confirm-cancel');
   await page.waitForTimeout(200);
-  check('cancelling the merge changes the row count not at all, got: ' + await rows(),
+  check('declining closes the edit dialog', (await page.$$('#edit-name')).length === 0);
+  check('declining the merge changes the row count not at all, got: ' + await rows(),
     (await rows()) === rowsBeforeCancel);
   check('M4 keeps its own name',
     (await page.textContent('.row[data-id="M4"] .txt')).trim() === 'Leite Moça lata');
@@ -1012,16 +1020,13 @@ function handleScan(body) {
   await page.evaluate(() => window.__setCodes(['7899999999999']));
   await page.click('#edit-scan');
   await page.waitForSelector('.scan-overlay');
-  await page.waitForFunction(
-    () => document.querySelector('#edit-name').value === 'Pão caseiro',
-    null, { timeout: 6000 });
-  const rowsBeforeAccept = await rows();
-  await page.click('#edit-ok');
   await page.waitForSelector('#confirm-ok', { timeout: 6000 });
+  const rowsBeforeAccept = await rows();
   await page.click('#confirm-ok');
   await page.waitForFunction(
     (n) => document.querySelectorAll('.row[data-id]').length === n,
     rowsBeforeAccept - 1, { timeout: 6000 });
+  check('accepting closes the edit dialog too', (await page.$$('#edit-name')).length === 0);
   check('M4 is gone, merged away', (await page.$$('.row[data-id="M4"]')).length === 0);
   check('one unit added to the item the code actually belongs to, got: ' +
       await page.inputValue('.row[data-id="S3"] .qty-input'),
