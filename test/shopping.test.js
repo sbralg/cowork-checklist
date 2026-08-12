@@ -216,11 +216,12 @@ function handleScan(body) {
     } else if (body.action === 'shopping_item_scan') {
       resp = handleScan(body);
     } else if (body.action === 'product_upsert') {
-      // The size the user typed in the scan dialog lands here, against the
-      // barcode rather than the row. Recorded so the test can assert both
-      // that it is sent when edited and that it is NOT sent otherwise.
+      // The size (and, for a brand-new barcode, the brand) the user typed in
+      // the scan dialog land here, against the barcode rather than the row.
+      // Recorded so the test can assert both that it is sent when edited and
+      // that it is NOT sent otherwise.
       state.upserts.push({ ...body });
-      resp = { product: { gtin: body.gtin, name: body.name,
+      resp = { product: { gtin: body.gtin, name: body.name, brand: body.brand ?? null,
         net_qty: body.net_qty ?? null, net_unit: body.net_unit ?? null } };
     } else if (body.action === 'shopping_item_add') {
       // Mirrors the API: net_text is parsed into a normalized pair, and
@@ -507,7 +508,9 @@ function handleScan(body) {
   check('unknown code offers empty size fields',
     (await page.inputValue('#scan-net-qty')) === '' &&
     (await page.inputValue('#scan-net-unit')) === '');
+  check('unknown code offers a brand field', (await page.$$('#scan-brand')).length === 1);
   await page.fill('#scan-name', 'Pão caseiro');
+  await page.fill('#scan-brand', 'Wickbold');
 
   // The amount field takes digits and one separator only, like the item
   // quantity — a package size is a decimal, not free prose.
@@ -532,15 +535,16 @@ function handleScan(body) {
     null, { timeout: 6000 });
   check('typed-name row added', await rows() === 3);
   // Normalized to the g/ml/un pair on the way out, and written against the
-  // BARCODE, so the next scan of this code already knows the size.
-  // Fired in the background after the row lands, so it needs a moment.
+  // BARCODE (brand included), so the next scan of this code already knows
+  // both. Fired in the background after the row lands, so it needs a moment.
   for (let i = 0; i < 40 && state.upserts.length === 0; i++) await page.waitForTimeout(50);
-  check('size stored against the barcode, got: ' + JSON.stringify(state.upserts),
+  check('size and brand stored against the barcode, got: ' + JSON.stringify(state.upserts),
     state.upserts.length === 1 && state.upserts[0].gtin === '7899999999999' &&
-    state.upserts[0].net_qty === 1500 && state.upserts[0].net_unit === 'g');
-  check('new size shows on the row without a refetch, got: ' +
+    state.upserts[0].net_qty === 1500 && state.upserts[0].net_unit === 'g' &&
+    state.upserts[0].brand === 'Wickbold');
+  check('new size and brand show on the row without a refetch, got: ' +
       (await page.textContent('.row[data-id="S3"] .meta')).trim(),
-    /1,5 kg/.test(await page.textContent('.row[data-id="S3"] .meta')));
+    (await page.textContent('.row[data-id="S3"] .meta')).trim() === 'Wickbold · 1,5 kg');
 
   // --- quick add: name and quantity only, one row ---
   check('quick-add form has no brand field', (await page.$$('#new-item-brand')).length === 0);
