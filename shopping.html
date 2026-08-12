@@ -354,6 +354,21 @@ async function api(action, extra){
   return await r.json();
 }
 
+// What a barcode last sold for — a useful thing to see while confirming a
+// scan or price, and never worth failing the surrounding action over, so any
+// failure (including "no history yet", the normal case for a while) is the
+// same as "nothing to show".
+async function lastPriceFor(gtin){
+  if(!gtin) return null;
+  try{
+    const hist = await api("product_price_history", { gtin, limit: 1 });
+    const latest = (hist.prices || [])[0];
+    return latest && latest.price != null ? Number(latest.price) : null;
+  }catch(_){
+    return null;
+  }
+}
+
 function esc(s){
   return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 }
@@ -961,106 +976,142 @@ function hideListToast(){
   clearTimeout(listToastTimer);
 }
 
-// Shown after every scan, before anything is written. It confirms WHICH
-// product the barcode resolved to — the safety check that matters when the
-// name comes from a shared external catalogue — and collects the things only
-// the person holding the box knows: how many, what it costs here, and how
-// much is IN one box.
-// Capturing the price at scan time is also what makes the price history
-// worth graphing; relying on it being typed later left it almost empty.
-// Resolves with {name, brand, size, quantity, price} or null; `size` is null
-// unless the package size was actually edited.
-function scanConfirmModal(opts){
-  const known = !!opts.product;
-  const p = opts.product || {};
-  // Tidied the same way the row itself renders a shouted catalogue brand, so
-  // the prefilled field reads like the rest of the page — and so a comparison
-  // against what the user leaves in the field can tell "untouched" from
-  // "edited back to the same thing" apart from an actual correction.
-  const origBrand = tidyShouted(p.brand || "");
+// Shared by the scan-confirm dialog (adding or merging a scanned product)
+// and the pencil/rescan edit dialog (editing an existing row) — same fields,
+// same order, so the two can never drift into feeling like different tools.
+// Confirms WHICH product a barcode resolved to — the safety check that
+// matters when the name comes from a shared external catalogue — and
+// collects the things only the person holding the box knows: how many, what
+// it costs here, and how much is IN one box.
+// Resolves with {name, brand, size, quantity, price, gtin} or null if
+// dismissed. `size` is null unless the package size was actually edited —
+// leaving it blank means "unchanged", never "erase it".
+//
+// opts:
+//   idPrefix      "scan" or "edit", so the two dialogs' DOM ids stay apart
+//   title, saveLabel
+//   name, brand, netQty, netUnit, quantity, price   initial values
+//   lastPrice     optional, shown as a hint under the price field
+//   gtin          the barcode in play, if any
+//   gtinEditable  true for the edit dialog (typed or scanned in place),
+//                 false for the scan dialog (already fixed by the scan
+//                 gesture that opened it — shown as plain text instead)
+//   gtinKnown     scan dialog only: whether the code resolved to a
+//                 catalogue entry, for the "ainda não conhecido" line
+//   presetGtin    edit dialog only: a code just scanned via the row's own
+//                 camera icon, applied as soon as the dialog opens — the
+//                 same live catalogue fill the embedded scan button does,
+//                 without asking the camera to open a second time
+//   focusPrice    true to focus the price field instead of the name field
+function productFieldsModal(opts){
+  const p = opts.idPrefix;
+  // A quick-add row (edit dialog, no barcode yet) has no product behind it,
+  // so brand and size stay out of the way until a code is attached — typed,
+  // scanned, or already there when the dialog opens. The scan dialog always
+  // has a code by the time it's shown, so this is always "on" there.
+  const hasCode = !opts.gtinEditable || !!(opts.presetGtin || opts.gtin);
   // The stored pair, split back into what the label on the box actually says
   // (1500 g reads as 1,5 kg), so a prefilled value looks like the packaging
   // rather than like our storage units.
-  const pack = netQtyToFields(p.net_qty, p.net_unit);
+  const pack = netQtyToFields(opts.netQty, opts.netUnit);
   return new Promise(resolve => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
     backdrop.innerHTML =
       '<div class="modal-card">' +
-        '<h3>' + (known ? "Adicionar à lista" : "Produto novo") + '</h3>' +
+        '<h3>' + esc(opts.title) + '</h3>' +
         // Name and brand are always editable, prefilled from the catalogue
-        // when it has one — a barcode scan resolves to a shared, crowd-typed
+        // when it has one — a barcode resolves to a shared, crowd-typed
         // entry, and the person holding the box is the only one who can
         // catch a wrong name or brand OFF (or an earlier mistake) got stuck
         // with.
-        '<label for="scan-name">Nome do produto</label>' +
-        '<input type="text" id="scan-name" placeholder="ex: Arroz 5 kg" value="' +
-          esc(p.name || "") + '">' +
-        '<label for="scan-brand">Marca (opcional)</label>' +
-        '<input type="text" id="scan-brand" placeholder="ex: Nestlé" value="' +
-          esc(origBrand) + '">' +
-        '<p class="scan-meta">Código ' + esc(opts.gtin) +
-          (known ? '' : ' — ainda não conhecido.') + '</p>' +
+        '<label for="' + p + '-name">Nome do produto</label>' +
+        '<input type="text" id="' + p + '-name" placeholder="ex: Arroz 5 kg" value="' +
+          esc(opts.name || "") + '">' +
+        '<div id="' + p + '-brand-field"' + (hasCode ? '' : ' hidden') + '>' +
+          '<label for="' + p + '-brand">Marca (opcional)</label>' +
+          '<input type="text" id="' + p + '-brand" placeholder="ex: Nestlé" value="' +
+            esc(opts.brand || "") + '">' +
+        '</div>' +
+        (opts.gtinEditable
+          ? '<label for="' + p + '-gtin">Código de barras</label>' +
+            '<div class="gtin-row">' +
+              '<input type="text" id="' + p + '-gtin" inputmode="numeric" ' +
+                'placeholder="sem código" value="' + esc(opts.gtin || "") + '">' +
+              '<button type="button" class="primary small alt" id="' + p + '-scan" ' +
+                'title="Ler código de barras">📷</button>' +
+            '</div>' +
+            '<p class="hint" id="' + p + '-gtin-hint"></p>'
+          : '<p class="scan-meta">Código ' + esc(opts.gtin) +
+              (opts.gtinKnown ? '' : ' — ainda não conhecido.') + '</p>') +
         // Amount + unit as two controls, mirroring how the pair is STORED
         // (net_qty + net_unit) instead of asking for prose and parsing it
-        // back. Always shown, prefilled from the catalogue when it knows —
-        // blank for a brand new code, and also for an Open Food Facts entry
-        // whose `quantity` field was empty or unparseable. Without it a
-        // barcode can never answer "quanto disso eu tenho?", because the
-        // row's quantity counts PACKAGES. Editable even when prefilled
-        // because OFF's sizes are crowd-typed and never re-checked once
-        // cached — the person holding the box is the only one who can catch
-        // a shrunk package.
-        '<label for="scan-net-qty">Peso / volume do pacote (opcional)</label>' +
-        '<div class="scan-fields">' +
-          '<div class="col grow">' +
-            '<span class="field">' +
-              '<input class="num-input" type="text" inputmode="decimal" id="scan-net-qty" ' +
-                'aria-label="Quantidade do pacote" placeholder="0" ' +
-                'value="' + esc(pack.qty) + '">' +
-            '</span>' +
+        // back. Prefilled from the catalogue when it knows — blank for a
+        // brand new code, and also for an Open Food Facts entry whose
+        // `quantity` field was empty or unparseable. Without it a barcode
+        // can never answer "quanto disso eu tenho?", because the row's
+        // quantity counts PACKAGES. Editable even when prefilled because
+        // OFF's sizes are crowd-typed and never re-checked once cached —
+        // the person holding the box is the only one who can catch a
+        // shrunk package.
+        '<div id="' + p + '-net-field"' + (hasCode ? '' : ' hidden') + '>' +
+          '<label for="' + p + '-net-qty">Peso / volume do pacote (opcional)</label>' +
+          '<div class="scan-fields">' +
+            '<div class="col grow">' +
+              '<span class="field">' +
+                '<input class="num-input" type="text" inputmode="decimal" id="' + p + '-net-qty" ' +
+                  'aria-label="Quantidade do pacote" placeholder="0" ' +
+                  'value="' + esc(pack.qty) + '">' +
+              '</span>' +
+            '</div>' +
+            '<div class="col unit-col">' +
+              '<select id="' + p + '-net-unit" aria-label="Unidade do pacote">' +
+                unitOptions(pack.unit) +
+              '</select>' +
+            '</div>' +
           '</div>' +
-          '<div class="col unit-col">' +
-            '<select id="scan-net-unit" aria-label="Unidade do pacote">' +
-              unitOptions(pack.unit) +
-            '</select>' +
-          '</div>' +
+          '<p class="hint">Quanto vem em UM pacote — é o que permite somar o ' +
+            'total disponível para as receitas. Corrija se estiver errado.</p>' +
         '</div>' +
-        '<p class="hint">Quanto vem em UM pacote — é o que permite somar o ' +
-          'total disponível para as receitas. Corrija se estiver errado.</p>' +
         '<div class="scan-fields">' +
           '<div class="col">' +
-            '<label for="scan-qty">Quantidade</label>' +
+            '<label for="' + p + '-qty">Quantidade</label>' +
             '<span class="field qty-field">' +
               '<button type="button" class="step-btn" data-step="-1" aria-label="Diminuir">\u2212</button>' +
               '<input class="num-input qty-input" type="text" inputmode="decimal" ' +
-                'id="scan-qty" aria-label="Quantidade" value="1">' +
+                'id="' + p + '-qty" aria-label="Quantidade" value="' +
+                esc(fmtQty(opts.quantity || 1)) + '">' +
               '<button type="button" class="step-btn" data-step="1" aria-label="Aumentar">+</button>' +
             '</span>' +
           '</div>' +
           '<div class="col grow">' +
-            '<label for="scan-price">Preço</label>' +
+            '<label for="' + p + '-price">Preço</label>' +
             '<span class="field"><span class="prefix">R$</span>' +
               '<input class="num-input price-input" type="text" inputmode="numeric" ' +
-                'id="scan-price" aria-label="Preço unitário" placeholder="0,00"></span>' +
+                'id="' + p + '-price" aria-label="Preço unitário" placeholder="0,00" value="' +
+                esc(fmtPriceInput(opts.price)) + '"></span>' +
           '</div>' +
         '</div>' +
         (opts.lastPrice != null
           ? '<p class="hint">Última vez: ' + esc(fmtMoney(opts.lastPrice)) + '</p>'
           : '<p class="hint">O preço é opcional — em branco significa desconhecido.</p>') +
         '<div class="modal-actions">' +
-          '<button class="cancel" id="scan-cancel">Cancelar</button>' +
-          '<button class="save" id="scan-ok">Adicionar</button>' +
+          '<button class="cancel" id="' + p + '-cancel">Cancelar</button>' +
+          '<button class="save" id="' + p + '-ok">' + esc(opts.saveLabel) + '</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(backdrop);
 
-    const nameEl = backdrop.querySelector("#scan-name");
-    const brandEl = backdrop.querySelector("#scan-brand");
-    const netQtyEl = backdrop.querySelector("#scan-net-qty");
-    const netUnitEl = backdrop.querySelector("#scan-net-unit");
-    const qtyEl = backdrop.querySelector("#scan-qty");
-    const priceEl = backdrop.querySelector("#scan-price");
+    const nameEl = backdrop.querySelector("#" + p + "-name");
+    const brandEl = backdrop.querySelector("#" + p + "-brand");
+    const brandFieldEl = backdrop.querySelector("#" + p + "-brand-field");
+    const netFieldEl = backdrop.querySelector("#" + p + "-net-field");
+    const netQtyEl = backdrop.querySelector("#" + p + "-net-qty");
+    const netUnitEl = backdrop.querySelector("#" + p + "-net-unit");
+    const gtinEl = backdrop.querySelector("#" + p + "-gtin");
+    const gtinHintEl = backdrop.querySelector("#" + p + "-gtin-hint");
+    const qtyEl = backdrop.querySelector("#" + p + "-qty");
+    const priceEl = backdrop.querySelector("#" + p + "-price");
     wireQtyInput(qtyEl);
     // Same digits-and-one-separator rule as the item quantity: a package size
     // is a decimal amount too, and type=number would let "e"/"+"/"-" through.
@@ -1071,6 +1122,59 @@ function scanConfirmModal(opts){
         const step = Number(btn.getAttribute("data-step"));
         qtyEl.value = fmtQty(Math.max((parseQtyInput(qtyEl.value) ?? 1) + step, 1));
       }));
+
+    // Marca/Peso show or hide as the code field goes from empty to not, in
+    // either direction — typing or scanning one in reveals them, clearing it
+    // goes back to "just a reminder". Only relevant for the edit dialog: the
+    // scan dialog always has a code by the time it's shown.
+    function syncProductFields(){
+      const has = !!gtinEl.value.trim();
+      brandFieldEl.hidden = !has;
+      netFieldEl.hidden = !has;
+      gtinHintEl.textContent = has
+        ? "Ao reconhecer o código, nome, marca e peso passam a vir do catálogo."
+        : "Sem código de barras — é só uma lembrança de compra. Leia o código " +
+          "para trazer nome, marca e peso do catálogo.";
+    }
+    // Applies a code just obtained from the camera — used both by the
+    // embedded scan button below and by a code the row's own camera icon
+    // already scanned before this dialog even opened (`presetGtin`), so
+    // scanning never has to happen twice for the same read.
+    async function applyScannedGtin(code){
+      gtinEl.value = code;
+      syncProductFields();
+      // Best-effort: show exactly what will be saved, right here, rather
+      // than leaving the fields as whatever was typed before and letting
+      // the catalogue silently win only once the save round-trips.
+      try{
+        const found = await api("product_lookup", { gtin: code });
+        if(found.found){
+          nameEl.value = found.product.name || "";
+          brandEl.value = tidyShouted(found.product.brand || "");
+          const foundPack = netQtyToFields(found.product.net_qty, found.product.net_unit);
+          netQtyEl.value = foundPack.qty;
+          netUnitEl.value = foundPack.unit;
+        }
+      }catch(_){ /* the save-time lookup still resolves it either way */ }
+    }
+    if(gtinEl){
+      syncProductFields();
+      gtinEl.addEventListener("input", syncProductFields);
+      backdrop.querySelector("#" + p + "-scan").addEventListener("click", async () => {
+        if(!scanningSupported()){
+          await alertModal(
+            "Este navegador não suporta leitura de código de barras. " +
+            "No Android, use o Chrome."
+          );
+          return;
+        }
+        // The camera overlay sits above this dialog, which stays open
+        // underneath so nothing typed so far is lost.
+        const code = await openScanner();
+        if(code) await applyScannedGtin(code);
+      });
+      if(opts.presetGtin) applyScannedGtin(opts.presetGtin);
+    }
 
     const close = (result) => {
       backdrop.remove();
@@ -1086,9 +1190,9 @@ function scanConfirmModal(opts){
       // be blocked. An amount with no unit is NOT fine: "1" could be a gram
       // or a kilo, and guessing would corrupt exactly the number the recipe
       // side exists to add up. Only a CHANGED pair counts, so re-scanning a
-      // product whose size is already right doesn't rewrite the catalogue row
-      // on every scan; clearing the amount means "leave it as it was", not
-      // "erase it" — the way to fix a wrong size is to enter the right one.
+      // product whose size is already right doesn't rewrite it on every
+      // scan; clearing the amount means "leave it as it was", not "erase
+      // it" — the way to fix a wrong size is to enter the right one.
       let size = null;
       const netQtyNow = netQtyEl.value.trim();
       const netUnitNow = netUnitEl.value;
@@ -1107,7 +1211,8 @@ function scanConfirmModal(opts){
         brand: brandEl.value.trim(),
         size,
         quantity: parseQtyInput(qtyEl.value) ?? 1,
-        price: centsToPrice(priceDigits(priceEl.value))
+        price: centsToPrice(priceDigits(priceEl.value)),
+        gtin: gtinEl ? gtinEl.value.replace(/\D/g, "") : opts.gtin
       });
     };
     function onKey(e){
@@ -1116,15 +1221,37 @@ function scanConfirmModal(opts){
     }
     document.addEventListener("keydown", onKey);
     backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
-    backdrop.querySelector("#scan-cancel").addEventListener("click", () => close(null));
-    backdrop.querySelector("#scan-ok").addEventListener("click", ok);
-    // Straight to the price for a product we recognize — correcting the
-    // name or brand is the exception, not the common case, so it shouldn't
-    // cost the common case a tap. An unrecognized product needs its name
-    // typed before anything else, so it gets the focus instead.
-    const first = known ? priceEl : nameEl;
+    backdrop.querySelector("#" + p + "-cancel").addEventListener("click", () => close(null));
+    backdrop.querySelector("#" + p + "-ok").addEventListener("click", ok);
+    // Straight to the price when there's nothing to double-check — correcting
+    // a field is the exception, not the common case. Otherwise the name gets
+    // the focus, since that's the thing most likely to need typing or fixing.
+    const first = opts.focusPrice ? priceEl : nameEl;
     first.focus();
     if(first.select) first.select();
+  });
+}
+
+// The scan-confirm dialog: shown after every scan, before anything is
+// written. See productFieldsModal for the fields themselves.
+function scanConfirmModal(opts){
+  const known = !!opts.product;
+  const p = opts.product || {};
+  return productFieldsModal({
+    idPrefix: "scan",
+    title: known ? "Adicionar à lista" : "Produto novo",
+    saveLabel: "Adicionar",
+    name: p.name || "",
+    brand: tidyShouted(p.brand || ""),
+    netQty: p.net_qty,
+    netUnit: p.net_unit,
+    quantity: 1,
+    price: null,
+    lastPrice: opts.lastPrice,
+    gtin: opts.gtin,
+    gtinEditable: false,
+    gtinKnown: known,
+    focusPrice: known
   });
 }
 
@@ -1578,139 +1705,31 @@ function productMeta(it){
   return bits.join(" · ");
 }
 
-// The free-text form of an item's size, for prefilling the edit field.
-function netTextOf(it){
+// The pencil/rescan edit dialog: same fields, same order as the scan
+// dialog (see productFieldsModal) plus an editable barcode field, since
+// unlike a fresh scan an existing row's code can be wrong and worth typing
+// or reading again. `opts.lastPrice` and `opts.presetGtin` (a code the
+// row's own camera icon already scanned before this dialog opened) are both
+// optional. Resolves with the fields, or null if dismissed.
+function itemEditModal(it, opts){
+  opts = opts || {};
   const p = (it && it.products) || {};
   const hasOwnSize = it && it.net_qty != null;
-  return fmtNetQty(hasOwnSize ? it.net_qty : p.net_qty,
-                   hasOwnSize ? it.net_unit : p.net_unit);
-}
-
-// Name + price + brand + size in one dialog. Resolves with the fields, or
-// null if dismissed. `net_text` goes to the API as typed and is parsed there.
-function itemEditModal(it){
-  const hasProduct = !!it.gtin;
-  return new Promise(resolve => {
-    const backdrop = document.createElement("div");
-    backdrop.className = "modal-backdrop";
-    backdrop.innerHTML =
-      '<div class="modal-card">' +
-        '<h3>Editar item</h3>' +
-        '<label for="edit-name">Nome</label>' +
-        '<input type="text" id="edit-name" value="' + esc(it.name || "") + '">' +
-        '<label for="edit-price">Preço</label>' +
-        '<div class="scan-fields">' +
-          '<div class="col grow">' +
-            '<span class="field"><span class="prefix">R$</span>' +
-              '<input class="num-input price-input" type="text" inputmode="numeric" ' +
-                'id="edit-price" aria-label="Preço unitário" placeholder="0,00" value="' +
-                esc(fmtPriceInput(it.price)) + '"></span>' +
-          '</div>' +
-        '</div>' +
-        // Brand and size only mean something once the row is tied to a
-        // barcode — a quick-add item is just a reminder to buy something,
-        // not a catalogue entry, so these stay out of the way until a code
-        // is attached (typed or scanned), matching the scan dialog's own
-        // "no product yet" shape.
-        '<div id="edit-product-fields"' + (hasProduct ? '' : ' hidden') + '>' +
-          '<label for="edit-brand">Marca (opcional)</label>' +
-          '<input type="text" id="edit-brand" value="' +
-            esc((it.brand || (it.products && it.products.brand) || "")) + '">' +
-          '<label for="edit-net">Peso / volume (opcional)</label>' +
-          '<input type="text" id="edit-net" placeholder="ex: 380 g, 1 kg, 500 ml" value="' +
-            esc(netTextOf(it)) + '">' +
-        '</div>' +
-        '<label for="edit-gtin">Código de barras</label>' +
-        '<div class="gtin-row">' +
-          '<input type="text" id="edit-gtin" inputmode="numeric" ' +
-            'placeholder="sem código" value="' + esc(it.gtin || "") + '">' +
-          '<button type="button" class="primary small alt" id="edit-scan" ' +
-            'title="Ler código de barras">📷</button>' +
-        '</div>' +
-        '<p class="hint" id="edit-gtin-hint"></p>' +
-        '<div class="modal-actions">' +
-          '<button class="cancel" id="edit-cancel">Cancelar</button>' +
-          '<button class="save" id="edit-ok">Salvar</button>' +
-        '</div>' +
-      '</div>';
-    document.body.appendChild(backdrop);
-
-    const nameEl = backdrop.querySelector("#edit-name");
-    const priceEl = backdrop.querySelector("#edit-price");
-    const brandEl = backdrop.querySelector("#edit-brand");
-    const netEl = backdrop.querySelector("#edit-net");
-    const gtinEl = backdrop.querySelector("#edit-gtin");
-    const productFieldsEl = backdrop.querySelector("#edit-product-fields");
-    const hintEl = backdrop.querySelector("#edit-gtin-hint");
-    wirePriceInput(priceEl);
-
-    // Marca/Peso show or hide as the code field goes from empty to not, in
-    // either direction — typing or scanning one in reveals them, clearing it
-    // goes back to "just a reminder". The hint follows the same state.
-    function syncProductFields(){
-      const has = !!gtinEl.value.trim();
-      productFieldsEl.hidden = !has;
-      hintEl.textContent = has
-        ? "Ao reconhecer o código, nome, marca e peso passam a vir do catálogo."
-        : "Sem código de barras — é só uma lembrança de compra. Leia o código " +
-          "para trazer nome, marca e peso do catálogo.";
-    }
-    syncProductFields();
-    gtinEl.addEventListener("input", syncProductFields);
-
-    const close = (result) => {
-      backdrop.remove();
-      document.removeEventListener("keydown", onKey);
-      resolve(result);
-    };
-    const ok = () => {
-      const name = nameEl.value.trim();
-      if(!name){ nameEl.focus(); return; }
-      close({
-        name,
-        price: centsToPrice(priceDigits(priceEl.value)),
-        brand: brandEl.value.trim(),
-        net_text: netEl.value.trim(),
-        // Digits only: a barcode pasted with spaces or dashes still works.
-        gtin: gtinEl.value.replace(/\D/g, "")
-      });
-    };
-    function onKey(e){
-      if(e.key === "Escape") close(null);
-      if(e.key === "Enter"){ e.preventDefault(); ok(); }
-    }
-    document.addEventListener("keydown", onKey);
-    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
-    backdrop.querySelector("#edit-cancel").addEventListener("click", () => close(null));
-    backdrop.querySelector("#edit-ok").addEventListener("click", ok);
-    backdrop.querySelector("#edit-scan").addEventListener("click", async () => {
-      if(!scanningSupported()){
-        await alertModal(
-          "Este navegador não suporta leitura de código de barras. " +
-          "No Android, use o Chrome."
-        );
-        return;
-      }
-      // The camera overlay sits above this dialog, which stays open
-      // underneath so nothing typed so far is lost.
-      const code = await openScanner();
-      if(!code) return;
-      gtinEl.value = code;
-      syncProductFields();
-      // Best-effort: show exactly what will be saved, right here, rather
-      // than leaving the fields as whatever was typed before and letting
-      // the catalogue silently win only once the save round-trips.
-      try{
-        const found = await api("product_lookup", { gtin: code });
-        if(found.found){
-          nameEl.value = found.product.name || "";
-          brandEl.value = tidyShouted(found.product.brand || "");
-          netEl.value = fmtNetQty(found.product.net_qty, found.product.net_unit);
-        }
-      }catch(_){ /* the save-time lookup still resolves it either way */ }
-    });
-    nameEl.focus();
-    nameEl.select();
+  return productFieldsModal({
+    idPrefix: "edit",
+    title: "Editar item",
+    saveLabel: "Salvar",
+    name: (it && it.name) || "",
+    brand: tidyShouted((it && (it.brand || p.brand)) || ""),
+    netQty: hasOwnSize ? it.net_qty : p.net_qty,
+    netUnit: hasOwnSize ? it.net_unit : p.net_unit,
+    quantity: qtyOf(it),
+    price: it ? it.price : null,
+    lastPrice: opts.lastPrice,
+    gtin: (it && it.gtin) || "",
+    gtinEditable: true,
+    presetGtin: opts.presetGtin,
+    focusPrice: false
   });
 }
 
@@ -1723,9 +1742,12 @@ function itemRowHtml(it){
         (meta ? '<p class="meta">' + esc(meta) + '</p>' : '') +
       '</span>' +
     '</label>' +
-    '<button class="icon-btn nobc" data-action="fix-gtin" data-nobc' +
-      (it.gtin ? ' hidden' : '') +
-      ' title="Sem código de barras — necessário para o controle de estoque">⚠️</button>' +
+    // Always present, not just when the code is missing: the same camera
+    // opens straight to the scanner either way, to attach a first barcode
+    // or to rescan and correct a wrong one. Small and muted until there's a
+    // code to fix — once there is, it's a deliberate action, not a nudge.
+    '<button class="icon-btn' + (it.gtin ? '' : ' nobc') + '" data-action="scan-item" title="' +
+      (it.gtin ? 'Reescanear código de barras' : 'Ler código de barras') + '">📷</button>' +
     '<button class="icon-btn" data-action="rename-item" title="Editar">✎</button>' +
     '<button class="icon-btn danger" data-action="delete-item" title="Remover">✕</button>' +
     '<div class="fields">' +
@@ -1790,8 +1812,11 @@ function renderItems(list, items){
   // entirely depending on what was just saved.
   function redrawItemText(row, it){
     row.querySelector(".txt").textContent = it.name;
-    const nobc = row.querySelector("[data-nobc]");
-    if(nobc) nobc.hidden = !!it.gtin;
+    const scanBtn = row.querySelector('[data-action="scan-item"]');
+    if(scanBtn){
+      scanBtn.classList.toggle("nobc", !it.gtin);
+      scanBtn.title = it.gtin ? "Reescanear código de barras" : "Ler código de barras";
+    }
     const meta = productMeta(it);
     let metaEl = row.querySelector(".meta");
     if(!meta){ if(metaEl) metaEl.remove(); return; }
@@ -1878,23 +1903,25 @@ function renderItems(list, items){
         const step = Number(btn.getAttribute("data-step"));
         setQty(Math.max(qtyOf(it) + step, 1));
       }));
-    // Both the ✎ and the missing-barcode marker open the same dialog.
-    row.querySelectorAll('[data-action="rename-item"],[data-action="fix-gtin"]').forEach(btn =>
-      btn.addEventListener("click", async () => {
-      const edited = await itemEditModal(it);
-      if(edited === null) return;
+    // Shared by the pencil and the camera below: both end in the same edit
+    // dialog, so both save the result the same way.
+    async function saveItemEdit(edited){
       try{
-        const data = await api("shopping_item_update", {
-          id: it.id, name: edited.name, price: edited.price, brand: edited.brand,
-          net_text: edited.net_text, gtin: edited.gtin
-        });
+        const patch = {
+          id: it.id, name: edited.name, price: edited.price,
+          brand: edited.brand, quantity: edited.quantity, gtin: edited.gtin
+        };
+        // A blank size in the dialog means "unchanged" (same rule the scan
+        // dialog's package-size field already used), so the key is only
+        // sent at all when there's an actual pair to apply.
+        if(edited.size) patch.net_text = edited.size.net_qty + " " + edited.size.net_unit;
+        const data = await api("shopping_item_update", patch);
         // The API returns the stored row, with the size normalized out of
-        // whatever free text was typed — so redraw from that, not from the
-        // input values.
+        // whatever was typed — so redraw from that, not from the input values.
         if(data.item) Object.assign(it, data.item);
         redrawItemText(row, it);
-        const priceEl = row.querySelector(".price-input");
-        if(priceEl) priceEl.value = fmtPriceInput(it.price);
+        priceEl.value = fmtPriceInput(it.price);
+        qtyEl.value = fmtQty(qtyOf(it));
         refreshLineTotal(row, it);
         recomputeTotals();
       }catch(err){
@@ -1903,7 +1930,32 @@ function renderItems(list, items){
           ? "Verifique o peso/volume (ex: 380 g) e o código de barras."
           : "Não foi possível salvar. Tente novamente.");
       }
-    }));
+    }
+    row.querySelector('[data-action="rename-item"]').addEventListener("click", async () => {
+      const lastPrice = it.gtin ? await lastPriceFor(it.gtin) : null;
+      const edited = await itemEditModal(it, { lastPrice });
+      if(edited === null) return;
+      await saveItemEdit(edited);
+    });
+    // The camera opens the scanner right away — no dialog first — for both
+    // a fresh attach and a rescan to fix a wrong match. Whatever it resolves
+    // to then shows up prefilled in the same review dialog editing already
+    // uses, so a bad read still gets caught before anything is saved.
+    row.querySelector('[data-action="scan-item"]').addEventListener("click", async () => {
+      if(!scanningSupported()){
+        await alertModal(
+          "Este navegador não suporta leitura de código de barras. " +
+          "No Android, use o Chrome."
+        );
+        return;
+      }
+      const code = await openScanner();
+      if(!code) return;
+      const lastPrice = await lastPriceFor(code);
+      const edited = await itemEditModal(it, { presetGtin: code, lastPrice });
+      if(edited === null) return;
+      await saveItemEdit(edited);
+    });
     row.querySelector('[data-action="delete-item"]').addEventListener("click", async () => {
       if(!(await confirmModal('Remover "' + it.name + '"?'))) return;
       const idx = items.indexOf(it);
@@ -2049,16 +2101,10 @@ function renderItems(list, items){
       listToast("Falha de conexão", true);
       return;
     }
-    // Best-effort: what this cost last time is a useful thing to see while
-    // standing in the aisle, but never worth failing the scan over.
-    let lastPrice = null;
-    if(found.found){
-      try{
-        const hist = await api("product_price_history", { gtin: code, limit: 1 });
-        const latest = (hist.prices || [])[0];
-        if(latest && latest.price != null) lastPrice = Number(latest.price);
-      }catch(_){ /* no history is the normal case for a while */ }
-    }
+    // What this cost last time is a useful thing to see while standing in
+    // the aisle, but never worth failing the scan over — lastPriceFor()
+    // already swallows its own errors.
+    const lastPrice = found.found ? await lastPriceFor(code) : null;
     hideListToast();
 
     const product = found.found ? found.product : null;

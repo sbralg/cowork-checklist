@@ -87,6 +87,10 @@ const KNOWN_PRODUCTS = {
   '7891000100103': { name: 'Leite Condensado Integral moça', brand: 'CASA DE BENTO',
     net_qty: 1000, net_unit: 'ml' },
   '7896004700236': { name: 'Bolacha Maria', brand: 'Adria', net_qty: null, net_unit: null },
+  // A third, otherwise-untouched barcode for the row camera-icon test —
+  // 7896004700236 is reserved for the later "fresh insert" scenario, which
+  // needs that gtin to still be unused by any row when it runs.
+  '7897001234564': { name: 'Suco de Uva Aurora', brand: 'AURORA', net_qty: null, net_unit: null },
 };
 
 function handleScan(body) {
@@ -273,6 +277,7 @@ function handleScan(body) {
       // correction can send just the name, so a field's absence has to mean
       // "leave it alone", not "clear it".
       if ('price' in body) it.price = body.price;
+      if ('quantity' in body) it.quantity = body.quantity;
       if ('brand' in body) it.brand = (body.brand ?? '').trim() || null;
       if ('net_text' in body) {
         const t = (body.net_text || '').trim();
@@ -665,14 +670,19 @@ function handleScan(body) {
   await qtyBox.blur();
   await page.waitForTimeout(200);
 
-  // --- a quick-add item's edit dialog has no room for brand/size: it is a
-  // reminder to buy something, not a catalogue entry, until it is scanned ---
+  // --- the edit dialog has the same fields, in the same order, as the scan
+  // dialog: name, brand, code, size, quantity, price. A quick-add row is a
+  // reminder to buy something, not a catalogue entry, so brand/size stay
+  // out of the way until a code is attached — but quantity and price are
+  // right there either way. ---
   await page.click('.row[data-id="M4"] [data-action="rename-item"]');
   await page.waitForSelector('#edit-name');
-  check('brand/size hidden for a barcode-less item',
-    await page.isHidden('#edit-product-fields'));
+  check('brand hidden for a barcode-less item', await page.isHidden('#edit-brand-field'));
+  check('size hidden for a barcode-less item', await page.isHidden('#edit-net-field'));
   check('hint explains why, got: ' + await page.textContent('#edit-gtin-hint'),
     /lembrança de compra/.test(await page.textContent('#edit-gtin-hint')));
+  check('quantity is editable from the pencil too, got: ' + await page.inputValue('#edit-qty'),
+    (await page.inputValue('#edit-qty')) === '3');
   await page.fill('#edit-name', 'Pão de forma');
   await page.click('#edit-ok');
   await page.waitForFunction(
@@ -682,68 +692,72 @@ function handleScan(body) {
   check('still no meta line — there is no product behind a hand-typed row',
     (await page.$$('.row[data-id="M4"] .meta')).length === 0);
 
-  // --- missing-barcode marker ---
-  check('hand-typed row flags the missing barcode',
-    await page.isVisible('.row[data-id="M4"] [data-action="fix-gtin"]'));
-  check('scanned row does not flag it',
-    !(await page.isVisible('.row[data-id="S2"] [data-nobc]')));
+  // --- the camera icon replaces the old warning triangle, on every row —
+  // small and muted until there's a code to fix, full weight once there is
+  // one, since it's then a deliberate correction rather than a nudge ---
+  check('barcode-less row shows a muted camera with an "attach" title',
+    await page.locator('.row[data-id="M4"] [data-action="scan-item"]').evaluate(el =>
+      el.classList.contains('nobc') && el.title === 'Ler código de barras'));
+  check('a scanned row shows the same icon, full weight, with a "rescan" title',
+    await page.locator('.row[data-id="S2"] [data-action="scan-item"]').evaluate(el =>
+      !el.classList.contains('nobc') && el.title === 'Reescanear código de barras'));
 
-  // --- typing a barcode reveals brand/size, and on save the catalogue wins ---
-  await page.click('.row[data-id="M4"] [data-action="fix-gtin"]');
-  await page.waitForSelector('#edit-gtin');
-  check('barcode field starts empty for a hand-typed item',
-    (await page.inputValue('#edit-gtin')) === '');
-  check('brand/size still hidden before a code is entered',
-    await page.isHidden('#edit-product-fields'));
-  await page.fill('#edit-gtin', '789 1000 100103');   // spaces must be tolerated
-  check('typing a code reveals brand/size',
-    await page.isVisible('#edit-product-fields'));
+  // --- tapping the camera opens the scanner immediately, no dialog first —
+  // and whatever it resolves to lands prefilled in the same review dialog
+  // editing already uses, brand included, before anything is saved ---
+  // A gtin of its own, distinct from the ones later scenarios need
+  // untouched (7896004700236 for the "fresh insert" test, 7891000100103
+  // for the rescan-vs-merge history this row already carries).
+  await page.evaluate(() => window.__setCodes(['7897001234564']));
+  await page.click('.row[data-id="M4"] [data-action="scan-item"]');
+  await page.waitForSelector('.scan-overlay');
+  await page.waitForSelector('#edit-name', { timeout: 6000 });
+  check('overlay gone before the review dialog', (await page.$$('.scan-overlay')).length === 0);
+  check('name filled from the catalogue, got: ' + await page.inputValue('#edit-name'),
+    (await page.inputValue('#edit-name')) === 'Suco de Uva Aurora');
+  check('brand revealed and filled from the catalogue, got: ' + await page.inputValue('#edit-brand'),
+    (await page.isVisible('#edit-brand-field')) &&
+    (await page.inputValue('#edit-brand')) === 'Aurora');
+  check('code filled in too', (await page.inputValue('#edit-gtin')) === '7897001234564');
   await page.click('#edit-ok');
   await page.waitForFunction(
-    () => document.querySelector('.row[data-id="M4"] .txt').textContent.includes('Condensado'),
+    () => document.querySelector('.row[data-id="M4"] .txt').textContent.trim() === 'Suco de Uva Aurora',
     null, { timeout: 6000 });
-  check('name replaced by the catalogue',
-    (await page.textContent('.row[data-id="M4"] .txt')).trim() === 'Leite Condensado Integral moça');
-  check('brand and size replaced by the catalogue, got: ' +
-      (await page.textContent('.row[data-id="M4"] .meta')).trim(),
-    (await page.textContent('.row[data-id="M4"] .meta')).trim() === 'Nestlé · 395 g');
-  check('missing-barcode marker cleared once linked',
-    !(await page.isVisible('.row[data-id="M4"] [data-action="fix-gtin"]')));
-  check('barcode prefilled on reopen, brand/size shown now that there is a code',
-    await (async () => {
-      await page.click('.row[data-id="M4"] [data-action="rename-item"]');
-      await page.waitForSelector('#edit-gtin');
-      const v = await page.inputValue('#edit-gtin');
-      const shown = await page.isVisible('#edit-product-fields');
-      await page.click('#edit-cancel');
-      return v === '7891000100103' && shown;
-    })());
+  check('name replaced by the catalogue on the row',
+    (await page.textContent('.row[data-id="M4"] .txt')).trim() === 'Suco de Uva Aurora');
+  check('brand shown on the row, got: ' + (await page.textContent('.row[data-id="M4"] .meta')).trim(),
+    (await page.textContent('.row[data-id="M4"] .meta')).trim() === 'Aurora');
+  check('camera un-mutes once linked, title becomes "rescan"',
+    await page.locator('.row[data-id="M4"] [data-action="scan-item"]').evaluate(el =>
+      !el.classList.contains('nobc') && el.title === 'Reescanear código de barras'));
 
-  // --- scanning FROM the edit dialog shows the resolved product live, right
-  // in the fields — not just after the save round-trips ---
+  // --- rescanning from INSIDE the edit dialog (opened via the pencil, not
+  // the row's own camera) shows the newly resolved product live too — the
+  // "wrong one got scanned" case — without saving over the row yet ---
   await page.click('.row[data-id="M4"] [data-action="rename-item"]');
   await page.waitForSelector('#edit-gtin');
-  await page.evaluate(() => window.__setCodes(['7896004700236']));
+  await page.evaluate(() => window.__setCodes(['7891000100103']));
   await page.click('#edit-scan');
   await page.waitForSelector('.scan-overlay');
   await page.waitForFunction(
-    () => document.querySelector('#edit-name').value === 'Bolacha Maria',
+    () => document.querySelector('#edit-name').value === 'Leite Condensado Integral moça',
     null, { timeout: 6000 });
-  check('scan-from-edit fills the resolved name',
-    (await page.inputValue('#edit-name')) === 'Bolacha Maria');
-  check('scan-from-edit fills the resolved brand, got: ' + await page.inputValue('#edit-brand'),
-    (await page.inputValue('#edit-brand')) === 'Adria');
-  check('scan-from-edit fills the resolved code',
-    (await page.inputValue('#edit-gtin')) === '7896004700236');
-  check('scan-from-edit leaves size blank — this product has none on file',
-    (await page.inputValue('#edit-net')) === '');
-  check('brand/size visible now that a code just resolved',
-    await page.isVisible('#edit-product-fields'));
-  // Cancelled on purpose: M4 stays as the Leite Condensado row the rest of
-  // the test still relies on.
+  check('rescan-from-edit fills the newly resolved name',
+    (await page.inputValue('#edit-name')) === 'Leite Condensado Integral moça');
+  check('rescan-from-edit fills the newly resolved brand, got: ' + await page.inputValue('#edit-brand'),
+    (await page.inputValue('#edit-brand')) === 'Casa de Bento');
+  check('rescan-from-edit fills the newly resolved size, got: ' +
+      await page.inputValue('#edit-net-qty') + ' / ' + await page.inputValue('#edit-net-unit'),
+    (await page.inputValue('#edit-net-qty')) === '1' && (await page.inputValue('#edit-net-unit')) === 'L');
+  check('rescan-from-edit fills the newly resolved code',
+    (await page.inputValue('#edit-gtin')) === '7891000100103');
+  // Cancelled on purpose: M4 stays the Suco de Uva Aurora row the rest of the
+  // test still relies on — this only proves the rescan is caught before
+  // anything saves, which is the whole point of reviewing it here first.
   await page.click('#edit-cancel');
 
-  // --- price is editable from the pencil too, not just the row's own field ---
+  // --- quantity and price are editable from the pencil too, in the same row
+  // the scan dialog puts them in ---
   await page.click('.row[data-id="M4"] [data-action="rename-item"]');
   await page.waitForSelector('#edit-price');
   check('price field starts blank for an item with no price yet',
@@ -752,17 +766,19 @@ function handleScan(body) {
   await page.waitForTimeout(80);
   check('edit-modal price is cents-first too, got: ' + await page.inputValue('#edit-price'),
     (await page.inputValue('#edit-price')) === '9,99');
+  await page.fill('#edit-qty', '5');
   await page.click('#edit-ok');
   await page.waitForFunction(
     () => document.querySelector('.row[data-id="M4"] .price-input').value === '9,99',
     null, { timeout: 6000 });
   check('price set through the edit dialog shows on the row',
     (await page.inputValue('.row[data-id="M4"] .price-input')) === '9,99');
-  // M4's quantity was set to 3 earlier in this test, so the total follows it.
+  check('quantity set through the edit dialog shows on the row, got: ' +
+      await page.inputValue('.row[data-id="M4"] .qty-input'),
+    (await page.inputValue('.row[data-id="M4"] .qty-input')) === '5');
   const m4Subtotal = (await page.textContent('.row[data-id="M4"] [data-subtotal]'))
     .replace(/[  ]/g, ' ').trim();
-  check('line total follows the edit-dialog price too, got: ' + m4Subtotal,
-    m4Subtotal === 'R$ 29,97');
+  check('line total follows both, got: ' + m4Subtotal, m4Subtotal === 'R$ 49,95');
 
   // --- price: cents-first, digits fill in from the right ---
   const priceSel = '.row[data-id="I1"] .price-input';
@@ -878,7 +894,8 @@ function handleScan(body) {
   await page.waitForSelector('#edit-name');
   await page.fill('#edit-name', 'Leite Moça lata');
   await page.fill('#edit-brand', 'Nestlé BR');
-  await page.fill('#edit-net', '800 g');
+  await page.fill('#edit-net-qty', '800');
+  await page.selectOption('#edit-net-unit', 'g');
   await page.click('#edit-ok');
   await page.waitForFunction(
     () => /800/.test((document.querySelector('.row[data-id="M4"] .meta') || {}).textContent || ''),
@@ -888,8 +905,9 @@ function handleScan(body) {
   check('edit of a barcoded item stores brand/size overrides, got: ' +
       (await page.textContent('.row[data-id="M4"] .meta')).trim(),
     (await page.textContent('.row[data-id="M4"] .meta')).trim() === 'Nestlé BR · 800 g');
-  check('the barcode survives the edit',
-    !(await page.isVisible('.row[data-id="M4"] [data-action="fix-gtin"]')));
+  check('the barcode survives the edit, camera still reads "rescan"',
+    await page.locator('.row[data-id="M4"] [data-action="scan-item"]').evaluate(el =>
+      el.title === 'Reescanear código de barras'));
 
   // --- correcting a KNOWN product on its very FIRST scan (a fresh insert,
   // not a merge) — the name goes through as part of the insert itself, so
