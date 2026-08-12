@@ -77,11 +77,21 @@ const state = {
   ],
   seq: 1,
   upserts: [],
+  itemUpdates: [],
+};
+
+// A second known barcode, distinct from the merge-heavy 7891000100103, kept
+// free of other scenarios so a fresh-insert correction can be asserted in
+// isolation (exact call count and shape, not just the visible result).
+const KNOWN_PRODUCTS = {
+  '7891000100103': { name: 'Leite Condensado Integral moça', brand: 'CASA DE BENTO',
+    net_qty: 1000, net_unit: 'ml' },
+  '7896004700236': { name: 'Bolacha Maria', brand: 'Adria', net_qty: null, net_unit: null },
 };
 
 function handleScan(body) {
-  const known = { '7891000100103': 'Leite Condensado Integral moça' };
-  const name = body.name || known[body.gtin];
+  const known = KNOWN_PRODUCTS[body.gtin];
+  const name = body.name || (known && known.name);
   if (!name) return { needs_name: true, found: false, gtin: body.gtin };
   const existing = state.items.find(i => i.gtin === body.gtin && !i.purchased);
   if (existing) {
@@ -94,8 +104,8 @@ function handleScan(body) {
     price: body.price ?? null, quantity: body.quantity ?? 1,
     purchased: false, gtin: body.gtin, created_at: '2026-08-09T10:00:00Z',
     // Brand deliberately SHOUTED, to prove it is tidied at render.
-    products: body.gtin === '7891000100103'
-      ? { brand: 'CASA DE BENTO', net_qty: 1000, net_unit: 'ml' }
+    products: known
+      ? { brand: known.brand.toUpperCase(), net_qty: known.net_qty, net_unit: known.net_unit }
       : null,
   };
   state.items.push(item);
@@ -195,6 +205,7 @@ function handleScan(body) {
 
   await page.route('**/functions/v1/checklist-api', async route => {
     const body = route.request().postDataJSON();
+    if (body.action === 'shopping_item_update') state.itemUpdates.push({ ...body });
     let resp;
     if (body.action === 'shopping_lists') {
       resp = { lists: [{ id: 'L1', name: 'Mercado', emoji: '🛒', item_count: state.items.length,
@@ -202,12 +213,9 @@ function handleScan(body) {
     } else if (body.action === 'shopping_items') {
       resp = { items: state.items.map(i => ({ ...i })) };
     } else if (body.action === 'product_lookup') {
-      const known = {
-        '7891000100103': { gtin: body.gtin, name: 'Leite Condensado Integral moça',
-          brand: 'CASA DE BENTO', net_qty: 1000, net_unit: 'ml' },
-      };
-      resp = known[body.gtin]
-        ? { found: true, gtin: body.gtin, product: known[body.gtin], origin: 'local' }
+      const known = KNOWN_PRODUCTS[body.gtin];
+      resp = known
+        ? { found: true, gtin: body.gtin, product: { gtin: body.gtin, ...known }, origin: 'local' }
         : { found: false, gtin: body.gtin };
     } else if (body.action === 'product_price_history') {
       resp = { gtin: body.gtin, prices: body.gtin === '7891000100103'
@@ -248,13 +256,28 @@ function handleScan(body) {
       const it = state.items.find(i => i.id === body.id);
       if (it) it.price = body.price;
       resp = { ok: true, item: it ? { ...it } : null };
+    } else if (body.action === 'shopping_item_update' && !('name' in body) &&
+               ('brand' in body)) {
+      // A known product's brand corrected from the scan dialog: an
+      // item-level override sent on its own, without the rest of the
+      // full edit-modal payload (name/net_text/gtin).
+      const it = state.items.find(i => i.id === body.id);
+      if (it) it.brand = (body.brand ?? '').trim() || null;
+      resp = { ok: true, item: it ? { ...it } : null };
     } else if (body.action === 'shopping_item_update' && 'name' in body) {
       const it = state.items.find(i => i.id === body.id);
-      Object.assign(it, { name: body.name, brand: (body.brand || '').trim() || null });
-      const t = (body.net_text || '').trim();
-      const m = t ? t.match(/^([\d.,]+)\s*(kg|g|ml|l)$/i) : null;
-      it.net_qty = m ? Number(m[1].replace(',', '.')) * (/^(kg|l)$/i.test(m[2]) ? 1000 : 1) : null;
-      it.net_unit = m ? (/^(kg|g)$/i.test(m[2]) ? 'g' : 'ml') : null;
+      it.name = body.name;
+      // Each field is only touched when the caller actually sent it — the
+      // full edit modal sends all of them together, but a scan-dialog
+      // correction can send just the name, so a field's absence has to mean
+      // "leave it alone", not "clear it".
+      if ('brand' in body) it.brand = (body.brand ?? '').trim() || null;
+      if ('net_text' in body) {
+        const t = (body.net_text || '').trim();
+        const m = t ? t.match(/^([\d.,]+)\s*(kg|g|ml|l)$/i) : null;
+        it.net_qty = m ? Number(m[1].replace(',', '.')) * (/^(kg|l)$/i.test(m[2]) ? 1000 : 1) : null;
+        it.net_unit = m ? (/^(kg|g)$/i.test(m[2]) ? 'g' : 'ml') : null;
+      }
       // Only a CHANGED code re-resolves; an unchanged one leaves the edits
       // above standing as overrides.
       if ('gtin' in body && (body.gtin || null) !== (it.gtin || null)) {
@@ -321,12 +344,15 @@ function handleScan(body) {
   check('valid code vibrates once', await vibrations() === 1);
   // --- the scan dialog confirms the product and collects qty + price ---
   await page.waitForSelector('#scan-price', { timeout: 6000 });
-  check('dialog names the resolved product',
-    /Leite Condensado/.test(await page.textContent('.scan-product')));
-  // The size lives in its own editable field now, so the meta line is brand
-  // only — repeating it in both would read as the dialog contradicting itself.
-  check('dialog shows the brand, got: ' + await page.textContent('.scan-meta'),
-    (await page.textContent('.scan-meta')).trim() === 'Casa de Bento');
+  // Name and brand are editable, not read-only — a known product can still
+  // have a bad OFF entry or an earlier mistake worth fixing right here.
+  check('dialog prefills the resolved name, got: ' + await page.inputValue('#scan-name'),
+    (await page.inputValue('#scan-name')) === 'Leite Condensado Integral moça');
+  check('dialog prefills the brand, got: ' + await page.inputValue('#scan-brand'),
+    (await page.inputValue('#scan-brand')) === 'Casa de Bento');
+  // The gtin line no longer repeats the brand — that lives in its own field now.
+  check('dialog meta line shows just the code, got: ' + await page.textContent('.scan-meta'),
+    (await page.textContent('.scan-meta')).trim() === 'Código 7891000100103');
   // 1000 ml is stored, but the box says 1 L — the prefill has to read like the
   // packaging, not like our storage units, or every scan looks wrong.
   check('package size is prefilled from the catalogue, got: ' +
@@ -334,8 +360,7 @@ function handleScan(body) {
       await page.inputValue('#scan-net-unit'),
     (await page.inputValue('#scan-net-qty')) === '1' &&
     (await page.inputValue('#scan-net-unit')) === 'L');
-  check('known product has no name field', (await page.$$('#scan-name')).length === 0);
-  check('cursor starts in the price field',
+  check('cursor starts in the price field, not the prefilled name',
     await page.evaluate(() => document.activeElement.id) === 'scan-price');
   check('quantity defaults to 1', (await page.inputValue('#scan-qty')) === '1');
   // Several .hint lines share the dialog now (size, price), so this has to
@@ -479,9 +504,12 @@ function handleScan(body) {
   await page.evaluate(() => window.__setCodes(['7891000100103']));
   await page.click('#scan-item-btn');
   await page.waitForSelector('#scan-price', { timeout: 6000 });
-  check('a product already on the list still opens the dialog',
-    /Leite Condensado/.test(await page.textContent('.scan-product')));
-  await page.click('#scan-ok');            // quantity 1, no price
+  check('a product already on the list still opens the dialog, got: ' +
+      await page.inputValue('#scan-name'),
+    (await page.inputValue('#scan-name')) === 'Leite Condensado Integral moça');
+  // --- correcting the brand of a KNOWN product, while merging ---
+  await page.fill('#scan-brand', 'Nestlé');
+  await page.click('#scan-ok');
   await page.waitForFunction(
     () => document.querySelector('.row[data-id="S2"] .qty-input').value === '3',
     null, { timeout: 6000 });
@@ -491,6 +519,17 @@ function handleScan(body) {
   check('a blank price leaves the existing one alone, got: ' +
       await page.inputValue('.row[data-id="S2"] .price-input'),
     (await page.inputValue('.row[data-id="S2"] .price-input')) === '6,75');
+  // The corrected brand is an override on THIS row (not a catalogue
+  // rewrite), same as the pencil-edit dialog would make — shown without a
+  // refetch, and sent as its own patch rather than the full edit-modal shape.
+  check('corrected brand shows on the merged row without a refetch, got: ' +
+      (await page.textContent('.row[data-id="S2"] .meta')).trim(),
+    (await page.textContent('.row[data-id="S2"] .meta')).trim() === 'Nestlé · 1 L');
+  check('exactly one item-level patch sent for the merge correction, got: ' +
+      JSON.stringify(state.itemUpdates),
+    state.itemUpdates.length === 1 && state.itemUpdates[0].id === 'S2' &&
+    state.itemUpdates[0].brand === 'Nestlé' && !('name' in state.itemUpdates[0]));
+  state.itemUpdates.length = 0;
 
   // --- unknown but VALID code still prompts, after the camera closes ---
   await page.evaluate(() => window.__setCodes(['7899999999999']));
@@ -807,6 +846,45 @@ function handleScan(body) {
     (await page.textContent('.row[data-id="M4"] .meta')).trim() === 'Nestlé BR · 800 g');
   check('the barcode survives the edit',
     !(await page.isVisible('.row[data-id="M4"] [data-action="fix-gtin"]')));
+
+  // --- correcting a KNOWN product on its very FIRST scan (a fresh insert,
+  // not a merge) — the name goes through as part of the insert itself, so
+  // only the brand should need a follow-up patch. Run last, and its own
+  // barcode, so the row-count checks and ids earlier in the test are
+  // undisturbed by it. ---
+  state.itemUpdates.length = 0;
+  const rowCountBefore = await rows();
+  await page.evaluate(() => window.__setCodes(['7896004700236']));
+  await page.click('#scan-item-btn');
+  await page.waitForSelector('#scan-price', { timeout: 6000 });
+  check('second known product prefills its own name and brand, got: ' +
+      await page.inputValue('#scan-name') + ' / ' + await page.inputValue('#scan-brand'),
+    (await page.inputValue('#scan-name')) === 'Bolacha Maria' &&
+    (await page.inputValue('#scan-brand')) === 'Adria');
+  await page.fill('#scan-name', 'Bolacha Maria Tradicional');
+  await page.fill('#scan-brand', 'Piraquê');
+  await page.click('#scan-ok');
+  await page.waitForFunction(
+    (n) => document.querySelectorAll('.row[data-id]').length === n,
+    rowCountBefore + 1, { timeout: 6000 });
+  const newRowId = await page.evaluate(() =>
+    document.querySelector('.row:last-child').getAttribute('data-id'));
+  check('corrected name used for the new row, got: ' +
+      await page.textContent('.row[data-id="' + newRowId + '"] .txt'),
+    (await page.textContent('.row[data-id="' + newRowId + '"] .txt')).trim() ===
+      'Bolacha Maria Tradicional');
+  check('corrected brand shown on the new row, got: ' +
+      (await page.textContent('.row[data-id="' + newRowId + '"] .meta')).trim(),
+    (await page.textContent('.row[data-id="' + newRowId + '"] .meta')).trim() === 'Piraquê');
+  // The name was already sent as part of the insert itself (shopping_item_scan
+  // took it directly), so the follow-up patch should carry the brand only —
+  // resending an unchanged name would just be a wasted round trip.
+  check('fresh insert only patches the brand, not the name, got: ' +
+      JSON.stringify(state.itemUpdates),
+    state.itemUpdates.length === 1 && state.itemUpdates[0].id === newRowId &&
+    state.itemUpdates[0].brand === 'Piraquê' && !('name' in state.itemUpdates[0]));
+  check('no catalogue write for a correction on a product that already exists',
+    state.upserts.every(u => u.gtin !== '7896004700236'));
 
   await page.screenshot({ path: path.join(SHOTS, 'after_scan.png'), fullPage: true });
   await browser.close();
