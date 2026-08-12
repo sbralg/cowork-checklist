@@ -61,6 +61,19 @@ never touches Supabase and holds no passphrase. There is no CI — run
 - **No build step.** Each `.html` file is a single, complete, static
   page — HTML/CSS/JS all inline in one file. Deploy is `git push` to
   `main`; GitHub Pages serves it directly, no CI.
+- **Commit straight to `main` — no feature branches, no pull requests
+  in THIS repo (decided 2026-08-12).** `main` is what Pages serves, so
+  a change parked on a branch cannot be looked at on a phone; the only
+  way to review a UI change here is to have it deployed. Routing that
+  through a PR meant the user had to merge before seeing it and then do
+  branch surgery whenever it needed another pass. Push the work, let
+  them look at the live page, iterate with another commit.
+  - Run `node test/shopping.test.js` BEFORE pushing, every time. It is
+    the only gate left between a broken page and the live site.
+  - `sbralg/cowork-personal-daily-summary` is the opposite — it keeps
+    PRs. Nothing there is served straight from `main` to a browser, and
+    its `CLAUDE.md` is the project's history, which reads better as
+    reviewed changes.
 - **No shared JS module between the pages.** Logic more than one page needs
   (the hamburger menu, `esc()`, `confirmModal()`/`promptModal()`, the
   emoji-grapheme helpers, etc.) is duplicated verbatim in both files
