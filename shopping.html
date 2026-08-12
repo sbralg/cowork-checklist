@@ -1822,6 +1822,20 @@ function renderItems(list, items){
     if(el) el.textContent = lineTotal(it);
   }
 
+  // The row a barcode already belongs to, if the list has one. A checked-off
+  // row still counts: "purchased" means IN THE CART, not gone — scanning it
+  // again is a walk back to the aisle for one more, which belongs on that
+  // same line rather than starting a second one. (It's "Confirmar compra"
+  // that will clear the checked rows out into stock and finance; until then
+  // they're as much a part of the list as any other.) When both a checked
+  // and an unchecked row carry the code, the unchecked one wins — that's
+  // the line still saying "you need this".
+  function rowForGtin(code, exceptId){
+    if(!code) return null;
+    const matches = items.filter(i => i.gtin === code && i.id !== exceptId);
+    return matches.find(i => !i.purchased) || matches[0] || null;
+  }
+
   // Name plus the brand/size line under it, which may appear or disappear
   // entirely depending on what was just saved.
   function redrawItemText(row, it){
@@ -1929,7 +1943,7 @@ function renderItems(list, items){
     // go on and apply the code normally.
     async function mergeIfColliding(code){
       if(!code || code === it.gtin) return false;
-      const existing = items.find(i => i.id !== it.id && i.gtin === code && !i.purchased);
+      const existing = rowForGtin(code, it.id);
       if(!existing) return false;
 
       const hadOwnCode = !!it.gtin;
@@ -2192,9 +2206,7 @@ function renderItems(list, items){
     // been confirmed once. Correcting its name, brand or price is still a
     // tap away on the pencil; asking for them on every repeat scan is what
     // made picking up a second box feel like adding a stranger.
-    // A purchased row is deliberately not matched — that one is in the
-    // cart already, so scanning it again is a genuinely new line.
-    const already = items.find(i => i.gtin === code && !i.purchased);
+    const already = rowForGtin(code);
     if(already){ await addUnitsToRow(already, 1); return; }
 
     // Resolve FIRST and write nothing yet: the dialog needs to show which

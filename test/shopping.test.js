@@ -1043,6 +1043,31 @@ function handleScan(body) {
       await page.inputValue('.row[data-id="S3"] .qty-input'),
     (await page.inputValue('.row[data-id="S3"] .qty-input')) === '2');
 
+  // --- a row already IN THE CART still matches: checking it off means it's
+  // in the trolley, not that it's off the list, so scanning the code again
+  // is a walk back to the aisle for one more and belongs on that same line.
+  // (It's "Confirmar compra" that will later clear checked rows out into
+  // stock and finance.) ---
+  await page.click('.row[data-id="S2"] [data-purchase]');
+  await page.waitForFunction(
+    () => document.querySelector('.row[data-id="S2"] .txt').classList.contains('done'),
+    null, { timeout: 6000 });
+  const qtyBeforeCartScan = await page.inputValue('.row[data-id="S2"] .qty-input');
+  const rowsBeforeCartScan = await rows();
+  await page.evaluate(() => window.__setCodes(['7891000100103']));
+  await page.click('#scan-item-btn');
+  await page.waitForFunction(
+    (q) => document.querySelector('.row[data-id="S2"] .qty-input').value !== q,
+    qtyBeforeCartScan, { timeout: 6000 });
+  check('scanning a checked-off item bumps it rather than starting a new line, got: ' +
+      await page.inputValue('.row[data-id="S2"] .qty-input') + ' from ' + qtyBeforeCartScan,
+    (await page.inputValue('.row[data-id="S2"] .qty-input')) ===
+      String(Number(qtyBeforeCartScan) + 1));
+  check('no new row for a checked-off item', (await rows()) === rowsBeforeCartScan);
+  check('no dialog either', (await page.$$('.modal-card')).length === 0);
+  check('it stays in the cart', await page.locator('.row[data-id="S2"] [data-purchase]')
+    .evaluate(el => el.checked));
+
   await page.screenshot({ path: path.join(SHOTS, 'after_scan.png'), fullPage: true });
   await browser.close();
   server.close();
