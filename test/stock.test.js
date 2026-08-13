@@ -1,0 +1,531 @@
+// Headless UI test for estoque.html and produtos.html — the pantry
+// steppers, the zero floor and its retroactive-purchase dialog, the
+// recount dialog, the catalogue search, the price graph and the product
+// editor.
+//
+//   node test/stock.test.js             # exits non-zero on any failure
+//   KEEP_SHOTS=1 node test/...          # also prints where screenshots went
+//
+// Same shape as shopping.test.js: it serves the repo root over http (which
+// is what GitHub Pages does, and localStorage behaves differently on a
+// file: origin) and answers checklist-api from an in-memory fake, so it
+// never touches Supabase and holds no passphrase.
+//
+// The fake keeps a REAL LEDGER rather than a balance number, and enforces
+// the zero floor exactly the way the Edge Function does — refusing with
+// ok:false + the shortfall instead of an error status. That rule is the
+// whole reason this page has the dialog it has, so faking it away would
+// leave the interesting half untested.
+const http = require('http');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+function loadPlaywright() {
+  for (const id of ['playwright', '/opt/node22/lib/node_modules/playwright']) {
+    try { return require(id); } catch (_) { /* try the next */ }
+  }
+  console.error('playwright not found — npm i -D playwright, or set NODE_PATH');
+  process.exit(2);
+}
+const { chromium } = loadPlaywright();
+
+const WEB_DIR = path.resolve(__dirname, '..');
+const SHOTS = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-test-'));
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript',
+                '.css': 'text/css', '.png': 'image/png' };
+
+function serve() {
+  return new Promise(resolve => {
+    const server = http.createServer((req, res) => {
+      const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '');
+      const file = path.join(WEB_DIR, rel || 'estoque.html');
+      if (!file.startsWith(WEB_DIR)) { res.writeHead(403).end(); return; }
+      fs.readFile(file, (err, body) => {
+        if (err) { res.writeHead(404).end(); return; }
+        res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
+        res.end(body);
+      });
+    });
+    server.listen(0, '127.0.0.1', () => resolve(server));
+  });
+}
+
+// Four products spanning what the pages have to cope with: a stocked one
+// with a package size, a stocked one WITHOUT (so the "total" line has to
+// stay absent), one at zero, and one with a price history long enough to
+// draw a line from.
+const PRODUCTS = [
+  { gtin: '7891000100103', name: 'Leite Condensado moça', brand: 'NESTLÉ',
+    net_qty: 395, net_unit: 'g', image_url: null, source: 'off' },
+  { gtin: '7896004700236', name: 'Bolacha Maria', brand: 'Adria',
+    net_qty: null, net_unit: null, image_url: null, source: 'off' },
+  { gtin: '7891234567895', name: 'Manteiga com Sal', brand: 'AVIAÇÃO',
+    net_qty: 200, net_unit: 'g', image_url: null, source: 'off' },
+  { gtin: '7897001234564', name: 'Suco de Uva Aurora', brand: 'AURORA',
+    net_qty: 1000, net_unit: 'ml', image_url: null, source: 'manual' },
+];
+
+const PRICES = {
+  '7891000100103': [
+    { id: 'P1', price: 7.5, quantity: 1, store: null, captured_at: '2026-06-01T10:00:00Z' },
+    { id: 'P2', price: 6.9, quantity: 1, store: null, captured_at: '2026-07-01T10:00:00Z' },
+    { id: 'P3', price: 8.2, quantity: 1, store: null, captured_at: '2026-08-01T10:00:00Z' },
+  ],
+  // Exactly one price: not a history, so no chart should be drawn.
+  '7891234567895': [
+    { id: 'P4', price: 12.0, quantity: 1, store: null, captured_at: '2026-08-02T10:00:00Z' },
+  ],
+  '7896004700236': [],
+  '7897001234564': [],
+};
+
+const state = { movements: [], seq: 0, calls: [] };
+
+// Seed: 3 leite, 1 manteiga, 2 suco, 0 bolacha.
+function seed(gtin, n) {
+  state.movements.push({ id: 'M' + (++state.seq), gtin, delta: n, reason: 'purchase',
+    unit_cost: null, note: null, source_item_id: null,
+    occurred_at: '2026-08-05T10:00:00Z' });
+}
+function resetState() {
+  state.movements = [];
+  state.seq = 0;
+  state.calls = [];
+  seed('7891000100103', 3);
+  seed('7891234567895', 1);
+  seed('7897001234564', 2);
+}
+
+function balance(gtin) {
+  return state.movements
+    .filter(m => m.gtin === gtin)
+    .reduce((acc, m) => acc + Number(m.delta), 0);
+}
+function lastPrice(gtin) {
+  const list = PRICES[gtin] || [];
+  return list.length ? list[list.length - 1].price : null;
+}
+
+function productsResponse() {
+  return {
+    products: PRODUCTS.map(p => ({
+      ...p,
+      qty: balance(p.gtin),
+      last_movement_at: null,
+      last_price: lastPrice(p.gtin),
+      last_price_at: null,
+    })),
+    stock_error: null,
+    price_error: null,
+  };
+}
+
+// Mirrors checklist-api's stock_move, including the two things that matter:
+// the zero floor answering 200 + ok:false (a business outcome, not a
+// transport error), and an inbound movement with no unit_cost falling back
+// to the last price paid.
+function handleMove(body) {
+  const current = balance(body.gtin);
+  const delta = Number(body.delta);
+  if (current + delta < 0) {
+    return { ok: false, reason: 'insufficient_stock', gtin: body.gtin,
+      available: current, requested: -delta, deficit: -(current + delta),
+      last_price: lastPrice(body.gtin) };
+  }
+  let unitCost = null;
+  if (body.reason === 'purchase' || body.reason === 'unaccounted_purchase') {
+    unitCost = body.unit_cost === undefined ? lastPrice(body.gtin)
+      : (body.unit_cost === null || body.unit_cost === '' ? null : Number(body.unit_cost));
+  }
+  const movement = { id: 'M' + (++state.seq), gtin: body.gtin, delta,
+    reason: body.reason, unit_cost: unitCost, note: body.note ?? null,
+    source_item_id: body.source_item_id ?? null,
+    occurred_at: new Date().toISOString() };
+  state.movements.push(movement);
+  return { ok: true, qty: current + delta, movement };
+}
+
+(async () => {
+  const failures = [];
+  const check = (label, cond) => { if (!cond) failures.push('FAIL: ' + label); };
+
+  resetState();
+  const server = await serve();
+  const BASE = 'http://127.0.0.1:' + server.address().port + '/';
+  const browser = await chromium.launch({
+    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+  });
+  const ctx = await browser.newContext({ viewport: { width: 414, height: 860 } });
+
+  const errors = [];
+  ctx.on('weberror', e => errors.push('pageerror: ' + e.error().message));
+  await ctx.addInitScript(() => {
+    try { localStorage.setItem('checklist_pass', 'x'); } catch (_) {}
+  });
+
+  const page = await ctx.newPage();
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+
+  await page.route('**/functions/v1/checklist-api', async route => {
+    const body = route.request().postDataJSON();
+    state.calls.push({ ...body });
+    let resp;
+    if (body.action === 'products') {
+      resp = productsResponse();
+    } else if (body.action === 'product_detail') {
+      const p = PRODUCTS.find(x => x.gtin === body.gtin);
+      resp = p
+        ? { found: true, gtin: p.gtin, product: { ...p }, qty: balance(p.gtin),
+            prices: (PRICES[p.gtin] || []).map(x => ({ ...x })),
+            movements: state.movements.filter(m => m.gtin === p.gtin)
+              .slice().reverse().map(m => ({ ...m })) }
+        : { found: false, gtin: body.gtin };
+    } else if (body.action === 'stock_move') {
+      resp = handleMove(body);
+    } else if (body.action === 'stock_set') {
+      const current = balance(body.gtin);
+      const delta = Number(body.quantity) - current;
+      if (delta === 0) resp = { ok: true, qty: current, unchanged: true };
+      else {
+        state.movements.push({ id: 'M' + (++state.seq), gtin: body.gtin, delta,
+          reason: 'adjustment', unit_cost: null, note: null, source_item_id: null,
+          occurred_at: new Date().toISOString() });
+        resp = { ok: true, qty: Number(body.quantity) };
+      }
+    } else if (body.action === 'stock_movement_delete') {
+      const i = state.movements.findIndex(m => m.id === body.id);
+      const gtin = i >= 0 ? state.movements[i].gtin : null;
+      if (i >= 0) state.movements.splice(i, 1);
+      resp = { ok: true, qty: gtin ? balance(gtin) : null };
+    } else if (body.action === 'product_upsert') {
+      const p = PRODUCTS.find(x => x.gtin === body.gtin);
+      if (p) {
+        p.name = body.name;
+        if ('brand' in body) p.brand = body.brand || null;
+        if ('net_qty' in body) p.net_qty = body.net_qty;
+        if ('net_unit' in body) p.net_unit = body.net_unit;
+      }
+      resp = { product: { ...p } };
+    } else {
+      resp = { error: 'bad action' };
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify(resp) });
+  });
+
+  const rowSel = g => '.row[data-gtin="' + g + '"]';
+  const qtyText = g => page.textContent(rowSel(g) + ' [data-qty]');
+  const step = (g, dir) => page.click(rowSel(g) + ' .step-btn[data-step="' + dir + '"]');
+  // Every mutation round-trips, so waiting for the number to settle is the
+  // honest way to sequence the assertions.
+  const waitQty = (g, want) => page.waitForFunction(
+    ([sel, w]) => document.querySelector(sel + ' [data-qty]')?.textContent === w,
+    [rowSel(g), want], { timeout: 6000 });
+
+  // ================= estoque.html =================
+  await page.goto(BASE + 'estoque.html');
+  await page.waitForSelector('#in-card', { timeout: 8000 });
+
+  check('the pantry lists what is in stock',
+    (await page.$$('#in-card .row')).length === 3);
+
+  // Lowest first: the point of a pantry list is what is about to run out.
+  const order = await page.$$eval('#in-card .row', rows => rows.map(r => r.dataset.gtin));
+  check('sorted lowest first, got: ' + order.join(','),
+    order[0] === '7891234567895' && order[1] === '7897001234564' &&
+    order[2] === '7891000100103');
+
+  check('out-of-stock products are behind a collapsed section',
+    (await page.$('#toggle-empty')) !== null &&
+    await page.locator('#out-card').evaluate(el => el.classList.contains('hidden')));
+  check('the collapsed section holds the product at zero',
+    (await page.$$('#out-card .row')).length === 1 &&
+    (await page.$('#out-card ' + rowSel('7896004700236'))) !== null);
+
+  // Open it and leave it open for the rest of the run: a row that runs out
+  // MOVES into this section, so from here on the interesting rows live
+  // here, and a user taking two of something they are out of has to open it
+  // the same way.
+  await page.click('#toggle-empty');
+  await page.waitForFunction(
+    () => !document.getElementById('out-card').classList.contains('hidden'),
+    null, { timeout: 4000 });
+
+  // The count times the package size, which is what the whole net_qty
+  // apparatus exists to make possible.
+  check('the real amount is shown, got: ' + await page.textContent(rowSel('7891000100103') + ' [data-meta]'),
+    (await page.textContent(rowSel('7891000100103') + ' [data-meta]')).includes('total 1,185 kg'));
+  check('a product with no package size shows no total, got: ' +
+      await page.textContent(rowSel('7896004700236') + ' [data-meta]'),
+    !(await page.textContent(rowSel('7896004700236') + ' [data-meta]')).includes('total'));
+
+  // --- putting one away ---
+  await step('7891000100103', '1');
+  await waitQty('7891000100103', '4');
+  check('+ books a purchase',
+    state.calls.some(c => c.action === 'stock_move' && c.delta === 1 && c.reason === 'purchase'));
+  check('the purchase carries the last price paid, so finance has a number',
+    state.movements.filter(m => m.reason === 'purchase' && m.unit_cost === 8.2).length === 1);
+
+  // --- taking one out ---
+  await step('7891000100103', '-1');
+  await waitQty('7891000100103', '3');
+  check('− books a consumption',
+    state.calls.some(c => c.action === 'stock_move' && c.delta === -1 && c.reason === 'consumption'));
+  check('a consumption carries no cost — what a drawdown is worth is the ' +
+      'finance module\'s call, not this table\'s',
+    state.movements.filter(m => m.reason === 'consumption').every(m => m.unit_cost === null));
+
+  // --- crossing zero moves the row into the other half ---
+  await step('7891234567895', '-1');
+  await waitQty('7891234567895', '0');
+  check('a row that runs out moves to the out-of-stock section',
+    (await page.$('#out-card ' + rowSel('7891234567895'))) !== null);
+
+  // --- THE zero floor, cancelled ---
+  const movesBefore = state.movements.length;
+  await step('7891234567895', '-1');
+  await page.waitForSelector('.modal-card', { timeout: 6000 });
+  check('using something with no stock asks instead of going negative',
+    (await page.textContent('.modal-card h3')).includes('Não tem isso em estoque'));
+  check('the dialog prefills the last price paid, got: ' + await page.inputValue('#sf-price'),
+    (await page.inputValue('#sf-price')) === '12,00');
+  await page.screenshot({ path: path.join(SHOTS, 'shortfall.png') });
+  check('and how many are missing, got: ' + await page.inputValue('#sf-qty'),
+    (await page.inputValue('#sf-qty')) === '1');
+  await page.click('#sf-cancel');
+  await page.waitForSelector('.modal-card', { state: 'detached', timeout: 6000 });
+  check('declining writes absolutely nothing', state.movements.length === movesBefore);
+  check('and leaves the count alone', (await qtyText('7891234567895')) === '0');
+
+  // --- THE zero floor, resolved as a retroactive purchase ---
+  await step('7891234567895', '-1');
+  await page.waitForSelector('#sf-price', { timeout: 6000 });
+  await page.fill('#sf-qty', '2');
+  await page.fill('#sf-price', '1350');
+  check('the price field is cents-first, got: ' + await page.inputValue('#sf-price'),
+    (await page.inputValue('#sf-price')) === '13,50');
+  await page.click('#sf-ok');
+  await waitQty('7891234567895', '1');
+
+  const retro = state.movements.filter(m => m.reason === 'unaccounted_purchase');
+  check('the missing purchase is recorded, not swallowed', retro.length === 1);
+  check('with the quantity actually bought, got: ' + (retro[0] && retro[0].delta),
+    retro[0] && retro[0].delta === 2);
+  check('and the cost, so the finance module can find it later, got: ' +
+      (retro[0] && retro[0].unit_cost),
+    retro[0] && retro[0].unit_cost === 13.5);
+  check('the consumption then goes through', balance('7891234567895') === 1);
+  check('the row is back in the in-stock section',
+    (await page.$('#in-card ' + rowSel('7891234567895'))) !== null);
+
+  // The floor is the invariant the whole page is built around.
+  check('no balance ever went below zero',
+    PRODUCTS.every(p => balance(p.gtin) >= 0));
+
+  // --- buying fewer than are missing is refused up front, rather than
+  // letting the retry fail ---
+  await step('7896004700236', '-1');
+  await page.waitForSelector('#sf-qty', { timeout: 6000 });
+  page.once('dialog', d => d.dismiss());
+  await page.fill('#sf-qty', '0');
+  await page.click('#sf-ok');
+  check('a quantity that would not cover the shortfall keeps the dialog open',
+    (await page.$('#sf-qty')) !== null);
+  await page.click('#sf-cancel');
+  await page.waitForSelector('.modal-card', { state: 'detached', timeout: 6000 });
+
+  // --- recounting the shelf ---
+  await page.click(rowSel('7891000100103') + ' [data-qty]');
+  await page.waitForSelector('#ct-qty', { timeout: 6000 });
+  check('the recount dialog opens on the current count, got: ' + await page.inputValue('#ct-qty'),
+    (await page.inputValue('#ct-qty')) === '3');
+  await page.fill('#ct-qty', '5');
+  await page.click('#ct-ok');
+  await waitQty('7891000100103', '5');
+  check('a recount is an adjustment, not a purchase',
+    state.movements.some(m => m.reason === 'adjustment' && m.delta === 2));
+
+  // Zero is a legitimate recount — "there are none left" — even though the
+  // steppers can never reach it by consuming what isn't there.
+  await page.click(rowSel('7891000100103') + ' [data-qty]');
+  await page.waitForSelector('#ct-qty', { timeout: 6000 });
+  await page.fill('#ct-qty', '0');
+  await page.click('#ct-ok');
+  await waitQty('7891000100103', '0');
+  check('a shelf can be counted down to zero', balance('7891000100103') === 0);
+  await page.click(rowSel('7891000100103') + ' [data-qty]');
+  await page.waitForSelector('#ct-qty', { timeout: 6000 });
+  await page.fill('#ct-qty', '3');
+  await page.click('#ct-ok');
+  await waitQty('7891000100103', '3');
+
+  // --- a double tap must not outrun the floor ---
+  // Two −1 taps at a balance of 1: fired together they would both read a
+  // balance of 1 server-side and both pass, landing at −1. The per-product
+  // queue is what stops that.
+  await page.click(rowSel('7891234567895') + ' .step-btn[data-step="-1"]');
+  await page.click(rowSel('7891234567895') + ' .step-btn[data-step="-1"]');
+  await page.waitForSelector('#sf-qty', { timeout: 6000 });
+  check('the second tap is queued behind the first and hits the floor, not −1',
+    balance('7891234567895') === 0);
+  await page.click('#sf-cancel');
+  await page.waitForSelector('.modal-card', { state: 'detached', timeout: 6000 });
+
+  // --- search ---
+  await page.fill('#search', 'manteiga');
+  await page.waitForFunction(
+    () => document.querySelectorAll('.row[data-gtin]').length === 1, null, { timeout: 6000 });
+  check('search matches the name', (await page.$(rowSel('7891234567895'))) !== null);
+  await page.fill('#search', '7896004700236');
+  await page.waitForFunction(
+    () => document.querySelectorAll('.row[data-gtin]').length === 1, null, { timeout: 6000 });
+  check('search matches the barcode', (await page.$(rowSel('7896004700236'))) !== null);
+  await page.fill('#search', 'aviação');
+  await page.waitForFunction(
+    () => document.querySelectorAll('.row[data-gtin]').length === 1, null, { timeout: 6000 });
+  check('search matches the brand', (await page.$(rowSel('7891234567895'))) !== null);
+  await page.fill('#search', '');
+  await page.waitForFunction(
+    () => document.querySelectorAll('.row[data-gtin]').length === 4, null, { timeout: 6000 });
+
+  check('the menu offers both new pages', await page.evaluate(() => {
+    document.getElementById('menu-btn').click();
+    const labels = [...document.querySelectorAll('.menu-item')].map(e => e.textContent);
+    document.querySelector('.menu-backdrop').remove();
+    return labels.some(l => l.includes('Estoque')) && labels.some(l => l.includes('Produtos'));
+  }));
+
+  await page.screenshot({ path: path.join(SHOTS, 'estoque.png'), fullPage: true });
+
+  // ================= produtos.html =================
+  await page.goto(BASE + 'produtos.html');
+  await page.waitForSelector('#cat-card', { timeout: 8000 });
+
+  check('the catalogue lists every product',
+    (await page.$$('#cat-card .row')).length === 4);
+  await page.screenshot({ path: path.join(SHOTS, 'produtos.png'), fullPage: true });
+  check('each row carries its pantry count, got: ' +
+      await page.textContent(rowSel('7891000100103') + ' .stock-badge'),
+    (await page.textContent(rowSel('7891000100103') + ' .stock-badge')).trim() === '3 un');
+  check('a shouted brand is tidied at render, got: ' +
+      await page.textContent(rowSel('7891000100103') + ' .meta'),
+    (await page.textContent(rowSel('7891000100103') + ' .meta')).includes('Nestlé'));
+
+  await page.fill('#search', 'bolacha');
+  await page.waitForFunction(
+    () => document.querySelectorAll('.row[data-gtin]').length === 1, null, { timeout: 6000 });
+  check('the catalogue searches too', (await page.$(rowSel('7896004700236'))) !== null);
+  await page.fill('#search', '');
+  await page.waitForFunction(
+    () => document.querySelectorAll('.row[data-gtin]').length === 4, null, { timeout: 6000 });
+
+  // --- detail sheet ---
+  await page.click(rowSel('7891000100103') + ' .body');
+  await page.waitForSelector('.prod-head', { timeout: 6000 });
+  check('the detail sheet shows the pantry count',
+    (await page.textContent('.stock-line .big')) === '3');
+  check('and what it adds up to, got: ' + await page.textContent('.stock-line'),
+    (await page.textContent('.stock-line')).includes('1,185 kg'));
+
+  check('a price series is drawn as a chart', (await page.$('svg.chart')) !== null);
+  check('one dot per price point, got: ' + (await page.$$('svg.chart .dot')).length,
+    (await page.$$('svg.chart .dot')).length === 3);
+  check('the cheapest and dearest are labelled, and nothing else is',
+    (await page.$$eval('svg.chart .lbl.val', els => els.map(e => e.textContent)))
+      .join('|').replace(/ /g, ' ') === 'R$ 8,20|R$ 6,90');
+  check('the same numbers are readable as text, not only as a picture',
+    (await page.$$('.plist .prow')).length === 3);
+  // An SVG chart that cannot be interrogated is decoration.
+  await page.click('svg.chart .hit[data-i="0"]');
+  await page.waitForSelector('.chart-tip.show', { timeout: 4000 });
+  check('a point can be tapped for its date and price, got: ' +
+      await page.textContent('.chart-tip'),
+    (await page.textContent('.chart-tip')).includes('01/06/2026'));
+
+  check('the movement ledger is listed', (await page.$$('#mov-card .mov')).length > 0);
+  await page.screenshot({ path: path.join(SHOTS, 'produto_detalhe.png'), fullPage: true });
+
+  // --- editing catalogue metadata: the whole reason this page exists ---
+  await page.click('#edit-product');
+  await page.waitForSelector('#pe-name', { timeout: 6000 });
+  check('the editor prefills the stored size as the packaging reads it, got: ' +
+      await page.inputValue('#pe-net-qty') + await page.inputValue('#pe-net-unit'),
+    (await page.inputValue('#pe-net-qty')) === '395' &&
+    (await page.inputValue('#pe-net-unit')) === 'g');
+  await page.fill('#pe-name', 'Leite Condensado Moça');
+  await page.fill('#pe-net-qty', '1,5');
+  await page.selectOption('#pe-net-unit', 'kg');
+  await page.click('#pe-ok');
+  await page.waitForSelector('.prod-head', { timeout: 6000 });
+
+  const upsert = state.calls.filter(c => c.action === 'product_upsert').pop();
+  check('the edit reaches the catalogue', !!upsert);
+  check('the size is normalized to the stored pair, got: ' +
+      (upsert && upsert.net_qty + upsert.net_unit),
+    upsert && upsert.net_qty === 1500 && upsert.net_unit === 'g');
+  check('the name is saved', upsert && upsert.name === 'Leite Condensado Moça');
+  check('and the sheet redraws with it, got: ' + await page.textContent('.prod-title .name'),
+    (await page.textContent('.prod-title .name')) === 'Leite Condensado Moça');
+
+  // An amount with no unit is refused rather than defaulted to grams —
+  // reading 1,5 as 1,5 g when the box says 1,5 kg corrupts exactly the
+  // number recipes will add up.
+  await page.click('#edit-product');
+  await page.waitForSelector('#pe-net-qty', { timeout: 6000 });
+  await page.selectOption('#pe-net-unit', '');
+  const upsertsBefore = state.calls.filter(c => c.action === 'product_upsert').length;
+  page.once('dialog', d => d.dismiss());
+  await page.click('#pe-ok');
+  check('an amount with no unit is refused', (await page.$('#pe-net-qty')) !== null &&
+    state.calls.filter(c => c.action === 'product_upsert').length === upsertsBefore);
+  await page.click('#pe-cancel');
+
+  // --- a product with a single price has no shape to draw ---
+  await page.click('#back');
+  await page.waitForSelector('#cat-card', { timeout: 6000 });
+  await page.click(rowSel('7891234567895') + ' .body');
+  await page.waitForSelector('.prod-head', { timeout: 6000 });
+  check('one price is not a history, so no chart is drawn',
+    (await page.$('svg.chart')) === null && (await page.$$('.plist .prow')).length === 1);
+
+  // --- removing a mis-tapped ledger entry ---
+  const movsBefore = (await page.$$('#mov-card .mov')).length;
+  await page.click('#mov-card .mov [data-del-mov]');
+  // An in-page modal, not a native confirm() — the convention across every
+  // page here is that a decision gets a real dialog.
+  await page.waitForSelector('#confirm-ok', { timeout: 6000 });
+  await page.click('#confirm-ok');
+  await page.waitForFunction(
+    (n) => document.querySelectorAll('#mov-card .mov').length === n - 1,
+    movsBefore, { timeout: 6000 });
+  check('a movement can be removed when it was a mis-tap',
+    (await page.$$('#mov-card .mov')).length === movsBefore - 1);
+
+  // --- the deep link between the two pages ---
+  await page.goto(BASE + 'produtos.html?gtin=7897001234564');
+  await page.waitForSelector('.prod-head', { timeout: 8000 });
+  check('a deep link opens straight on the product, got: ' +
+      await page.textContent('.prod-title .name'),
+    (await page.textContent('.prod-title .name')) === 'Suco de Uva Aurora');
+  check('and the url is cleaned up so a reload is not stuck on it',
+    !(await page.evaluate(() => location.search)));
+
+  await page.goto(BASE + 'estoque.html?gtin=7897001234564');
+  await page.waitForSelector('#in-card', { timeout: 8000 });
+  await page.waitForSelector(rowSel('7897001234564') + '.flash', { timeout: 4000 });
+  check('and the pantry link points at the right row',
+    (await page.$(rowSel('7897001234564') + '.flash')) !== null);
+
+  await page.screenshot({ path: path.join(SHOTS, 'deeplink.png'), fullPage: true });
+  await browser.close();
+  server.close();
+  if (process.env.KEEP_SHOTS) console.log('screenshots: ' + SHOTS);
+
+  console.log('--- JS errors ---');
+  console.log(errors.length ? errors.join('\n') : '(none)');
+  console.log('--- failures ---');
+  console.log(failures.length ? failures.join('\n') : '(none)');
+  process.exit(failures.length || errors.length ? 1 : 0);
+})();

@@ -5,7 +5,7 @@ Context file for Claude Code / Claude sessions working on this repo.
 ## What this is
 
 The public GitHub Pages front end deployed from this repo's `main` branch,
-served at https://sbralg.github.io/cowork-checklist/. Three independent
+served at https://sbralg.github.io/cowork-checklist/. Five independent
 pages, no build step, no framework:
 
 - `index.html` — the daily-task checklist (pending actions, done-tasks
@@ -15,8 +15,23 @@ pages, no build step, no framework:
   scanning against the product catalogue).
 - `hoje.html` — "Hoje": the morning summary rendered for the browser,
   read from `public.daily_reports`.
+- `estoque.html` — the pantry: how many packages of each product are in
+  the cupboard, and changing that (− / + steppers, exact recount).
+- `produtos.html` — the product catalogue: what a barcode means, its price
+  history as a graph, and the editor that corrects its metadata.
 
-All three are data-free shells: no Supabase keys, no data baked in. Each
+**The rule that shapes `estoque.html`, and must not be quietly undone:
+stock never goes below zero.** Using something that isn't recorded doesn't
+mean the pantry owes you one — it means a purchase was never written down,
+and that purchase cost money a future finance module will want. So a
+consumption that would cross zero is refused by the API (a 200 carrying
+`ok:false` plus the shortfall and the last price, because it is an ordinary
+outcome and not a transport error), and the page offers to book the
+difference as a retroactive `unaccounted_purchase` before completing the
+consumption. This was the user's call over both alternatives on the table;
+the reasoning is in the other repo's `CLAUDE.md`.
+
+All five are data-free shells: no Supabase keys, no data baked in. Each
 asks for a shared passphrase (stored in `localStorage`, prompted once per
 device) and talks only to one Supabase Edge Function, `checklist-api`
 (deployed in project `opehbckfmfschpvbhxvo`), which holds the
@@ -29,8 +44,8 @@ this one for the front end.
 
 ## Master-copy relationship
 
-**Every page lives ONLY here — there are no mirrors anywhere.** All
-three pages and the test have exactly one copy, in this repo. Edit them
+**Every page lives ONLY here — there are no mirrors anywhere.** All five
+pages and both tests have exactly one copy, in this repo. Edit them
 directly; there is nothing to sync and no master copy to update first.
 
 This is a deliberate reversal, not an accident of history. The pages
@@ -49,12 +64,22 @@ reading before changing anything here: the `checklist-api` Edge Function
 source, the Supabase schema, the scheduled task, and the project's full
 dated change history in its `CLAUDE.md`.
 
-`test/shopping.test.js` is a headless Chromium test covering the
-scanner, the barcode validation, the scan confirm dialog (including its
-layout) and the add/edit/merge paths. It serves the repo root on an
-ephemeral port and answers `checklist-api` from an in-memory fake, so it
-never touches Supabase and holds no passphrase. There is no CI — run
-`node test/shopping.test.js` by hand after changing `shopping.html`.
+Two headless Chromium tests, each next to the pages it guards. Both serve
+the repo root on an ephemeral port and answer `checklist-api` from an
+in-memory fake, so neither touches Supabase nor holds a passphrase.
+**There is no CI — run them by hand before pushing.**
+
+- `test/shopping.test.js` — the scanner, the barcode validation, the scan
+  confirm dialog (including its layout) and the add/edit/merge paths. Run
+  it after changing `shopping.html`.
+- `test/stock.test.js` — the pantry steppers, the zero floor and its
+  retroactive-purchase dialog, the recount, the per-product queue that
+  keeps a double tap from outrunning the floor, search, the price graph,
+  the product editor and the deep links between the two pages. Run it
+  after changing `estoque.html` or `produtos.html`. Its fake keeps a
+  **real ledger** and enforces the zero floor the same way the Edge
+  Function does — that rule is the whole reason those pages look the way
+  they do, so faking it away would leave the interesting half untested.
 
 ## Conventions
 
@@ -68,18 +93,27 @@ never touches Supabase and holds no passphrase. There is no CI — run
   through a PR meant the user had to merge before seeing it and then do
   branch surgery whenever it needed another pass. Push the work, let
   them look at the live page, iterate with another commit.
-  - Run `node test/shopping.test.js` BEFORE pushing, every time. It is
-    the only gate left between a broken page and the live site.
+  - Run `node test/shopping.test.js` AND `node test/stock.test.js` BEFORE
+    pushing, every time. They are the only gate left between a broken page
+    and the live site.
   - `sbralg/cowork-personal-daily-summary` is the opposite — it keeps
     PRs. Nothing there is served straight from `main` to a browser, and
     its `CLAUDE.md` is the project's history, which reads better as
     reviewed changes.
 - **No shared JS module between the pages.** Logic more than one page needs
   (the hamburger menu, `esc()`, `confirmModal()`/`promptModal()`, the
-  emoji-grapheme helpers, etc.) is duplicated verbatim in both files
-  rather than factored into a shared script — a deliberate choice, not
-  an oversight. When fixing a shared-pattern bug or adding a shared
-  feature, apply it to both files.
+  emoji-grapheme helpers, `fmtNetQty()`/`fmtQty()`, the cents-first price
+  input, etc.) is duplicated verbatim across the files rather than factored
+  into a shared script — a deliberate choice, not an oversight. When fixing
+  a shared-pattern bug or adding a shared feature, apply it to every file
+  that carries a copy.
+  - `MENU_ITEMS` is the one that bites: adding a page means adding an entry
+    to **all five** copies of that array, or the new page is invisible from
+    wherever you forgot.
+  - What is deliberately NOT duplicated: the barcode scanner. It lives only
+    in `shopping.html` — ~300 lines of camera, lens-picking and focus code
+    that would be a genuine maintenance trap in a second copy. Estoque
+    finds a product by search instead.
 - **Every mutating action should update the DOM in place and fire its
   API call in the background**, only reverting the change (or, for
   destructive actions, re-inserting the same detached DOM node) and
