@@ -110,6 +110,42 @@
     background:rgba(127,127,127,.08);border:1px solid var(--border);
   }
   .thumb.ph{display:flex;align-items:center;justify-content:center;font-size:20px}
+  /* The ingredient chip. Tappable, and it does NOT open the product sheet —
+     categorising a product is quick enough to belong right here, on the
+     screen where you are already looking at the shelf. Muted when unset,
+     because an uncategorised product is normal, not an error. */
+  .ing-chip{
+    font:inherit;font-size:12px;padding:3px 9px;border-radius:999px;margin:5px 0 0;
+    background:rgba(37,99,235,.12);color:var(--accent);border:none;cursor:pointer;
+    max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    display:inline-block;transition:filter .15s ease,background-color .15s ease;
+  }
+  .ing-chip:hover{filter:brightness(1.12)}
+  .ing-chip:active{transform:scale(.97)}
+  .ing-chip.none{background:rgba(127,127,127,.12);color:var(--muted)}
+  /* ---- ingredient picker (same dialog as Produtos) ---- */
+  .ing-list{max-height:44vh;overflow-y:auto;margin:0 0 14px;-webkit-overflow-scrolling:touch}
+  .ing-opt{
+    display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+    background:none;border:none;border-bottom:1px solid var(--border);
+    color:var(--text);font:inherit;font-size:15px;padding:11px 4px;cursor:pointer;
+    transition:background-color .15s ease;
+  }
+  .ing-opt:last-child{border-bottom:none}
+  .ing-opt:hover{background:rgba(127,127,127,.08)}
+  .ing-opt .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ing-opt .cnt{font-size:12px;color:var(--muted);flex:none}
+  .ing-opt.current{color:var(--accent);font-weight:650}
+  .ing-opt.create{color:var(--accent)}
+  .ing-opt.clear{color:var(--muted)}
+  .ing-opt .hintbadge{
+    font-size:11px;padding:2px 7px;border-radius:999px;flex:none;
+    background:rgba(37,99,235,.14);color:var(--accent);
+  }
+  /* Which product is being categorised. Needed HERE and not in Produtos'
+     copy of this dialog: there it opens from the product's own sheet, with
+     the name already on screen behind it. */
+  .modal-card .who{font-size:13px;color:var(--muted);margin:-8px 0 16px}
   /* The stepper, same shape as the shopping list's: − and + flank the
      count and carry the rounded ends, so the three read as one control.
      The count in the middle is a BUTTON, not an input — typing a number
@@ -434,6 +470,26 @@ function thumbHtml(p){
     : '<span class="thumb ph">📦</span>';
 }
 
+// Words worth matching a product name against, for the picker's suggestion.
+// Two characters or fewer is noise ("de", "e"), and digits are sizes.
+function nameWords(s){
+  return String(s || "").toLowerCase()
+    .replace(/[^\p{L}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 2 && PT_SMALL_WORDS.indexOf(w) < 0);
+}
+
+// An existing ingredient whose every word appears in this product's name is
+// very likely the right answer — a second brand of creme de leite finds the
+// first one's ingredient without typing. Only a suggestion: it reorders the
+// list, it never picks for you.
+function looksLikely(ingName, productName){
+  const words = nameWords(ingName);
+  if(words.length === 0) return false;
+  const target = " " + nameWords(productName).join(" ") + " ";
+  return words.every(w => target.indexOf(" " + w + " ") >= 0);
+}
+
 // ---- login / shell ----
 
 function showLogin(errText){
@@ -537,6 +593,22 @@ function stockMeta(p){
   return bits.join(" · ");
 }
 
+// What a product IS, as opposed to which SKU it is — the link a recipe
+// reads, and the reason three brands of leite condensado can answer one
+// question. Assigned by hand here and on Produtos; see the API's comment for
+// why Open Food Facts' own categories can't do it (they group by dairy
+// shelf, and 8 of 19 products have no category at all).
+function ingredientName(p){
+  return (p && p.ingredient && p.ingredient.name) ? p.ingredient.name : "";
+}
+
+function ingredientChipHtml(p){
+  const name = ingredientName(p);
+  return '<button class="ing-chip' + (name ? '' : ' none') + '" data-ing ' +
+    'aria-label="Definir ingrediente">' +
+    esc(name || "sem ingrediente") + '</button>';
+}
+
 function stockRowHtml(p){
   const n = qtyOf(p);
   const meta = stockMeta(p);
@@ -545,6 +617,7 @@ function stockRowHtml(p){
     '<span class="body" data-open>' +
       '<p class="txt">' + esc(p.name) + '</p>' +
       (meta ? '<p class="meta" data-meta>' + esc(meta) + '</p>' : '<p class="meta" data-meta></p>') +
+      ingredientChipHtml(p) +
     '</span>' +
     '<span class="qty-field">' +
       '<button class="step-btn" data-step="-1" aria-label="Tirar um"' +
@@ -637,6 +710,14 @@ function wireStockRow(row){
 
   row.querySelector("[data-open]").addEventListener("click", () => {
     location.href = "produtos.html?gtin=" + encodeURIComponent(gtin);
+  });
+
+  // The chip lives inside the tap target that opens the product sheet, so it
+  // has to stop the click from bubbling — otherwise setting an ingredient
+  // would navigate away to Produtos at the same time.
+  row.querySelector("[data-ing]").addEventListener("click", async (e) => {
+    e.stopPropagation();
+    await setIngredient(p, row);
   });
 
   row.querySelectorAll(".step-btn").forEach(btn => {
@@ -736,6 +817,140 @@ async function recount(p, row){
     if(e.unauthorized) return handleAuthError(e, loadStock);
     listToast("Não foi possível ajustar", true);
   }
+}
+
+// Categorising from the pantry: pick the ingredient, redraw the one chip.
+// No reload — the rest of the page is untouched by this, and a reload here
+// would re-sort the list out from under the finger that just tapped.
+async function setIngredient(p, row){
+  const chosen = await ingredientModal(p);
+  if(!chosen) return;
+  try{
+    const res = await api("product_set_ingredient", { gtin: p.gtin, ...chosen.payload });
+    p.ingredient = (res.product && res.product.ingredient) || null;
+    const chip = row.querySelector("[data-ing]");
+    const name = ingredientName(p);
+    chip.textContent = name || "sem ingrediente";
+    chip.classList.toggle("none", !name);
+    // A new ingredient, or a changed count, makes the picker's list stale.
+    ingredientCache = null;
+    listToast(name ? "Ingrediente: " + name : "Ingrediente removido");
+  }catch(e){
+    if(e.unauthorized) return handleAuthError(e, loadStock);
+    listToast("Não foi possível salvar o ingrediente", true);
+  }
+}
+
+// The picker, duplicated verbatim from produtos.html per this repo's
+// no-shared-module convention — one input that filters the existing
+// ingredients AND names a new one, because those are the same question.
+// Resolves with {payload} for product_set_ingredient, or null. Fetched on
+// first open rather than at page load: most visits never touch it.
+let ingredientCache = null;
+
+function ingredientModal(p){
+  return new Promise(async resolve => {
+    let all;
+    try{
+      if(!ingredientCache) ingredientCache = (await api("ingredients")).ingredients || [];
+      all = ingredientCache;
+    }catch(e){
+      if(e.unauthorized){ handleAuthError(e, loadStock); return resolve(null); }
+      listToast("Não foi possível carregar os ingredientes", true);
+      return resolve(null);
+    }
+
+    const currentId = p.ingredient ? p.ingredient.id : null;
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>Ingrediente</h3>' +
+        '<p class="who">' + esc(p.name) + '</p>' +
+        '<label for="ing-q">Buscar ou criar</label>' +
+        '<input type="text" id="ing-q" placeholder="ex: leite condensado" autocomplete="off">' +
+        '<p class="hint">O que este produto É, para as receitas. Marcas ' +
+          'diferentes da mesma coisa compartilham o ingrediente — é assim que ' +
+          '"tenho leite condensado?" passa a ter resposta.</p>' +
+        '<div class="ing-list" id="ing-list"></div>' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="ing-cancel">Cancelar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+
+    const qEl = backdrop.querySelector("#ing-q");
+    const listEl = backdrop.querySelector("#ing-list");
+
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+
+    function draw(){
+      const term = qEl.value.trim();
+      const t = term.toLowerCase();
+      const shown = all.filter(i => !t || String(i.name).toLowerCase().indexOf(t) >= 0);
+      const ranked = t ? shown : shown.slice().sort((a, b) =>
+        (looksLikely(b.name, p.name) ? 1 : 0) - (looksLikely(a.name, p.name) ? 1 : 0));
+      const exact = all.some(i => String(i.name).toLowerCase() === t);
+
+      let html = "";
+      if(term && !exact){
+        html += '<button class="ing-opt create" data-create>' +
+          '<span class="nm">➕ Criar "' + esc(term) + '"</span></button>';
+      }
+      if(currentId){
+        html += '<button class="ing-opt clear" data-clear>' +
+          '<span class="nm">✕ Sem ingrediente</span></button>';
+      }
+      html += ranked.map(i =>
+        '<button class="ing-opt' + (i.id === currentId ? ' current' : '') + '" ' +
+          'data-pick="' + esc(i.id) + '">' +
+          '<span class="nm">' + (i.id === currentId ? '✓ ' : '') + esc(i.name) + '</span>' +
+          (!t && i.id !== currentId && looksLikely(i.name, p.name)
+            ? '<span class="hintbadge">provável</span>' : '') +
+          // How many products already point at it — the difference between
+          // "this is the one we use" and a near-duplicate typed by mistake.
+          '<span class="cnt">' + (i.product_count || 0) +
+            ((i.product_count === 1) ? ' produto' : ' produtos') + '</span>' +
+        '</button>').join("");
+      if(!html){
+        html = '<p class="msg small">Nenhum ingrediente ainda. Digite acima para criar o primeiro.</p>';
+      }
+      listEl.innerHTML = html;
+
+      const create = listEl.querySelector("[data-create]");
+      if(create){
+        create.addEventListener("click", () =>
+          close({ payload: { ingredient_name: qEl.value.trim() } }));
+      }
+      const clear = listEl.querySelector("[data-clear]");
+      if(clear) clear.addEventListener("click", () => close({ payload: { ingredient_id: null } }));
+      listEl.querySelectorAll("[data-pick]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          if(btn.dataset.pick === currentId) return close(null);
+          close({ payload: { ingredient_id: btn.dataset.pick } });
+        });
+      });
+    }
+
+    function onKey(e){
+      if(e.key === "Escape") close(null);
+      if(e.key === "Enter"){
+        e.preventDefault();
+        const first = listEl.querySelector(".ing-opt");
+        if(first) first.click();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#ing-cancel").addEventListener("click", () => close(null));
+    qEl.addEventListener("input", draw);
+    draw();
+    qEl.focus();
+  });
 }
 
 // The zero floor, made useful. The packages are real and were really paid

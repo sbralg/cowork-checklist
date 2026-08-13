@@ -117,6 +117,18 @@
     background:rgba(127,127,127,.12);color:var(--muted);white-space:nowrap;
   }
   .stock-badge.has{background:rgba(37,99,235,.14);color:var(--accent)}
+  /* What a product IS, as opposed to which SKU it is — the link a recipe
+     reads. Shown on every catalogue row, including when it is missing:
+     "sem ingrediente" is muted rather than alarming, exactly like the
+     missing-barcode marker on the shopping list, because an uncategorised
+     product is normal today. Seeing which rows are blank is what makes a
+     categorising pass down the list possible at all. */
+  .ing-tag{
+    display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;
+    background:rgba(37,99,235,.12);color:var(--accent);margin:5px 0 0;
+    max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .ing-tag.none{background:rgba(127,127,127,.12);color:var(--muted)}
   .msg{padding:28px 8px;text-align:center;color:var(--muted);font-size:15px}
   .msg.err{color:var(--danger)}
   .msg.small{padding:16px 8px;font-size:14px}
@@ -140,6 +152,8 @@
   button.primary.small{min-height:44px;padding:10px 16px;font-size:14px;width:auto;flex:none}
   button.primary.alt{background:rgba(127,127,127,.16);color:var(--text)}
   button.primary.alt:hover:not(:disabled){background:rgba(127,127,127,.26);filter:none}
+  button.primary.alt.danger{color:var(--danger)}
+  button.primary.alt.danger:hover:not(:disabled){background:rgba(220,38,38,.14)}
   .loginerr{color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px}
   .searchrow{display:flex;gap:8px;margin:0 0 14px}
   .searchrow input[type=search]{
@@ -161,6 +175,39 @@
   }
   .stock-line .big{font-size:20px;font-weight:650}
   .stock-line .sub{font-size:12px;color:var(--muted);margin:2px 0 0}
+  /* The ingredient line sits with the pantry count rather than inside the
+     metadata editor: it is not a fact about the package, it is what this
+     product counts AS. Same divider treatment so the two read as one block
+     of "what this is". */
+  .ing-line{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+    border-top:1px solid var(--border);margin-top:14px;padding-top:14px;
+  }
+  .ing-line .lbl{font-size:12px;color:var(--muted);margin:0}
+  .ing-line .val{font-size:16px;font-weight:650;margin:2px 0 0}
+  .ing-line .val.none{font-weight:400;color:var(--muted)}
+  /* ---- ingredient picker ---- */
+  .ing-list{max-height:44vh;overflow-y:auto;margin:0 0 14px;-webkit-overflow-scrolling:touch}
+  .ing-opt{
+    display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+    background:none;border:none;border-bottom:1px solid var(--border);
+    color:var(--text);font:inherit;font-size:15px;padding:11px 4px;cursor:pointer;
+    transition:background-color .15s ease;
+  }
+  .ing-opt:last-child{border-bottom:none}
+  .ing-opt:hover{background:rgba(127,127,127,.08)}
+  .ing-opt .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ing-opt .cnt{font-size:12px;color:var(--muted);flex:none}
+  .ing-opt.current{color:var(--accent);font-weight:650}
+  .ing-opt.create{color:var(--accent)}
+  .ing-opt.clear{color:var(--muted)}
+  /* Ranked to the top when a word of the product's name matches an existing
+     ingredient — the household's own catalogue is a better guide to "is this
+     the same thing?" than any external category tree. */
+  .ing-opt .hintbadge{
+    font-size:11px;padding:2px 7px;border-radius:999px;flex:none;
+    background:rgba(37,99,235,.14);color:var(--accent);
+  }
   /* ---- price history ----
      One series, so no legend: the section heading names it. The line wears
      the accent; every number and label stays in text ink, so identity never
@@ -527,6 +574,50 @@ function thumbHtml(p, cls){
     : '<span class="' + c + ' ph">📦</span>';
 }
 
+// ---- ingredients ----
+//
+// The catalogue answers "which SKU is this barcode"; the ingredient answers
+// "what is it", which is the question a recipe asks. Leite Ninho and Leite
+// Piracanjuba are two products and one ingredient, and that link is what
+// makes "tenho farinha suficiente?" answerable across brands.
+//
+// It is assigned by hand, deliberately. Open Food Facts does publish
+// categories, but measured against this catalogue they group by dairy shelf
+// rather than by what a recipe would substitute — creme de leite, leite em
+// pó and leite condensado all come back under "milk and yogurt" — and 8 of
+// 19 products have no category at all. A wrong link is worse than a blank
+// one, so the household decides. The reasoning is in the API's own comment.
+function ingredientName(p){
+  return (p && p.ingredient && p.ingredient.name) ? p.ingredient.name : "";
+}
+
+function ingredientTagHtml(p){
+  const name = ingredientName(p);
+  return name
+    ? '<span class="ing-tag">' + esc(name) + '</span>'
+    : '<span class="ing-tag none">sem ingrediente</span>';
+}
+
+// Words worth matching a product name against, for the picker's suggestion.
+// Two characters or fewer is noise ("de", "e"), and digits are sizes.
+function nameWords(s){
+  return String(s || "").toLowerCase()
+    .replace(/[^\p{L}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 2 && PT_SMALL_WORDS.indexOf(w) < 0);
+}
+
+// An existing ingredient whose name shares a word with this product is very
+// likely the right answer — a second brand of creme de leite finds the first
+// one's ingredient without typing. Only a suggestion: it reorders the list,
+// it never picks for you.
+function looksLikely(ingName, productName){
+  const words = nameWords(ingName);
+  if(words.length === 0) return false;
+  const target = " " + nameWords(productName).join(" ") + " ";
+  return words.every(w => target.indexOf(" " + w + " ") >= 0);
+}
+
 // ---- login / shell ----
 
 function showLogin(errText){
@@ -606,6 +697,9 @@ function matchesSearch(p, term){
   const t = term.toLowerCase();
   if(String(p.name || "").toLowerCase().indexOf(t) >= 0) return true;
   if(String(p.brand || "").toLowerCase().indexOf(t) >= 0) return true;
+  // The ingredient matches too, so "leite" finds every brand of it — which
+  // is the whole reason the link exists.
+  if(ingredientName(p).toLowerCase().indexOf(t) >= 0) return true;
   // Barcode search only when digits were actually typed: stripping
   // non-digits out of a word leaves "", and indexOf("") matches everything.
   const digits = t.replace(/\D/g, "");
@@ -621,6 +715,7 @@ function productRowHtml(p){
     '<span class="body">' +
       '<p class="txt">' + esc(p.name) + '</p>' +
       (sub ? '<p class="meta">' + esc(sub) + '</p>' : '') +
+      ingredientTagHtml(p) +
     '</span>' +
     '<span class="stock-badge' + (Number(p.qty) > 0 ? ' has' : '') + '">' +
       fmtQty(p.qty) + ' un' +
@@ -870,6 +965,16 @@ function renderProduct(data){
       '</div>' +
       '<div class="detail-actions">' +
         '<button class="primary small alt" id="edit-product">✎ Editar dados</button>' +
+        '<button class="primary small alt danger" id="del-product">🗑 Remover</button>' +
+      '</div>' +
+      '<div class="ing-line">' +
+        '<span>' +
+          '<p class="lbl">Ingrediente</p>' +
+          '<p class="val' + (ingredientName(p) ? '' : ' none') + '">' +
+            esc(ingredientName(p) || "não definido") + '</p>' +
+        '</span>' +
+        '<button class="link" id="set-ing">' +
+          (ingredientName(p) ? 'Alterar' : 'Definir') + '</button>' +
       '</div>' +
       '<div class="stock-line">' +
         '<span>' +
@@ -906,6 +1011,65 @@ function renderProduct(data){
     }catch(e){
       if(e.unauthorized) return handleAuthError(e, loadCatalog);
       listToast("Não foi possível salvar", true);
+    }
+  });
+
+  document.getElementById("set-ing").addEventListener("click", async () => {
+    const chosen = await ingredientModal(p);
+    if(!chosen) return;
+    try{
+      const res = await api("product_set_ingredient", { gtin: p.gtin, ...chosen.payload });
+      listToast(chosen.payload.ingredient_id === null && !chosen.payload.ingredient_name
+        ? "Ingrediente removido"
+        : "Ingrediente: " + (res.product && res.product.ingredient
+            ? res.product.ingredient.name : ""));
+      // The catalogue behind this sheet now shows the wrong tag on this row,
+      // and the picker's own list has a new entry and/or a stale count.
+      catalog = [];
+      ingredientCache = null;
+      openProduct(p.gtin);
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadCatalog);
+      listToast("Não foi possível salvar o ingrediente", true);
+    }
+  });
+
+  // Removing a product is the one destructive act on this page, and it takes
+  // its price history and its pantry ledger with it (both foreign keys
+  // cascade). So the API refuses the first attempt whenever there is
+  // anything to lose and reports exactly what — the dialog below is built
+  // from ITS numbers, not from this sheet, which may have been open a while.
+  document.getElementById("del-product").addEventListener("click", async () => {
+    if(!(await confirmModal(
+      'Remover "' + (p.name || p.gtin) + '" do catálogo?', "Remover"))) return;
+    try{
+      let res = await api("product_delete", { gtin: p.gtin });
+      if(res.ok === false && res.reason === "has_history"){
+        const lost = [];
+        if(Number(res.qty) !== 0){
+          lost.push("ainda há " + fmtQty(res.qty) +
+            (Number(res.qty) === 1 ? " pacote" : " pacotes") + " no estoque");
+        }
+        if(res.movements) lost.push(res.movements +
+          (res.movements === 1 ? " movimentação" : " movimentações"));
+        if(res.prices) lost.push(res.prices +
+          (res.prices === 1 ? " preço registrado" : " preços registrados"));
+        const itemsNote = res.items
+          ? " " + res.items + (res.items === 1 ? " item de lista fica" : " itens de lista ficam") +
+            " sem código de barras, mas não some" + (res.items === 1 ? "" : "m") + "."
+          : "";
+        if(!(await confirmModal(
+          "Este produto tem histórico: " + lost.join(", ") + ". Removê-lo apaga " +
+          "isso junto, e não dá para desfazer." + itemsNote,
+          "Remover mesmo assim"))) return;
+        res = await api("product_delete", { gtin: p.gtin, force: true });
+      }
+      listToast("Produto removido do catálogo");
+      catalog = [];
+      loadCatalog();
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadCatalog);
+      listToast("Não foi possível remover", true);
     }
   });
 
@@ -1012,6 +1176,125 @@ function productEditModal(p){
     backdrop.querySelector("#pe-ok").addEventListener("click", ok);
     nameEl.focus();
     nameEl.select();
+  });
+}
+
+// The picker. One input doing double duty — it filters the existing
+// ingredients as you type AND is the name of a new one — because those are
+// the same question ("which ingredient is this?") and splitting them into
+// two fields would make the common case (it already exists) the slower one.
+//
+// Resolves with {payload} ready to send to product_set_ingredient, or null.
+// The list is fetched on first open rather than at page load: most visits
+// to this page never touch it.
+let ingredientCache = null;
+
+function ingredientModal(p){
+  return new Promise(async resolve => {
+    let all;
+    try{
+      if(!ingredientCache) ingredientCache = (await api("ingredients")).ingredients || [];
+      all = ingredientCache;
+    }catch(e){
+      if(e.unauthorized){ handleAuthError(e, loadCatalog); return resolve(null); }
+      listToast("Não foi possível carregar os ingredientes", true);
+      return resolve(null);
+    }
+
+    const currentId = p.ingredient ? p.ingredient.id : null;
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>Ingrediente</h3>' +
+        '<label for="ing-q">Buscar ou criar</label>' +
+        '<input type="text" id="ing-q" placeholder="ex: leite condensado" autocomplete="off">' +
+        '<p class="hint">O que este produto É, para as receitas. Marcas ' +
+          'diferentes da mesma coisa compartilham o ingrediente — é assim que ' +
+          '"tenho leite condensado?" passa a ter resposta.</p>' +
+        '<div class="ing-list" id="ing-list"></div>' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="ing-cancel">Cancelar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+
+    const qEl = backdrop.querySelector("#ing-q");
+    const listEl = backdrop.querySelector("#ing-list");
+
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+
+    function draw(){
+      const term = qEl.value.trim();
+      const t = term.toLowerCase();
+      const shown = all.filter(i => !t || String(i.name).toLowerCase().indexOf(t) >= 0);
+      // A likely match floats to the top only while nothing has been typed —
+      // once there is a filter, the user's own words rank the list.
+      const ranked = t ? shown : shown.slice().sort((a, b) =>
+        (looksLikely(b.name, p.name) ? 1 : 0) - (looksLikely(a.name, p.name) ? 1 : 0));
+      const exact = all.some(i => String(i.name).toLowerCase() === t);
+
+      let html = "";
+      if(term && !exact){
+        html += '<button class="ing-opt create" data-create>' +
+          '<span class="nm">➕ Criar "' + esc(term) + '"</span></button>';
+      }
+      if(currentId){
+        html += '<button class="ing-opt clear" data-clear>' +
+          '<span class="nm">✕ Sem ingrediente</span></button>';
+      }
+      html += ranked.map(i =>
+        '<button class="ing-opt' + (i.id === currentId ? ' current' : '') + '" ' +
+          'data-pick="' + esc(i.id) + '">' +
+          '<span class="nm">' + (i.id === currentId ? '✓ ' : '') + esc(i.name) + '</span>' +
+          (!t && i.id !== currentId && looksLikely(i.name, p.name)
+            ? '<span class="hintbadge">provável</span>' : '') +
+          // How many products already point at it — the difference between
+          // "this is the one we use" and a near-duplicate typed by mistake.
+          '<span class="cnt">' + (i.product_count || 0) +
+            ((i.product_count === 1) ? ' produto' : ' produtos') + '</span>' +
+        '</button>').join("");
+      if(!html){
+        html = '<p class="msg small">Nenhum ingrediente ainda. Digite acima para criar o primeiro.</p>';
+      }
+      listEl.innerHTML = html;
+
+      const create = listEl.querySelector("[data-create]");
+      if(create){
+        create.addEventListener("click", () =>
+          close({ payload: { ingredient_name: qEl.value.trim() } }));
+      }
+      const clear = listEl.querySelector("[data-clear]");
+      if(clear) clear.addEventListener("click", () => close({ payload: { ingredient_id: null } }));
+      listEl.querySelectorAll("[data-pick]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          // Picking the one already set is a no-op, not a write.
+          if(btn.dataset.pick === currentId) return close(null);
+          close({ payload: { ingredient_id: btn.dataset.pick } });
+        });
+      });
+    }
+
+    function onKey(e){
+      if(e.key === "Escape") close(null);
+      // Enter takes the obvious action: the first row of the list, which is
+      // "create" when the typed name is new and the best match when it isn't.
+      if(e.key === "Enter"){
+        e.preventDefault();
+        const first = listEl.querySelector(".ing-opt");
+        if(first) first.click();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#ing-cancel").addEventListener("click", () => close(null));
+    qEl.addEventListener("input", draw);
+    draw();
+    qEl.focus();
   });
 }
 

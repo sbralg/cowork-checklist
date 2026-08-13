@@ -18,7 +18,23 @@ pages, no build step, no framework:
 - `estoque.html` — the pantry: how many packages of each product are in
   the cupboard, and changing that (− / + steppers, exact recount).
 - `produtos.html` — the product catalogue: what a barcode means, its price
-  history as a graph, and the editor that corrects its metadata.
+  history as a graph, the editor that corrects its metadata, and removal
+  from the catalogue.
+
+**The ingredient is what a product IS, as opposed to which SKU it is** —
+three brands of leite condensado are three barcodes and ONE ingredient, and
+that link is what will let a recipe ask "tenho leite condensado?" across
+brands. It is set BY HAND, from the detail sheet on `produtos.html` or the
+chip on each `estoque.html` row, and that is a finding rather than laziness:
+Open Food Facts' categories were measured against this catalogue and group
+by supermarket shelf (creme de leite, leite em pó and leite condensado all
+land under "milk and yogurt"), 8 of 19 products have no category at all, and
+the two cremes de leite that genuinely ARE one ingredient get different
+answers. A wrong link is worse than a blank one, because a recipe would
+silently draw down the wrong product. The picker instead suggests from the
+household's own catalogue — an existing ingredient whose words appear in the
+product's name is floated up with a `provável` badge. Full reasoning in the
+other repo's `CLAUDE.md`.
 
 **The rule that shapes `estoque.html`, and must not be quietly undone:
 stock never goes below zero.** Using something that isn't recorded doesn't
@@ -75,7 +91,8 @@ in-memory fake, so neither touches Supabase nor holds a passphrase.
 - `test/stock.test.js` — the pantry steppers, the zero floor and its
   retroactive-purchase dialog, the recount, the per-product queue that
   keeps a double tap from outrunning the floor, search, the price graph,
-  the product editor and the deep links between the two pages. Run it
+  the product editor, the ingredient picker on both pages, the two-step
+  product removal and the deep links between the two pages. Run it
   after changing `estoque.html` or `produtos.html`. Its fake keeps a
   **real ledger** and enforces the zero floor the same way the Edge
   Function does — that rule is the whole reason those pages look the way

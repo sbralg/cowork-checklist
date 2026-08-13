@@ -57,13 +57,19 @@ function serve() {
 // draw a line from.
 const PRODUCTS = [
   { gtin: '7891000100103', name: 'Leite Condensado moça', brand: 'NESTLÉ',
-    net_qty: 395, net_unit: 'g', image_url: null, source: 'off' },
+    net_qty: 395, net_unit: 'g', image_url: null, source: 'off',
+    ingredient: { id: 'I1', name: 'Leite condensado' } },
   { gtin: '7896004700236', name: 'Bolacha Maria', brand: 'Adria',
     net_qty: null, net_unit: null, image_url: null, source: 'off' },
   { gtin: '7891234567895', name: 'Manteiga com Sal', brand: 'AVIAÇÃO',
     net_qty: 200, net_unit: 'g', image_url: null, source: 'off' },
   { gtin: '7897001234564', name: 'Suco de Uva Aurora', brand: 'AURORA',
     net_qty: 1000, net_unit: 'ml', image_url: null, source: 'manual' },
+  // The case the ingredient link exists for: a different BRAND of something
+  // already in the catalogue. Nothing about the barcode, the name or the
+  // size says these two are interchangeable — the ingredient does.
+  { gtin: '7898215151999', name: 'Leite Condensado Piracanjuba', brand: 'Piracanjuba',
+    net_qty: 395, net_unit: 'g', image_url: null, source: 'off' },
 ];
 
 const PRICES = {
@@ -80,7 +86,15 @@ const PRICES = {
   '7897001234564': [],
 };
 
-const state = { movements: [], seq: 0, calls: [] };
+// The ingredient side. One already exists and is linked to the leite
+// condensado, so the "same ingredient, different brand" case — the whole
+// point of the two-level model — has something to be found by: the picker's
+// "provável" suggestion has to offer it for the SECOND condensed milk.
+const INGREDIENTS = [
+  { id: 'I1', name: 'Leite condensado', base_unit: null },
+];
+
+const state = { movements: [], seq: 0, calls: [], ingSeq: 0 };
 
 // Seed: 3 leite, 1 manteiga, 2 suco, 0 bolacha.
 function seed(gtin, n) {
@@ -198,6 +212,44 @@ function handleMove(body) {
       const gtin = i >= 0 ? state.movements[i].gtin : null;
       if (i >= 0) state.movements.splice(i, 1);
       resp = { ok: true, qty: gtin ? balance(gtin) : null };
+    } else if (body.action === 'ingredients') {
+      resp = { ingredients: INGREDIENTS.map(i => ({ ...i,
+        product_count: PRODUCTS.filter(p => p.ingredient && p.ingredient.id === i.id).length })) };
+    } else if (body.action === 'product_set_ingredient') {
+      const p = PRODUCTS.find(x => x.gtin === body.gtin);
+      let ing = null;
+      if (body.ingredient_id) {
+        ing = INGREDIENTS.find(i => i.id === body.ingredient_id) || null;
+      } else if (body.ingredient_name) {
+        // Found-or-created, case-insensitively, exactly like the API's
+        // unique index on lower(name).
+        const want = String(body.ingredient_name).trim();
+        ing = INGREDIENTS.find(i => i.name.toLowerCase() === want.toLowerCase());
+        if (!ing) { ing = { id: 'I' + (++state.ingSeq + 100), name: want, base_unit: null };
+          INGREDIENTS.push(ing); }
+      }
+      if (p) p.ingredient = ing ? { id: ing.id, name: ing.name } : null;
+      resp = { ok: true, product: { ...p } };
+    } else if (body.action === 'product_delete') {
+      const p = PRODUCTS.find(x => x.gtin === body.gtin);
+      const movements = state.movements.filter(m => m.gtin === body.gtin).length;
+      const prices = (PRICES[body.gtin] || []).length;
+      const qty = balance(body.gtin);
+      // The refusal-first rule: anything to lose means the first call comes
+      // back as a 200 with ok:false carrying the numbers, and only a second
+      // call with force goes through.
+      if (!body.force && (qty !== 0 || movements > 0 || prices > 0)) {
+        resp = { ok: false, reason: 'has_history', gtin: body.gtin, name: p && p.name,
+          qty, movements, prices, items: 0 };
+      } else {
+        const i = PRODUCTS.findIndex(x => x.gtin === body.gtin);
+        if (i >= 0) PRODUCTS.splice(i, 1);
+        // Both foreign keys cascade in the real schema.
+        state.movements = state.movements.filter(m => m.gtin !== body.gtin);
+        delete PRICES[body.gtin];
+        resp = { ok: true, gtin: body.gtin, name: p && p.name,
+          movements_removed: movements, prices_removed: prices, items_unlinked: 0 };
+      }
     } else if (body.action === 'product_upsert') {
       const p = PRODUCTS.find(x => x.gtin === body.gtin);
       if (p) {
@@ -240,7 +292,7 @@ function handleMove(body) {
     (await page.$('#toggle-empty')) !== null &&
     await page.locator('#out-card').evaluate(el => el.classList.contains('hidden')));
   check('the collapsed section holds the product at zero',
-    (await page.$$('#out-card .row')).length === 1 &&
+    (await page.$$('#out-card .row')).length === 2 &&
     (await page.$('#out-card ' + rowSel('7896004700236'))) !== null);
 
   // Open it and leave it open for the rest of the run: a row that runs out
@@ -388,7 +440,7 @@ function handleMove(body) {
   check('search matches the brand', (await page.$(rowSel('7891234567895'))) !== null);
   await page.fill('#search', '');
   await page.waitForFunction(
-    () => document.querySelectorAll('.row[data-gtin]').length === 4, null, { timeout: 6000 });
+    () => document.querySelectorAll('.row[data-gtin]').length === 5, null, { timeout: 6000 });
 
   check('the menu offers both new pages', await page.evaluate(() => {
     document.getElementById('menu-btn').click();
@@ -397,6 +449,69 @@ function handleMove(body) {
     return labels.some(l => l.includes('Estoque')) && labels.some(l => l.includes('Produtos'));
   }));
 
+  // --- categorising from the pantry ---
+  //
+  // The chip is inside the tap target that opens the product sheet, so the
+  // first thing worth proving is that setting an ingredient does NOT
+  // navigate away.
+  check('an uncategorised row says so, muted rather than alarming, got: ' +
+      await page.textContent(rowSel('7897001234564') + ' [data-ing]'),
+    (await page.textContent(rowSel('7897001234564') + ' [data-ing]')) === 'sem ingrediente');
+  check('and a categorised one names its ingredient, got: ' +
+      await page.textContent(rowSel('7891000100103') + ' [data-ing]'),
+    (await page.textContent(rowSel('7891000100103') + ' [data-ing]')) === 'Leite condensado');
+
+  await page.click(rowSel('7897001234564') + ' [data-ing]');
+  await page.waitForSelector('#ing-list', { timeout: 6000 });
+  check('the picker opens on the pantry page instead of navigating away',
+    (await page.evaluate(() => location.pathname)).endsWith('estoque.html'));
+  check('it lists the ingredients that already exist',
+    (await page.$$('#ing-list [data-pick]')).length === 1);
+  // One field doing both jobs: filter what exists, name what does not.
+  await page.fill('#ing-q', 'Suco de uva');
+  await page.waitForSelector('#ing-list [data-create]', { timeout: 4000 });
+  check('a name that matches nothing offers to create it',
+    (await page.textContent('#ing-list [data-create]')).includes('Suco de uva'));
+  await page.click('#ing-list [data-create]');
+  await page.waitForFunction(
+    (sel) => document.querySelector(sel + ' [data-ing]')?.textContent === 'Suco de uva',
+    rowSel('7897001234564'), { timeout: 6000 });
+  check('the chip redraws in place, with no page reload',
+    (await page.textContent(rowSel('7897001234564') + ' [data-ing]')) === 'Suco de uva');
+  const setCall = state.calls.filter(c => c.action === 'product_set_ingredient').pop();
+  check('a new ingredient is sent by NAME, for the API to find-or-create',
+    setCall && setCall.ingredient_name === 'Suco de uva' &&
+    setCall.ingredient_id === undefined);
+
+  // THE case the whole two-level model exists for: a second brand of
+  // something already categorised should find the existing ingredient
+  // rather than inventing a parallel one.
+  // This row has never been in stock, so it lives in the collapsed half.
+  // Open it only if a re-render has closed it since.
+  if (await page.locator('#out-card').evaluate(el => el.classList.contains('hidden'))) {
+    await page.click('#toggle-empty');
+    await page.waitForFunction(
+      () => !document.getElementById('out-card').classList.contains('hidden'),
+      null, { timeout: 4000 });
+  }
+  await page.click(rowSel('7898215151999') + ' [data-ing]');
+  await page.waitForSelector('#ing-list', { timeout: 6000 });
+  await page.screenshot({ path: path.join(SHOTS, 'ingrediente.png'), animations: 'disabled' });
+  const firstOpt = await page.textContent('#ing-list .ing-opt .nm');
+  check('the likely ingredient is ranked first for another brand of it, got: ' + firstOpt,
+    firstOpt.includes('Leite condensado'));
+  check('and marked as a suggestion rather than chosen for you',
+    (await page.$('#ing-list .ing-opt .hintbadge')) !== null);
+  await page.click('#ing-list [data-pick="I1"]');
+  await page.waitForFunction(
+    (sel) => document.querySelector(sel + ' [data-ing]')?.textContent === 'Leite condensado',
+    rowSel('7898215151999'), { timeout: 6000 });
+  const pickCall = state.calls.filter(c => c.action === 'product_set_ingredient').pop();
+  check('picking an existing one sends its id, so two brands share ONE ingredient',
+    pickCall && pickCall.ingredient_id === 'I1');
+  check('which is what makes both brands answer the same question',
+    PRODUCTS.filter(p => p.ingredient && p.ingredient.id === 'I1').length === 2);
+
   await page.screenshot({ path: path.join(SHOTS, 'estoque.png'), fullPage: true });
 
   // ================= produtos.html =================
@@ -404,7 +519,7 @@ function handleMove(body) {
   await page.waitForSelector('#cat-card', { timeout: 8000 });
 
   check('the catalogue lists every product',
-    (await page.$$('#cat-card .row')).length === 4);
+    (await page.$$('#cat-card .row')).length === 5);
   await page.screenshot({ path: path.join(SHOTS, 'produtos.png'), fullPage: true });
   check('each row carries its pantry count, got: ' +
       await page.textContent(rowSel('7891000100103') + ' .stock-badge'),
@@ -419,7 +534,7 @@ function handleMove(body) {
   check('the catalogue searches too', (await page.$(rowSel('7896004700236'))) !== null);
   await page.fill('#search', '');
   await page.waitForFunction(
-    () => document.querySelectorAll('.row[data-gtin]').length === 4, null, { timeout: 6000 });
+    () => document.querySelectorAll('.row[data-gtin]').length === 5, null, { timeout: 6000 });
 
   // --- detail sheet ---
   await page.click(rowSel('7891000100103') + ' .body');
@@ -503,20 +618,140 @@ function handleMove(body) {
   check('a movement can be removed when it was a mis-tap',
     (await page.$$('#mov-card .mov')).length === movsBefore - 1);
 
+  // --- the ingredient, from the catalogue side ---
+  await page.click('#back');
+  await page.waitForSelector('#cat-card', { timeout: 6000 });
+  check('every catalogue row shows its ingredient, blanks included',
+    (await page.$$('#cat-card .ing-tag')).length === 5 &&
+    (await page.$$('#cat-card .ing-tag.none')).length === 2);
+  await page.click(rowSel('7896004700236') + ' .body');
+  await page.waitForSelector('.ing-line', { timeout: 6000 });
+  check('the detail sheet says when nothing is set, got: ' +
+      await page.textContent('.ing-line .val'),
+    (await page.textContent('.ing-line .val')) === 'não definido');
+  await page.click('#set-ing');
+  await page.waitForSelector('#ing-list', { timeout: 6000 });
+  // Deliberately a word that appears NOWHERE in this product's name or
+  // brand, so the search assertion below can only pass via the ingredient.
+  await page.fill('#ing-q', 'Biscoito');
+  await page.click('#ing-list [data-create]');
+  await page.waitForSelector('.ing-line', { timeout: 6000 });
+  check('and shows the ingredient once it is set, got: ' +
+      await page.textContent('.ing-line .val'),
+    (await page.textContent('.ing-line .val')) === 'Biscoito');
+
+  // Searching by ingredient is the payoff: what a thing IS, not what the
+  // package happens to be called.
+  await page.click('#back');
+  await page.waitForSelector('#cat-card', { timeout: 6000 });
+  await page.fill('#search', 'biscoito');
+  await page.waitForFunction(
+    () => document.querySelectorAll('.row[data-gtin]').length === 1, null, { timeout: 6000 });
+  check('a product is findable by an ingredient its own name never mentions',
+    (await page.$(rowSel('7896004700236'))) !== null);
+  await page.fill('#search', '');
+  await page.waitForFunction(
+    () => document.querySelectorAll('.row[data-gtin]').length === 5, null, { timeout: 6000 });
+
+  // Clearing has to be reachable, or a mis-tap is permanent.
+  await page.click(rowSel('7896004700236') + ' .body');
+  await page.waitForSelector('#set-ing', { timeout: 6000 });
+  await page.click('#set-ing');
+  await page.waitForSelector('#ing-list [data-clear]', { timeout: 6000 });
+  await page.click('#ing-list [data-clear]');
+  await page.waitForFunction(
+    () => document.querySelector('.ing-line .val')?.textContent === 'não definido',
+    null, { timeout: 6000 });
+  check('the link can be cleared again',
+    (await page.textContent('.ing-line .val')) === 'não definido');
+  const clearCall = state.calls.filter(c => c.action === 'product_set_ingredient').pop();
+  check('clearing sends an explicit null, never an omitted field',
+    clearCall && clearCall.ingredient_id === null);
+
+  // --- removing a product from the catalogue ---
+  //
+  // The refusal-first rule matters here: this product has a price history,
+  // so the first attempt must come back refused and the user must be told
+  // what deleting it would destroy BEFORE it happens.
+  await page.click('#back');
+  await page.waitForSelector('#cat-card', { timeout: 6000 });
+  await page.click(rowSel('7897001234564') + ' .body');
+  await page.waitForSelector('#del-product', { timeout: 6000 });
+  await page.click('#del-product');
+  await page.waitForSelector('#confirm-ok', { timeout: 6000 });
+  await page.click('#confirm-cancel');
+  await page.waitForSelector('.modal-card', { state: 'detached', timeout: 6000 });
+  check('backing out of the first confirmation writes nothing',
+    state.calls.filter(c => c.action === 'product_delete').length === 0 &&
+    PRODUCTS.some(p => p.gtin === '7897001234564'));
+
+  await page.click('#del-product');
+  await page.waitForSelector('#confirm-ok', { timeout: 6000 });
+  await page.click('#confirm-ok');
+  // Second dialog: the API refused, and this one is built from ITS numbers.
+  await page.waitForFunction(
+    () => document.querySelector('#confirm-ok')?.textContent === 'Remover mesmo assim',
+    null, { timeout: 6000 });
+  await page.screenshot({ path: path.join(SHOTS, 'remover.png'), animations: 'disabled' });
+  const warning = await page.textContent('.modal-card p');
+  check('the warning names the stock that would go, got: ' + warning,
+    warning.includes('2 pacotes'));
+  check('and the ledger entries that would go with it', warning.includes('movimenta'));
+  const firstDelete = state.calls.filter(c => c.action === 'product_delete').pop();
+  check('the first call carries no force — it asks, it does not delete',
+    firstDelete && !firstDelete.force);
+  check('and nothing is deleted while the second dialog is still open',
+    PRODUCTS.some(p => p.gtin === '7897001234564'));
+
+  await page.click('#confirm-cancel');
+  await page.waitForSelector('.modal-card', { state: 'detached', timeout: 6000 });
+  check('declining the second dialog also writes nothing',
+    PRODUCTS.some(p => p.gtin === '7897001234564'));
+
+  await page.click('#del-product');
+  await page.waitForSelector('#confirm-ok', { timeout: 6000 });
+  await page.click('#confirm-ok');
+  await page.waitForFunction(
+    () => document.querySelector('#confirm-ok')?.textContent === 'Remover mesmo assim',
+    null, { timeout: 6000 });
+  await page.click('#confirm-ok');
+  await page.waitForSelector('#cat-card', { timeout: 6000 });
+  const forced = state.calls.filter(c => c.action === 'product_delete').pop();
+  check('confirming twice is what actually deletes, and it says so', forced && forced.force === true);
+  check('the product is gone from the catalogue',
+    !PRODUCTS.some(p => p.gtin === '7897001234564') &&
+    (await page.$(rowSel('7897001234564'))) === null);
+  check('and the page returns to the catalogue rather than a dead sheet',
+    (await page.$$('#cat-card .row')).length === 4);
+
+  // A product with nothing to lose is deleted on the first confirmation —
+  // the second dialog exists for history, not as a ritual.
+  await page.click(rowSel('7898215151999') + ' .body');
+  await page.waitForSelector('#del-product', { timeout: 6000 });
+  await page.click('#del-product');
+  await page.waitForSelector('#confirm-ok', { timeout: 6000 });
+  await page.click('#confirm-ok');
+  await page.waitForSelector('#cat-card', { timeout: 6000 });
+  check('a barcode scanned by mistake goes in one step',
+    !PRODUCTS.some(p => p.gtin === '7898215151999') &&
+    (await page.$$('#cat-card .row')).length === 3);
+
   // --- the deep link between the two pages ---
-  await page.goto(BASE + 'produtos.html?gtin=7897001234564');
+  await page.goto(BASE + 'produtos.html?gtin=7896004700236');
   await page.waitForSelector('.prod-head', { timeout: 8000 });
   check('a deep link opens straight on the product, got: ' +
       await page.textContent('.prod-title .name'),
-    (await page.textContent('.prod-title .name')) === 'Suco de Uva Aurora');
+    (await page.textContent('.prod-title .name')) === 'Bolacha Maria');
   check('and the url is cleaned up so a reload is not stuck on it',
     !(await page.evaluate(() => location.search)));
 
-  await page.goto(BASE + 'estoque.html?gtin=7897001234564');
+  // This one has never been in stock, so it also proves the pantry link
+  // opens the collapsed half rather than scrolling to a hidden row.
+  await page.goto(BASE + 'estoque.html?gtin=7896004700236');
   await page.waitForSelector('#in-card', { timeout: 8000 });
-  await page.waitForSelector(rowSel('7897001234564') + '.flash', { timeout: 4000 });
+  await page.waitForSelector(rowSel('7896004700236') + '.flash', { timeout: 4000 });
   check('and the pantry link points at the right row',
-    (await page.$(rowSel('7897001234564') + '.flash')) !== null);
+    (await page.$(rowSel('7896004700236') + '.flash')) !== null);
 
   await page.screenshot({ path: path.join(SHOTS, 'deeplink.png'), fullPage: true });
   await browser.close();
