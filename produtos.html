@@ -169,6 +169,32 @@
   .prod-title .sub{font-size:13px;color:var(--muted);margin:4px 0 0}
   .prod-title .code{font-size:12px;color:var(--muted);margin:6px 0 0;font-variant-numeric:tabular-nums}
   .detail-actions{display:flex;gap:8px;flex-wrap:wrap}
+  /* Why a row is a manual placeholder instead of real OFF data: OFF
+     genuinely doesn't have the barcode, or the lookup itself never got an
+     answer (e.g. mid-outage). Both get a retry — contributing to OFF or the
+     outage clearing are both things this page can't detect on its own,
+     short of asking again. */
+  .off-flag{
+    display:flex;align-items:flex-start;gap:10px;margin:14px 0 0;
+    padding:12px 14px;border-radius:12px;font-size:13px;line-height:1.45;
+    background:rgba(127,127,127,.08);border:1px solid var(--border);
+  }
+  .off-flag .icon{flex:none;font-size:16px}
+  .off-flag .body{flex:1;min-width:0}
+  .off-flag .body p{margin:0 0 10px}
+  .off-flag .actions{display:flex;gap:8px;flex-wrap:wrap}
+  .off-flag .actions a, .off-flag .actions button{
+    font:inherit;font-size:13px;font-weight:600;padding:7px 12px;border-radius:8px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+    text-decoration:none;cursor:pointer;transition:background-color .15s ease;
+  }
+  .off-flag .actions a:hover, .off-flag .actions button:hover:not(:disabled){
+    background:rgba(127,127,127,.12);
+  }
+  .off-flag .actions button:disabled{opacity:.5;cursor:default}
+  /* Muted, same convention as shopping.html's missing-barcode marker — a
+     manual placeholder is normal, not alarming. */
+  .flag-ic{font-size:12px;margin-right:3px}
   .stock-line{
     display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
     border-top:1px solid var(--border);margin-top:14px;padding-top:14px;
@@ -710,10 +736,16 @@ function productRowHtml(p){
   const meta = productMeta(p);
   const price = p.last_price != null ? fmtMoney(p.last_price) : "";
   const sub = [meta, price].filter(Boolean).join(" · ");
+  // A row with no real OFF data yet — worth noticing without opening it,
+  // but muted like the missing-barcode marker in shopping.html: this is a
+  // normal, expected state, not an error.
+  const flag = p.off_lookup_status
+    ? '<span class="flag-ic" title="Sem dados do Open Food Facts">⚠️</span>'
+    : '';
   return '<div class="row" data-gtin="' + esc(p.gtin) + '" style="cursor:pointer">' +
     thumbHtml(p) +
     '<span class="body">' +
-      '<p class="txt">' + esc(p.name) + '</p>' +
+      '<p class="txt">' + flag + esc(p.name) + '</p>' +
       (sub ? '<p class="meta">' + esc(sub) + '</p>' : '') +
       ingredientTagHtml(p) +
     '</span>' +
@@ -882,6 +914,38 @@ function wireChart(prices){
 
 // ---- product detail ----
 
+// Two different flags for two different situations, per off_lookup_status:
+// "not_found" means all four OFF sibling databases answered and none had
+// this barcode — worth a link to go register it (the household already
+// does this via the OFF app), AND a retry, because retrying right after
+// registering is exactly how the real data gets pulled in without
+// re-scanning. "lookup_incomplete" means at least one host never actually
+// answered (timeout, an outage) — there is nothing to link to yet, since
+// it isn't known whether OFF has it; only a retry makes sense.
+function offFlagHtml(p){
+  if(!p.off_lookup_status) return "";
+  const offUrl = "https://world.openfoodfacts.org/product/" + encodeURIComponent(p.gtin);
+  const notFound = p.off_lookup_status === "not_found";
+  return '<div class="off-flag">' +
+    '<span class="icon">' + (notFound ? "🔎" : "⚠️") + '</span>' +
+    '<div class="body">' +
+      '<p>' + (notFound
+        ? 'Não encontrado em nenhuma base do Open Food Facts. Você pode ' +
+          'cadastrar o produto por lá (app ou site) e depois puxar os dados ' +
+          'aqui.'
+        : 'Não foi possível consultar o Open Food Facts agora (a base pode ' +
+          'estar fora do ar) — ainda não se sabe se o produto existe lá.'
+      ) + '</p>' +
+      '<div class="actions">' +
+        (notFound
+          ? '<a href="' + esc(offUrl) + '" target="_blank" rel="noopener">Abrir no OFF</a>'
+          : '') +
+        '<button id="off-retry">Tentar novamente</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
 function movementLabel(m){
   const map = {
     purchase: "Compra",
@@ -967,6 +1031,7 @@ function renderProduct(data){
         '<button class="primary small alt" id="edit-product">✎ Editar dados</button>' +
         '<button class="primary small alt danger" id="del-product">🗑 Remover</button>' +
       '</div>' +
+      offFlagHtml(p) +
       '<div class="ing-line">' +
         '<span>' +
           '<p class="lbl">Ingrediente</p>' +
@@ -1072,6 +1137,32 @@ function renderProduct(data){
       listToast("Não foi possível remover", true);
     }
   });
+
+  const retryBtn = document.getElementById("off-retry");
+  if(retryBtn){
+    retryBtn.addEventListener("click", async () => {
+      retryBtn.disabled = true;
+      retryBtn.textContent = "Consultando…";
+      try{
+        const res = await api("product_retry_off", { gtin: p.gtin });
+        // Whichever way it went, the flag (or its absence) may have
+        // changed, so the catalogue behind this sheet is stale in that
+        // field — same reasoning as after an edit.
+        catalog = [];
+        listToast(res.found
+          ? "Dados atualizados do Open Food Facts"
+          : (res.off_status === "not_found"
+              ? "Ainda não encontrado no Open Food Facts"
+              : "Não foi possível consultar agora"));
+        openProduct(p.gtin);
+      }catch(e){
+        if(e.unauthorized) return handleAuthError(e, loadCatalog);
+        retryBtn.disabled = false;
+        retryBtn.textContent = "Tentar novamente";
+        listToast("Não foi possível consultar agora", true);
+      }
+    });
+  }
 
   root.querySelectorAll("[data-del-mov]").forEach(btn => {
     btn.addEventListener("click", async () => {
