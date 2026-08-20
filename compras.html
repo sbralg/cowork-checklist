@@ -9,30 +9,18 @@
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <title>Listas de compras</title>
 <!--
-  Data-free shell for the shopping-list module. Same pattern as index.html
+  Data-free shell for the shopping-list module. Same pattern as tarefas.html
   (the daily-summary checklist): hosted on public GitHub Pages, holds NO
   keys and NO data, asks for the shared passphrase, then talks only to the
   gated Supabase Edge Function (checklist-api) via its shopping_* actions.
 -->
+<link rel="stylesheet" href="shared-base.css">
+<link rel="stylesheet" href="shared-menu.css">
+<link rel="stylesheet" href="shared-modal.css">
+<link rel="stylesheet" href="shared-toast.css">
+<link rel="stylesheet" href="shared-inputs.css">
 <style>
-  :root{
-    --bg:#f7f7f8; --card:#ffffff; --text:#1a1a1a; --muted:#6b7280;
-    --border:#e5e7eb; --border-strong:#d1d5db; --accent:#2563eb;
-    --accent-text:#ffffff; --danger:#dc2626;
-  }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --muted:#94a3b8;
-      --border:#334155; --border-strong:#475569; --accent:#3b82f6;
-      --accent-text:#ffffff; --danger:#f87171;
-    }
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;padding:0}
   body{
-    background:var(--bg); color:var(--text);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    -webkit-font-smoothing:antialiased;
     padding:max(16px,env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom));
   }
   .wrap{max-width:640px;margin:0 auto}
@@ -42,54 +30,10 @@
   .list-title{display:flex;align-items:baseline;gap:8px;min-width:0}
   h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
   h2{font-size:17px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
-  .link{
-    background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;
-    text-decoration:none;display:inline-block;transition:color .15s ease,opacity .1s ease;
-  }
-  .link:hover{color:var(--text);text-decoration:underline}
-  .link:active{opacity:.6}
-  .menu-btn{
-    background:none;border:none;color:var(--text);font-size:22px;padding:2px 8px 2px 0;
-    cursor:pointer;line-height:1;flex:none;align-self:center;
-    transition:opacity .15s ease,transform .1s ease;
-  }
-  .menu-btn:hover{opacity:.7}
-  .menu-btn:active{transform:scale(.9)}
-  .menu-backdrop{
-    position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;
-    animation:modalFadeIn .15s ease;
-  }
-  .menu-panel{
-    position:fixed;top:0;left:0;bottom:0;width:min(280px,80vw);
-    background:var(--card);box-shadow:2px 0 24px rgba(0,0,0,.3);
-    display:flex;flex-direction:column;
-    padding:max(16px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-bottom));
-    transform:translateX(-100%);transition:transform .25s cubic-bezier(.2,.8,.2,1);
-  }
-  .menu-panel.open{transform:translateX(0)}
-  .menu-item{
-    display:flex;align-items:center;gap:12px;padding:14px 20px;font-size:15px;
-    color:var(--text);text-decoration:none;background:none;border:none;width:100%;
-    text-align:left;cursor:pointer;transition:background-color .15s ease;
-  }
-  .menu-item:hover{background:rgba(127,127,127,.08)}
-  .menu-item.active{color:var(--accent);font-weight:600}
-  .menu-spacer{flex:1}
-  .menu-item.logout{border-top:1px solid var(--border);color:var(--danger)}
-  .icon-btn{
-    background:none;border:none;color:var(--muted);font-size:16px;padding:6px;cursor:pointer;
-    flex:none;line-height:1;border-radius:8px;
-    transition:background-color .15s ease,color .15s ease,transform .1s ease;
-  }
-  .icon-btn:hover{background:rgba(127,127,127,.15);color:var(--text)}
-  .icon-btn:active{transform:scale(.9)}
-  .icon-btn.danger{color:var(--danger)}
   /* An item with no barcode: muted rather than alarming, since a hand-typed
      row is perfectly normal today — it just can't feed stock control. */
   .icon-btn.nobc{font-size:13px;opacity:.5}
   .icon-btn.nobc:hover{opacity:1;background:rgba(127,127,127,.15)}
-  .icon-btn.danger:hover{background:rgba(220,38,38,.15);color:var(--danger)}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
   .row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:14px;border-bottom:1px solid var(--border);transition:background-color .15s ease}
   .row:hover{background:rgba(127,127,127,.06)}
   .row:last-child{border-bottom:none}
@@ -108,17 +52,6 @@
      tight on a narrow phone, and the subtotal dropping to its own line
      reads better than being clipped. */
   .fields{display:flex;align-items:center;gap:6px;flex:1 1 100%;padding-left:14px;flex-wrap:wrap}
-  .field{display:flex;align-items:center;flex:none}
-  .field .prefix{
-    font-size:12px;color:var(--muted);background:rgba(127,127,127,.1);
-    border:1px solid var(--border-strong);border-right:none;border-radius:8px 0 0 8px;
-    padding:9px 7px;line-height:1;white-space:nowrap;
-  }
-  .num-input{
-    width:70px;flex:none;font:inherit;font-size:14px;padding:8px;
-    border:1px solid var(--border-strong);border-radius:0 8px 8px 0;
-    background:var(--card);color:var(--text);text-align:right;
-  }
   .num-input.qty-input{width:48px}
   /* Quantity stepper: the − and + flank the input and carry the rounded
      ends, so the three read as one control. Sized to stay a comfortable tap
@@ -136,30 +69,6 @@
   .step-btn:hover{background:rgba(127,127,127,.22);color:var(--text)}
   .step-btn:active{transform:scale(.92)}
   .subtotal{font-size:13px;color:var(--muted);margin-left:auto;white-space:nowrap}
-  .msg{padding:28px 8px;text-align:center;color:var(--muted);font-size:15px}
-  .msg.err{color:var(--danger)}
-  .login{max-width:360px;margin:12vh auto 0;text-align:center}
-  .login h2{font-size:18px;margin:0 0 4px}
-  .login p{color:var(--muted);font-size:14px;margin:0 0 20px}
-  input[type=password]{
-    width:100%;font:inherit;font-size:16px;padding:14px;border-radius:12px;
-    border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:12px;
-  }
-  button.primary{
-    font:inherit;font-weight:600;font-size:16px;border:none;border-radius:14px;
-    padding:15px 20px;min-height:52px;cursor:pointer;width:100%;max-width:640px;
-    background:var(--accent);color:var(--accent-text);
-    display:flex;align-items:center;justify-content:center;gap:8px;
-    transition:filter .15s ease,transform .1s ease;
-  }
-  button.primary:hover:not(:disabled){filter:brightness(1.1)}
-  button.primary:active:not(:disabled){transform:scale(.98)}
-  button.primary:disabled{opacity:.5}
-  button.primary.small{min-height:44px;padding:10px 16px;font-size:14px;width:auto;flex:none}
-  /* Secondary action sitting next to a primary one (the scan button beside +). */
-  button.primary.alt{background:rgba(127,127,127,.16);color:var(--text)}
-  button.primary.alt:hover:not(:disabled){background:rgba(127,127,127,.26);filter:none}
-  .loginerr{color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px}
   .addrow{display:flex;gap:8px;margin-top:14px}
   .addrow input[type=text]{
     flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
@@ -181,69 +90,15 @@
   /* Layering, bottom to top: ordinary dialogs (100) < the camera overlay
      (110), so a scan can be started from the edit dialog < the camera
      picker (120), which is opened from inside that overlay. */
-  .modal-backdrop{
-    position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;
-    display:flex;align-items:center;justify-content:center;padding:16px;
-    animation:modalFadeIn .15s ease;
-  }
-  .modal-card{
-    background:var(--card);border-radius:16px;padding:20px;width:100%;max-width:400px;
-    animation:modalPopIn .18s cubic-bezier(.2,.8,.2,1);
-  }
   .modal-backdrop.above-scanner{z-index:120}
-  @keyframes modalFadeIn{from{opacity:0} to{opacity:1}}
-  @keyframes modalPopIn{
-    from{opacity:0;transform:scale(.95) translateY(6px)}
-    to{opacity:1;transform:scale(1) translateY(0)}
-  }
-  .modal-card h3{margin:0 0 14px;font-size:16px}
-  .modal-card p{font-size:15px;line-height:1.4;margin:0 0 18px}
-  .modal-card label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
-  /* Deliberately excludes .num-input: the compact quantity/price controls are
-     type=text too (a number input can't hold "5,50" — see wirePriceInput), and
-     this rule outranks .num-input on specificity, so without the :not() it
-     stretched the price field past the card, rounded both ends off the R$ chip
-     and pushed it out of line with a stray margin-bottom. */
-  .modal-card input[type=text]:not(.num-input){
-    width:100%;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
-    border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:14px;
-  }
   .gtin-row{display:flex;gap:8px;align-items:flex-start}
   .gtin-row input[type=text]{flex:1;min-width:0}
-  .modal-card .hint{font-size:12px;color:var(--muted);line-height:1.4;margin:-6px 0 16px}
   /* Scan dialog: name and brand up top, then the two things worth entering
-     while the box is still in your hand. */
+     while the box is still in your hand. .fields-row is the shared
+     amount+unit row layout (shared-inputs.css); .qty-field's own width here
+     is scan-dialog-specific, so it stays local. */
   .scan-meta{margin:0 0 16px;font-size:13px;color:var(--muted)}
-  .scan-fields{display:flex;gap:12px;align-items:flex-end;margin:0 0 6px}
-  .scan-fields .col{display:flex;flex-direction:column;gap:6px;min-width:0}
-  .scan-fields .col.grow{flex:1}
-  .scan-fields label{margin:0;font-size:13px;color:var(--muted)}
-  .scan-fields .field{display:flex;align-items:center;flex:none}
-  /* The price takes whatever the quantity leaves — it's the only field here
-     whose content can get long. The quantity keeps the fixed width its
-     stepper is built around. */
-  .scan-fields .col.grow .field{width:100%}
-  .scan-fields .col.grow .num-input{flex:1 1 auto;width:auto;min-width:0}
-  .scan-fields .qty-field .num-input{width:44px}
-  /* Unit picker beside the package amount. Matched to .num-input's box rather
-     than the full-width text-input rule so the pair reads as one control, and
-     sized for a thumb (a native select opens the platform picker on a phone). */
-  .modal-card select{
-    font:inherit;font-size:15px;padding:9px 10px;border-radius:10px;
-    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
-  }
-  .scan-fields .unit-col select{width:84px}
-  .modal-actions{display:flex;gap:8px;justify-content:flex-end}
-  .modal-actions button{
-    font:inherit;font-weight:600;font-size:14px;padding:10px 16px;border-radius:10px;
-    border:none;cursor:pointer;transition:filter .15s ease,transform .1s ease,background-color .15s ease;
-  }
-  .modal-actions button:active{transform:scale(.97)}
-  .modal-actions .cancel{background:none;color:var(--muted)}
-  .modal-actions .cancel:hover{background:rgba(127,127,127,.12);color:var(--text)}
-  .modal-actions .save{background:var(--accent);color:var(--accent-text)}
-  .modal-actions .save.danger{background:var(--danger)}
-  .modal-actions .save:hover{filter:brightness(1.1)}
+  .fields-row .qty-field .num-input{width:44px}
 
   /* Barcode scanner. Sits ABOVE .modal-backdrop (z-index 100) because it can
      be opened from inside the edit dialog to attach a code to an item. The
@@ -294,19 +149,6 @@
   .scan-actions .ghost{background:rgba(255,255,255,.2);color:#fff;padding:14px 16px}
   .scan-actions .ghost.on{background:#fde68a;color:#111}
 
-  /* Status pill over the list. The camera closes as soon as a code is read,
-     so by the time the lookup answers there's no overlay left to report in. */
-  .toast{
-    position:fixed;left:16px;right:16px;
-    bottom:max(16px,env(safe-area-inset-bottom));
-    margin:0 auto;max-width:420px;text-align:center;z-index:95;
-    background:var(--text);color:var(--bg);
-    font-size:14px;font-weight:600;padding:12px 14px;border-radius:12px;
-    opacity:0;transform:translateY(8px);pointer-events:none;
-    transition:opacity .2s ease,transform .2s ease;
-  }
-  .toast.show{opacity:1;transform:translateY(0)}
-  .toast.err{background:var(--danger);color:#fff}
   /* Camera picker / diagnostic list. */
   .cam-list{display:flex;flex-direction:column;gap:8px;margin:0 0 14px;max-height:52vh;overflow:auto}
   .cam-item{
@@ -328,31 +170,21 @@
 <div id="root" class="wrap"><p class="msg">Carregando…</p></div>
 
 <script>
-const API = "https://opehbckfmfschpvbhxvo.supabase.co/functions/v1/checklist-api";
-const PASS_KEY = "checklist_pass";
-
 const root = document.getElementById("root");
+const CURRENT_PAGE = "compras";
+const PAGE_LOGIN = {
+  title: "Listas de compras",
+  subtitle: "Digite a senha para acessar.",
+  onSuccess: () => loadLists()
+};
+</script>
+<script src="shared-api.js"></script>
+<script src="shared-menu.js"></script>
+<script src="shared-ui.js"></script>
+<script src="shared-format.js"></script>
+<script src="shared-inputs.js"></script>
+<script>
 let currentList = null; // set when viewing a single list's items
-
-function getPass(){ return localStorage.getItem(PASS_KEY) || ""; }
-
-async function api(action, extra){
-  const r = await fetch(API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-checklist-pass": getPass() },
-    body: JSON.stringify(Object.assign({ action }, extra || {}))
-  });
-  if(r.status === 401){ const e = new Error("unauthorized"); e.unauthorized = true; throw e; }
-  if(!r.ok){
-    // 400 means the API rejected the input itself (an unreadable
-    // peso/volume, say), which deserves a different message from a
-    // connection failure.
-    const e = new Error("http " + r.status);
-    e.badRequest = r.status === 400;
-    throw e;
-  }
-  return await r.json();
-}
 
 // What a barcode last sold for — a useful thing to see while confirming a
 // scan or price, and never worth failing the surrounding action over, so any
@@ -367,13 +199,6 @@ async function lastPriceFor(gtin){
   }catch(_){
     return null;
   }
-}
-
-function esc(s){
-  return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-}
-function fmtMoney(v){
-  return new Intl.NumberFormat("pt-BR", { style:"currency", currency:"BRL" }).format(Number(v) || 0);
 }
 
 // Returns just the first grapheme cluster of a string -- unlike a raw
@@ -396,81 +221,6 @@ function limitToOneEmoji(input){
   input.addEventListener("input", () => {
     const limited = firstGrapheme(input.value);
     if(input.value !== limited) input.value = limited;
-  });
-}
-
-const CURRENT_PAGE = "shopping";
-const MENU_ITEMS = [
-  { page: "hoje", href: "hoje.html", emoji: "☀️", label: "Hoje" },
-  { page: "index", href: "index.html", emoji: "✓", label: "Tarefas" },
-  { page: "shopping", href: "shopping.html", emoji: "🛒", label: "Compras" },
-  { page: "estoque", href: "estoque.html", emoji: "📦", label: "Estoque" },
-  { page: "produtos", href: "produtos.html", emoji: "🏷️", label: "Produtos" },
-];
-
-function wireMenuButton(){
-  const btn = document.getElementById("menu-btn");
-  if(btn) btn.addEventListener("click", openMenu);
-}
-
-function openMenu(){
-  const itemsHtml = MENU_ITEMS.map(item => {
-    if(item.page === CURRENT_PAGE){
-      return '<span class="menu-item active">' + item.emoji + ' ' + item.label + '</span>';
-    }
-    return '<a class="menu-item" href="' + item.href + '">' + item.emoji + ' ' + item.label + '</a>';
-  }).join("");
-
-  const backdrop = document.createElement("div");
-  backdrop.className = "menu-backdrop";
-  backdrop.innerHTML =
-    '<div class="menu-panel" id="menu-panel">' +
-      itemsHtml +
-      '<div class="menu-spacer"></div>' +
-      '<button class="menu-item logout" id="menu-logout">🚪 Sair</button>' +
-    '</div>';
-  document.body.appendChild(backdrop);
-  const panel = document.getElementById("menu-panel");
-  requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.add("open")));
-
-  const close = () => {
-    panel.classList.remove("open");
-    document.removeEventListener("keydown", onKey);
-    setTimeout(() => backdrop.remove(), 250);
-  };
-  function onKey(e){ if(e.key === "Escape") close(); }
-  document.addEventListener("keydown", onKey);
-  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
-  document.getElementById("menu-logout").addEventListener("click", () => {
-    localStorage.removeItem(PASS_KEY);
-    close();
-    showLogin();
-  });
-}
-
-function confirmModal(message, confirmLabel){
-  return new Promise(resolve => {
-    const backdrop = document.createElement("div");
-    backdrop.className = "modal-backdrop";
-    backdrop.innerHTML =
-      '<div class="modal-card">' +
-        '<p>' + esc(message) + '</p>' +
-        '<div class="modal-actions">' +
-          '<button class="cancel" id="confirm-cancel">Cancelar</button>' +
-          '<button class="save danger" id="confirm-ok">' + esc(confirmLabel || "Excluir") + '</button>' +
-        '</div>' +
-      '</div>';
-    document.body.appendChild(backdrop);
-    const close = (result) => {
-      backdrop.remove();
-      document.removeEventListener("keydown", onKey);
-      resolve(result);
-    };
-    function onKey(e){ if(e.key === "Escape") close(false); }
-    document.addEventListener("keydown", onKey);
-    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(false); });
-    document.getElementById("confirm-cancel").addEventListener("click", () => close(false));
-    document.getElementById("confirm-ok").addEventListener("click", () => close(true));
   });
 }
 
@@ -955,29 +705,6 @@ async function openScanner(){
   });
 }
 
-// Transient status pill over the list. The camera closes on a read, so
-// there's no overlay left to report into by the time the API answers.
-let listToastTimer = null;
-function listToast(msg, isErr){
-  let el = document.getElementById("list-toast");
-  if(!el){
-    el = document.createElement("div");
-    el.id = "list-toast";
-    el.className = "toast";
-    document.body.appendChild(el);
-  }
-  el.textContent = msg;
-  el.classList.toggle("err", !!isErr);
-  el.classList.add("show");
-  clearTimeout(listToastTimer);
-  listToastTimer = setTimeout(() => el.classList.remove("show"), 2600);
-}
-function hideListToast(){
-  const el = document.getElementById("list-toast");
-  if(el) el.classList.remove("show");
-  clearTimeout(listToastTimer);
-}
-
 // Shared by the scan-confirm dialog (adding a newly scanned product)
 // and the pencil/rescan edit dialog (editing an existing row) — same fields,
 // same order, so the two can never drift into feeling like different tools.
@@ -1064,7 +791,7 @@ function productFieldsModal(opts){
         // shrunk package.
         '<div id="' + p + '-net-field"' + (hasCode ? '' : ' hidden') + '>' +
           '<label for="' + p + '-net-qty">Peso / volume do pacote (opcional)</label>' +
-          '<div class="scan-fields">' +
+          '<div class="fields-row">' +
             '<div class="col grow">' +
               '<span class="field">' +
                 '<input class="num-input" type="text" inputmode="decimal" id="' + p + '-net-qty" ' +
@@ -1081,7 +808,7 @@ function productFieldsModal(opts){
           '<p class="hint">Quanto vem em UM pacote — é o que permite somar o ' +
             'total disponível para as receitas. Corrija se estiver errado.</p>' +
         '</div>' +
-        '<div class="scan-fields">' +
+        '<div class="fields-row">' +
           '<div class="col">' +
             '<label for="' + p + '-qty">Quantidade</label>' +
             '<span class="field qty-field">' +
@@ -1295,41 +1022,6 @@ function alertModal(message){
   });
 }
 
-function promptModal(title, label, currentValue){
-  return new Promise(resolve => {
-    const backdrop = document.createElement("div");
-    backdrop.className = "modal-backdrop";
-    backdrop.innerHTML =
-      '<div class="modal-card">' +
-        '<h3>' + esc(title) + '</h3>' +
-        '<label for="prompt-input">' + esc(label) + '</label>' +
-        '<input type="text" id="prompt-input" value="' + esc(currentValue || "") + '">' +
-        '<div class="modal-actions">' +
-          '<button class="cancel" id="prompt-cancel">Cancelar</button>' +
-          '<button class="save" id="prompt-ok">Salvar</button>' +
-        '</div>' +
-      '</div>';
-    document.body.appendChild(backdrop);
-    const close = (result) => {
-      backdrop.remove();
-      document.removeEventListener("keydown", onKey);
-      resolve(result);
-    };
-    const ok = () => close(input.value);
-    function onKey(e){
-      if(e.key === "Escape") close(null);
-      if(e.key === "Enter"){ e.preventDefault(); ok(); }
-    }
-    document.addEventListener("keydown", onKey);
-    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
-    document.getElementById("prompt-cancel").addEventListener("click", () => close(null));
-    document.getElementById("prompt-ok").addEventListener("click", ok);
-    const input = document.getElementById("prompt-input");
-    input.focus();
-    input.select();
-  });
-}
-
 function openListEditModal(list, onSaved){
   const currentEmoji = list.emoji || "🛒";
   const backdrop = document.createElement("div");
@@ -1374,37 +1066,6 @@ function openListEditModal(list, onSaved){
     try{ await Promise.all(tasks); onSaved(); }
     catch(e){ handleAuthError(e, onSaved); }
   });
-}
-
-function showLogin(errText){
-  root.innerHTML =
-    '<div class="login">' +
-      '<h2>Listas de compras</h2>' +
-      '<p>Digite a senha para acessar.</p>' +
-      '<div class="loginerr">' + (errText ? esc(errText) : "") + '</div>' +
-      '<input type="password" id="pw" autocomplete="current-password" placeholder="Senha" />' +
-      '<button class="primary" id="enter">Entrar</button>' +
-    '</div>';
-  const pw = document.getElementById("pw");
-  const go = () => {
-    const v = pw.value.trim();
-    if(!v) return;
-    localStorage.setItem(PASS_KEY, v);
-    loadLists();
-  };
-  document.getElementById("enter").addEventListener("click", go);
-  pw.addEventListener("keydown", e => { if(e.key === "Enter") go(); });
-  pw.focus();
-}
-
-function handleAuthError(e, retry){
-  if(e.unauthorized){
-    localStorage.removeItem(PASS_KEY);
-    showLogin("Sessão expirada, entre novamente.");
-  }else{
-    root.innerHTML = '<p class="msg err">Não foi possível carregar agora.</p>' +
-      '<p class="msg"><button class="link" onclick="(' + retry.toString() + ')()">Tentar novamente</button></p>';
-  }
 }
 
 function navHeader(title, backAction, emoji){
@@ -1527,178 +1188,11 @@ function qtyOf(it){
   const q = Number(it.quantity);
   return Number.isFinite(q) && q > 0 ? q : 1;
 }
-// Cents-first currency input: the user types digits only and they fill in
-// from the right — 1 → 0,01, 12 → 0,12, 123 → 1,23 — so no separator key is
-// ever needed, which is what makes it quick on a phone keypad. Everything
-// that is not a digit is discarded, which also means the thousand
-// separators the formatter adds are ignored on the way back in.
-const PRICE_MAX_DIGITS = 9;
-function priceDigits(raw){
-  return String(raw ?? "")
-    .replace(/\D/g, "")
-    .slice(0, PRICE_MAX_DIGITS)
-    // ALL leading zeros go, not just the ones followed by a digit: that is
-    // what lets backspacing walk 0,01 down to an empty field instead of
-    // getting stuck on 0,00. It also means a price of exactly zero can't be
-    // typed, which is fine — blank already means "unknown", and a free item
-    // is not a thing this list needs to record.
-    .replace(/^0+/, "");
-}
-// Blank stays blank: an unknown price is not the same as a free item.
-function centsToPrice(digits){
-  return digits === "" ? null : Number(digits) / 100;
-}
-
-// Written back as "5,50" / "1.234,56". This is why the field is type=text
-// rather than type=number — a number input's value must be a dot-decimal
-// float, so assigning "5,50" to one silently blanks it.
-function fmtPriceInput(v){
-  if(v === null || v === undefined || v === "") return "";
-  const n = Number(v);
-  if(!Number.isFinite(n)) return "";
-  return n.toLocaleString("pt-BR",
-    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-// The price and quantity fields behave the same wherever they appear — in a
-// list row and in the scan dialog — so the behaviour is attached by these
-// two rather than written out twice.
-function wirePriceInput(el){
-  // WHILE TYPING the caret belongs at the far right: digits shift left as
-  // they are entered, so any other position edits a slot that is about to
-  // mean something else.
-  const caretToEnd = () => {
-    // A real selection is left alone — collapsing it would turn a replace
-    // into an append.
-    if(el.selectionStart !== el.selectionEnd) return;
-    const end = el.value.length;
-    try{ el.setSelectionRange(end, end); }catch(_){ /* not focusable */ }
-  };
-  // ON TAP the whole amount is selected instead. With cents-first entry the
-  // two agree rather than conflict: typing over the selection restarts the
-  // amount from the right, so a tap always means "replace this".
-  const selectAll = () => { try{ el.select(); }catch(_){ /* not focusable */ } };
-  // Selected synchronously, NOT on a timer. focus does fire before the
-  // browser places the caret from a tap — but click and pointerup fire
-  // after it, so between them the tap is covered without deferring. A
-  // deferred select was a race: it could land after the first keystroke and
-  // wipe what had just been typed.
-  el.addEventListener("focus", selectAll);
-  el.addEventListener("click", selectAll);
-  el.addEventListener("pointerup", selectAll);
-  el.addEventListener("input", () => {
-    el.value = fmtPriceInput(centsToPrice(priceDigits(el.value)));
-    caretToEnd();
-  });
-}
-
-function wireQtyInput(el){
-  el.addEventListener("input", () => {
-    const clean = sanitizeQtyInput(el.value);
-    if(clean !== el.value) el.value = clean;
-  });
-  // Tapping selects what's there, so the next digit replaces the amount
-  // instead of landing beside it. Synchronous for the same reason as the
-  // price field — a deferred select can land after the first keystroke.
-  const selectAll = () => { try{ el.select(); }catch(_){ /* not focusable */ } };
-  el.addEventListener("focus", selectAll);
-  el.addEventListener("click", selectAll);
-  el.addEventListener("pointerup", selectAll);
-}
-
-// Quantity accepts digits and at most ONE decimal separator, and nothing
-// else — type=number still let "e", "+" and "-" through on some browsers,
-// which then read back as an empty value. Decimals stay allowed on purpose:
-// "1,5 kg" is a normal amount to put on a shopping list.
-function sanitizeQtyInput(raw){
-  let s = String(raw ?? "").replace(/[^\d.,]/g, "").replace(/\./g, ",");
-  const first = s.indexOf(",");
-  if(first !== -1) s = s.slice(0, first + 1) + s.slice(first + 1).replace(/,/g, "");
-  return s;
-}
-// Either separator in, a positive number or null out.
-function parseQtyInput(raw){
-  const n = Number(String(raw ?? "").replace(",", "."));
-  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
-}
-
 // Quantity for display: "2", not "2,00" — but "1,5" stays "1,5" (kg happens).
 function fmtQty(q){
   const n = Number(q);
   if(!Number.isFinite(n) || n <= 0) return "1";
   return Number.isInteger(n) ? String(n) : n.toLocaleString("pt-BR");
-}
-
-// Package size as stored: normalized to g / ml / un by the API, shown back
-// in whichever unit reads naturally.
-function fmtNetQty(qty, unit){
-  const n = Number(qty);
-  if(!Number.isFinite(n) || n <= 0 || !unit) return "";
-  if(unit === "g" && n >= 1000) return (n / 1000).toLocaleString("pt-BR") + " kg";
-  if(unit === "ml" && n >= 1000) return (n / 1000).toLocaleString("pt-BR") + " L";
-  return n.toLocaleString("pt-BR") + " " + unit;
-}
-
-// The units the scan dialog offers, and what each one means in the g/ml/un
-// pair the catalogue stores. Deliberately shorter than the list
-// checklist-api's parseNetQuantity ACCEPTS (it also takes mg and cl): those
-// two never appear on a supermarket package here, and every extra row is
-// another thing to scroll past on a phone. A value that arrives from Open
-// Food Facts in mg or cl is still normalized to g/ml by the API before it
-// ever reaches this dialog, so nothing is lost by not offering them.
-const PACK_UNITS = [
-  { value: "kg", label: "kg", mult: 1000, unit: "g"  },
-  { value: "g",  label: "g",  mult: 1,    unit: "g"  },
-  { value: "L",  label: "L",  mult: 1000, unit: "ml" },
-  { value: "ml", label: "ml", mult: 1,    unit: "ml" },
-  { value: "un", label: "un", mult: 1,    unit: "un" },
-];
-
-// The blank option is the default for a product nothing is known about, and
-// it is deliberately NOT a silent "g": typing 1 while the box says 1 kg would
-// store a gram of rice and nobody would notice until a recipe did the maths.
-function unitOptions(selected){
-  return '<option value=""' + (selected ? "" : " selected") + '>—</option>' +
-    PACK_UNITS.map(u =>
-      '<option value="' + u.value + '"' +
-      (u.value === selected ? " selected" : "") + '>' + esc(u.label) + '</option>'
-    ).join("");
-}
-
-// Stored pair -> the two fields, in the unit the packaging would use: 1500 g
-// comes back as 1,5 + kg, not 1500 + g. Same thresholds as fmtNetQty, which
-// renders the same value as one string elsewhere.
-function netQtyToFields(qty, unit){
-  const n = Number(qty);
-  if(!Number.isFinite(n) || n <= 0 || !unit) return { qty: "", unit: "" };
-  if(unit === "g"  && n >= 1000) return { qty: fmtQty(n / 1000), unit: "kg" };
-  if(unit === "ml" && n >= 1000) return { qty: fmtQty(n / 1000), unit: "L" };
-  return { qty: fmtQty(n), unit: unit };
-}
-
-// The two fields -> the stored pair. Returns null when there is nothing usable
-// to store, so "blank" and "invalid" are one case for the caller.
-function fieldsToNetQty(rawQty, rawUnit){
-  const n = parseQtyInput(rawQty);
-  const u = PACK_UNITS.find(x => x.value === rawUnit);
-  if(n === null || !u) return null;
-  return { net_qty: n * u.mult, net_unit: u.unit };
-}
-
-// Same SHOUTED-name rule checklist-api applies to product names, used here
-// for the BRAND. Brands are tidied at render rather than on the way in
-// because, unlike the name, a brand is never copied onto an editable row and
-// never typed by the user — so the stored value can stay exactly as Open
-// Food Facts supplied it.
-const PT_SMALL_WORDS = ["de","da","do","das","dos","e","com","em","no","na",
-  "nos","nas","a","o","as","os","ao","aos","para","sem","por","um","uma"];
-function tidyShouted(raw){
-  const s = String(raw || "").trim().replace(/\s+/g, " ");
-  if(!s || /\p{Ll}/u.test(s)) return s;
-  return s.toLowerCase().replace(/\S+/gu, (word, offset) =>
-    (offset > 0 && PT_SMALL_WORDS.indexOf(word) >= 0)
-      ? word
-      : word.charAt(0).toUpperCase() + word.slice(1));
 }
 
 // Brand and package size of the scanned product, under the item name — the

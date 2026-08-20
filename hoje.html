@@ -28,30 +28,9 @@
   in the day's report — struck through and marked concluída — instead of
   silently vanishing or pretending to still be open.
 -->
+<link rel="stylesheet" href="shared-base.css">
+<link rel="stylesheet" href="shared-menu.css">
 <style>
-  :root{
-    --bg:#f7f7f8; --card:#ffffff; --text:#1a1a1a; --muted:#6b7280;
-    --border:#e5e7eb; --border-strong:#d1d5db; --accent:#2563eb;
-    --accent-text:#ffffff; --danger:#dc2626;
-    --warn:#b45309; --lead:#2563eb; --incident:#be185d;
-    --tint:rgba(127,127,127,.06);
-  }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --muted:#94a3b8;
-      --border:#334155; --border-strong:#475569; --accent:#3b82f6;
-      --accent-text:#ffffff; --danger:#f87171;
-      --warn:#fbbf24; --lead:#60a5fa; --incident:#f472b6;
-      --tint:rgba(255,255,255,.05);
-    }
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;padding:0}
-  body{
-    background:var(--bg); color:var(--text);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    -webkit-font-smoothing:antialiased;
-  }
   .page{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
   .wrap{
     flex:1 0 auto;max-width:640px;margin:0 auto;width:100%;
@@ -60,62 +39,6 @@
   header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 16px}
   .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
   h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
-  .link{
-    background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;
-    text-decoration:none;display:inline-block;transition:color .15s ease,opacity .1s ease;
-  }
-  .link:hover{color:var(--text);text-decoration:underline}
-  .link:active{opacity:.6}
-  .menu-btn{
-    background:none;border:none;color:var(--text);font-size:22px;padding:2px 8px 2px 0;
-    cursor:pointer;line-height:1;flex:none;align-self:center;
-    transition:opacity .15s ease,transform .1s ease;
-  }
-  .menu-btn:hover{opacity:.7}
-  .menu-btn:active{transform:scale(.9)}
-  .menu-backdrop{
-    position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;
-    animation:modalFadeIn .15s ease;
-  }
-  .menu-panel{
-    position:fixed;top:0;left:0;bottom:0;width:min(280px,80vw);
-    background:var(--card);box-shadow:2px 0 24px rgba(0,0,0,.3);
-    display:flex;flex-direction:column;
-    padding:max(16px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-bottom));
-    transform:translateX(-100%);transition:transform .25s cubic-bezier(.2,.8,.2,1);
-  }
-  .menu-panel.open{transform:translateX(0)}
-  .menu-item{
-    display:flex;align-items:center;gap:12px;padding:14px 20px;font-size:15px;
-    color:var(--text);text-decoration:none;background:none;border:none;width:100%;
-    text-align:left;cursor:pointer;transition:background-color .15s ease;
-  }
-  .menu-item:hover{background:rgba(127,127,127,.08)}
-  .menu-item.active{color:var(--accent);font-weight:600}
-  .menu-spacer{flex:1}
-  .menu-item.logout{border-top:1px solid var(--border);color:var(--danger)}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
-  .msg{padding:28px 8px;text-align:center;color:var(--muted);font-size:15px}
-  .msg.err{color:var(--danger)}
-  .login{max-width:360px;margin:12vh auto 0;text-align:center}
-  .login h2{font-size:18px;margin:0 0 4px}
-  .login p{color:var(--muted);font-size:14px;margin:0 0 20px}
-  input[type=password]{
-    width:100%;font:inherit;font-size:16px;padding:14px;border-radius:12px;
-    border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:12px;
-  }
-  button.primary{
-    font:inherit;font-weight:600;font-size:16px;border:none;border-radius:14px;
-    padding:15px 20px;min-height:52px;cursor:pointer;width:100%;max-width:640px;
-    background:var(--accent);color:var(--accent-text);
-    display:flex;align-items:center;justify-content:center;gap:8px;
-    transition:filter .15s ease,transform .1s ease;
-  }
-  button.primary:hover:not(:disabled){filter:brightness(1.1)}
-  button.primary:active:not(:disabled){transform:scale(.98)}
-  button.primary:disabled{opacity:.5}
-  .loginerr{color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px}
-  @keyframes modalFadeIn{from{opacity:0} to{opacity:1}}
 
   /* ---- report ---- */
   .datebar{
@@ -190,43 +113,19 @@
 </div>
 
 <script>
-const API = "https://opehbckfmfschpvbhxvo.supabase.co/functions/v1/checklist-api";
-const PASS_KEY = "checklist_pass";
-
 const root = document.getElementById("root");
-
-function getPass(){ return localStorage.getItem(PASS_KEY) || ""; }
-
-async function api(action, extra){
-  const r = await fetch(API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-checklist-pass": getPass() },
-    body: JSON.stringify(Object.assign({ action }, extra || {}))
-  });
-  if(r.status === 401){ const e = new Error("unauthorized"); e.unauthorized = true; throw e; }
-  if(!r.ok) throw new Error("http " + r.status);
-  return await r.json();
-}
-
-function esc(s){
-  return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-}
-function fmtStamp(iso){
-  if(!iso) return "";
-  try{
-    const d = new Date(iso);
-    return d.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}) + " " +
-           d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
-  }catch(e){ return ""; }
-}
-// report_date is a bare YYYY-MM-DD: parse it as local time (not UTC, which
-// `new Date("2026-07-29")` would do and could shift the label a day back).
-function fmtDay(ymd){
-  if(!ymd) return "";
-  const p = String(ymd).split("-");
-  if(p.length !== 3) return String(ymd);
-  return p[2] + "/" + p[1] + "/" + p[0];
-}
+const CURRENT_PAGE = "hoje";
+const PAGE_LOGIN = {
+  title: "Resumo do dia",
+  subtitle: "Digite a senha para acessar seu resumo.",
+  onSuccess: () => load()
+};
+</script>
+<script src="shared-api.js"></script>
+<script src="shared-menu.js"></script>
+<script src="shared-ui.js"></script>
+<script src="shared-format.js"></script>
+<script>
 const SOURCE_META = {
   email:            { emoji:"📧", label:"E-mail" },
   whatsapp:         { emoji:"💬", label:"WhatsApp" },
@@ -238,77 +137,17 @@ const SOURCE_META = {
 };
 const CLASSES = ["urgent", "conflict", "lead", "incident"];
 
-const CURRENT_PAGE = "hoje";
-const MENU_ITEMS = [
-  { page: "hoje", href: "hoje.html", emoji: "☀️", label: "Hoje" },
-  { page: "index", href: "index.html", emoji: "✓", label: "Tarefas" },
-  { page: "shopping", href: "shopping.html", emoji: "🛒", label: "Compras" },
-  { page: "estoque", href: "estoque.html", emoji: "📦", label: "Estoque" },
-  { page: "produtos", href: "produtos.html", emoji: "🏷️", label: "Produtos" },
-];
-
 // null = "whatever the newest report is"; a YYYY-MM-DD pins one day.
 let currentDate = null;
 
-function showLogin(errText){
-  root.innerHTML =
-    '<div class="login">' +
-      '<h2>Resumo do dia</h2>' +
-      '<p>Digite a senha para acessar seu resumo.</p>' +
-      '<div class="loginerr">' + (errText ? esc(errText) : "") + '</div>' +
-      '<input type="password" id="pw" autocomplete="current-password" placeholder="Senha" />' +
-      '<button class="primary" id="enter">Entrar</button>' +
-    '</div>';
-  const pw = document.getElementById("pw");
-  const go = () => {
-    const v = pw.value.trim();
-    if(!v) return;
-    localStorage.setItem(PASS_KEY, v);
-    load();
-  };
-  document.getElementById("enter").addEventListener("click", go);
-  pw.addEventListener("keydown", e => { if(e.key === "Enter") go(); });
-  pw.focus();
-}
-
-function wireMenuButton(){
-  const btn = document.getElementById("menu-btn");
-  if(btn) btn.addEventListener("click", openMenu);
-}
-
-function openMenu(){
-  const itemsHtml = MENU_ITEMS.map(item => {
-    if(item.page === CURRENT_PAGE){
-      return '<span class="menu-item active">' + item.emoji + ' ' + item.label + '</span>';
-    }
-    return '<a class="menu-item" href="' + item.href + '">' + item.emoji + ' ' + item.label + '</a>';
-  }).join("");
-
-  const backdrop = document.createElement("div");
-  backdrop.className = "menu-backdrop";
-  backdrop.innerHTML =
-    '<div class="menu-panel" id="menu-panel">' +
-      itemsHtml +
-      '<div class="menu-spacer"></div>' +
-      '<button class="menu-item logout" id="menu-logout">🚪 Sair</button>' +
-    '</div>';
-  document.body.appendChild(backdrop);
-  const panel = document.getElementById("menu-panel");
-  requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.add("open")));
-
-  const close = () => {
-    panel.classList.remove("open");
-    document.removeEventListener("keydown", onKey);
-    setTimeout(() => backdrop.remove(), 250);
-  };
-  function onKey(e){ if(e.key === "Escape") close(); }
-  document.addEventListener("keydown", onKey);
-  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
-  document.getElementById("menu-logout").addEventListener("click", () => {
-    localStorage.removeItem(PASS_KEY);
-    close();
-    showLogin();
-  });
+// report_date is a bare YYYY-MM-DD: parse it as local time (not UTC, which
+// `new Date("2026-07-29")` would do and could shift the label a day back).
+// Single consumer, so it stays local rather than moving to shared-format.js.
+function fmtDay(ymd){
+  if(!ymd) return "";
+  const p = String(ymd).split("-");
+  if(p.length !== 3) return String(ymd);
+  return p[2] + "/" + p[1] + "/" + p[0];
 }
 
 function headerHtml(){
@@ -335,7 +174,7 @@ function dateBarHtml(report, prevDate, nextDate){
   const p = report.payload || {};
   const dow = p.dia_semana ? esc(p.dia_semana) : "";
   const dia = esc(p.data || fmtDay(report.report_date));
-  const gerado = fmtStamp(report.generated_at);
+  const gerado = fmtDateTime(report.generated_at);
   return '<div class="datebar">' +
     '<button class="navbtn" id="prev-day"' + (prevDate ? '' : ' disabled') +
       ' aria-label="Dia anterior">‹</button>' +
@@ -408,7 +247,7 @@ function acoesHtml(p, statuses){
     const m = SOURCE_META[a.origem] || { emoji:"•", label: a.origem || "" };
     const st = statusOf(a, statuses);
     const done = st ? " done" : "";
-    const stamp = st && st.done_at ? fmtStamp(st.done_at) : "";
+    const stamp = st && st.done_at ? fmtDateTime(st.done_at) : "";
     const meta = st
       ? [st.label + (stamp ? " em " + stamp : ""), m.label].filter(Boolean).map(esc).join(" · ")
       : [m.label, a.motivo].filter(Boolean).map(esc).join(" · ");
@@ -423,7 +262,7 @@ function acoesHtml(p, statuses){
   }).join("");
   return section("Ações para hoje", inner) +
     '<p class="note">A lista é o retrato do resumo da manhã; o estado de cada ' +
-    'item é o atual. Para concluir ou reabrir, abra <a href="index.html">Tarefas</a>.</p>';
+    'item é o atual. Para concluir ou reabrir, abra <a href="tarefas.html">Tarefas</a>.</p>';
 }
 
 function amanhaHtml(p){

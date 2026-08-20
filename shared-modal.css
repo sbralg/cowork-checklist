@@ -1,0 +1,56 @@
+/* shared-modal.css — the modal shell every dialog on every page builds on
+   top of (confirmModal, promptModal, and every purpose-built one).
+
+   `.modal-card` now always carries max-height:90vh + overflow:auto —
+   previously only estoque.html/produtos.html had it (their dialogs, e.g.
+   the ingredient picker, can genuinely overflow a short viewport); it's a
+   harmless addition on pages whose dialogs were always short. Likewise
+   `.modal-actions .save.danger` is now universal, closing a real gap
+   (estoque.html had no confirmModal call before this refactor, so it never
+   needed the danger-button styling — now that confirmModal is available to
+   every page via shared-ui.js, the CSS for it needs to be too).
+
+   `.modal-card select` intentionally does NOT set width/margin-bottom the
+   way `.modal-card input[type=text]:not(.num-input)` does — a compact unit
+   picker (peso/volume dialogs) relies on staying its own narrow width
+   inside a flex row, and adding a default width:100%+margin-bottom here
+   would leak extra spacing into that row. The one page that used to get a
+   full-width category <select> for free from a combined rule (tarefas.html's
+   edit-category dialog) gets that back via a two-line page-local override
+   instead, since it's the only place that ever wanted it. */
+.modal-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;
+  display:flex;align-items:center;justify-content:center;padding:16px;
+  animation:modalFadeIn .15s ease;
+}
+.modal-card{
+  background:var(--card);border-radius:16px;padding:20px;width:100%;max-width:400px;
+  animation:modalPopIn .18s cubic-bezier(.2,.8,.2,1);
+  max-height:90vh;overflow:auto;
+}
+.modal-card h3{margin:0 0 14px;font-size:16px;color:var(--text)}
+.modal-card p{font-size:15px;line-height:1.4;margin:0 0 18px}
+.modal-card label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
+/* Excludes .num-input: the compact quantity/price controls are type=text
+   too (a number input can't hold "5,50" — see shared-inputs.js), and this
+   rule outranks .num-input on specificity without the :not(). */
+.modal-card input[type=text]:not(.num-input){
+  width:100%;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+  border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:14px;
+}
+.modal-card .hint{font-size:12px;color:var(--muted);line-height:1.4;margin:-6px 0 16px}
+.modal-card select{
+  font:inherit;font-size:15px;padding:9px 10px;border-radius:10px;
+  border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end}
+.modal-actions button{
+  font:inherit;font-weight:600;font-size:14px;padding:10px 16px;border-radius:10px;
+  border:none;cursor:pointer;transition:filter .15s ease,transform .1s ease,background-color .15s ease;
+}
+.modal-actions button:active{transform:scale(.97)}
+.modal-actions .cancel{background:none;color:var(--muted)}
+.modal-actions .cancel:hover{background:rgba(127,127,127,.12);color:var(--text)}
+.modal-actions .save{background:var(--accent);color:var(--accent-text)}
+.modal-actions .save.danger{background:var(--danger)}
+.modal-actions .save:hover{filter:brightness(1.1)}
