@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Financeiro">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<title>Financeiro</title>
+<!--
+  Data-free shell for the Financeiro ledger — every receita and despesa
+  the household side-business has, in one list. Same pattern as every
+  other page here: hosted on public GitHub Pages, holds NO keys and NO
+  data, asks for the shared passphrase, then talks only to the gated
+  Supabase Edge Function (checklist-api).
+
+  Most rows arrive on their own: confirming a payment on Vendas
+  auto-posts a receita here in the same request (source:"venda_payment"),
+  which is what the 🔗 link and the muted "automático" tag point back to.
+  This page also lets a cost be logged directly — rent, ingredients,
+  marketing — for spending that never passed through a sale. Reports are
+  future work; this is the ledger they will read from.
+-->
+<link rel="stylesheet" href="shared-base.css">
+<link rel="stylesheet" href="shared-menu.css">
+<link rel="stylesheet" href="shared-modal.css">
+<link rel="stylesheet" href="shared-toast.css">
+<link rel="stylesheet" href="shared-inputs.css">
+<style>
+  body{
+    padding:max(16px,env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom));
+  }
+  .wrap{max-width:640px;margin:0 auto}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 8px}
+  .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
+  h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
+  h3{font-size:14px;font-weight:650;margin:22px 0 8px;color:var(--muted)}
+
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:0 0 14px}
+  .stat{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 10px;text-align:center}
+  .stat .lbl{font-size:11.5px;color:var(--muted);margin:0}
+  .stat .val{font-size:16px;font-weight:650;margin:4px 0 0;word-break:break-word}
+  .stat.receitas .val{color:#16a34a}
+  .stat.despesas .val{color:var(--danger)}
+  @media (prefers-color-scheme: dark){ .stat.receitas .val{color:#4ade80} }
+
+  .chiprow{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+  .chip{
+    font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:999px;cursor:pointer;
+    background:rgba(127,127,127,.1);color:var(--muted);border:1px solid transparent;
+    transition:background-color .15s ease,color .15s ease;
+  }
+  .chip.active{background:var(--accent);color:var(--accent-text)}
+  .periodrow{display:flex;gap:8px;margin:0 0 14px}
+  .periodrow select{
+    flex:1;font:inherit;font-size:14px;padding:9px 10px;border-radius:10px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+  }
+
+  .entry{
+    display:flex;align-items:flex-start;gap:10px;padding:12px 14px;
+    border-bottom:1px solid var(--border);border-left:3px solid transparent;
+  }
+  .entry:last-child{border-bottom:none}
+  .entry.receita{border-left-color:#16a34a;background:rgba(22,163,74,.05)}
+  .entry.despesa{border-left-color:var(--danger);background:var(--tint)}
+  .entry .body{flex:1;min-width:0}
+  .entry .body .txt{font-size:14.5px;margin:0;word-wrap:break-word}
+  .entry .body .meta{font-size:12.5px;color:var(--muted);margin:3px 0 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .entry .cat{
+    display:inline-block;font-size:11px;font-weight:650;padding:2px 8px;border-radius:999px;
+    background:rgba(127,127,127,.12);color:var(--muted);
+  }
+  .entry .auto{font-size:11px;color:var(--muted);font-style:italic}
+  .entry .amt{font-size:14.5px;font-weight:650;white-space:nowrap;flex:none}
+  .entry.receita .amt{color:#16a34a}
+  .entry.despesa .amt{color:var(--danger)}
+  @media (prefers-color-scheme: dark){ .entry.receita .amt{color:#4ade80} }
+  .entry .row-actions{display:flex;gap:2px;flex:none}
+  .addrow-btn{margin:8px 0 0}
+  button.primary.full{width:100%}
+</style>
+</head>
+<body>
+<div id="root" class="wrap"><p class="msg">Carregando…</p></div>
+
+<script>
+const root = document.getElementById("root");
+let lancamentos = [];
+let totals = { total_receitas: 0, total_despesas: 0, saldo: 0 };
+let tipoFilter = "";
+let periodo = "all";
+
+const PAGE_LOGIN = {
+  title: "Financeiro",
+  subtitle: "Digite a senha para acessar.",
+  onSuccess: () => loadLancamentos(),
+};
+</script>
+<script src="shared-api.js"></script>
+<script src="shared-menu.js"></script>
+<script src="shared-ui.js"></script>
+<script src="shared-format.js"></script>
+<script src="shared-inputs.js"></script>
+<script>
+
+const CURRENT_PAGE = "financeiro";
+
+const CATEGORIA_SUGGESTOES = ["aluguel", "ingredientes", "marketing", "taxas", "venda", "outros"];
+
+// Client-side only: the boundaries just decide which date_from/date_to get
+// sent to financeiro_lancamentos, same fetch either way.
+function periodRange(p){
+  const now = new Date();
+  if(p === "all") return {};
+  const startOfMonth = (y, m) => new Date(y, m, 1).toISOString();
+  if(p === "this"){
+    return { date_from: startOfMonth(now.getFullYear(), now.getMonth()) };
+  }
+  // last calendar month
+  const from = startOfMonth(now.getFullYear(), now.getMonth() - 1);
+  const to = startOfMonth(now.getFullYear(), now.getMonth());
+  return { date_from: from, date_to: to };
+}
+
+function navHeader(){
+  return '<header><div class="hleft">' +
+    '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
+    '<h1>Financeiro</h1>' +
+    '</div></header>';
+}
+
+async function loadLancamentos(){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  if(!getPass()){ showLogin(); return; }
+  try{
+    const data = await api("financeiro_lancamentos", periodRange(periodo));
+    lancamentos = data.lancamentos || [];
+    totals = {
+      total_receitas: data.total_receitas || 0,
+      total_despesas: data.total_despesas || 0,
+      saldo: data.saldo || 0,
+    };
+    render();
+  }catch(e){ handleAuthError(e, loadLancamentos); }
+}
+
+function entryRowHtml(l){
+  const sign = l.tipo === "receita" ? "+" : "−";
+  const linkHtml = l.venda_id
+    ? '<a class="link" href="vendas.html?id=' + encodeURIComponent(l.venda_id) + '">🔗 venda</a>'
+    : '';
+  const autoHtml = l.source && l.source !== "manual"
+    ? '<span class="auto">automático</span>' : '';
+  return '<div class="entry ' + l.tipo + '" data-id="' + esc(l.id) + '">' +
+    '<span class="body">' +
+      '<p class="txt">' + esc(l.description) + '</p>' +
+      '<p class="meta">' +
+        '<span class="cat">' + esc(l.categoria) + '</span>' +
+        '<span>' + esc(fmtDate(l.occurred_at)) + '</span>' +
+        linkHtml + autoHtml +
+      '</p>' +
+    '</span>' +
+    '<span class="amt">' + sign + ' ' + fmtMoney(l.amount) + '</span>' +
+    '<span class="row-actions">' +
+      '<button class="icon-btn" data-edit title="Editar">✎</button>' +
+      '<button class="icon-btn danger" data-del title="Remover">🗑</button>' +
+    '</span>' +
+  '</div>';
+}
+
+function render(){
+  const shown = lancamentos.filter(l => !tipoFilter || l.tipo === tipoFilter);
+
+  const statsHtml = '<div class="stats">' +
+    '<div class="stat receitas"><p class="lbl">Receitas</p><p class="val">' + fmtMoney(totals.total_receitas) + '</p></div>' +
+    '<div class="stat despesas"><p class="lbl">Despesas</p><p class="val">' + fmtMoney(totals.total_despesas) + '</p></div>' +
+    '<div class="stat"><p class="lbl">Saldo</p><p class="val">' + fmtMoney(totals.saldo) + '</p></div>' +
+  '</div>';
+
+  const chips = '<div class="chiprow">' +
+    '<span class="chip' + (tipoFilter === "" ? " active" : "") + '" data-tipo="">Todos</span>' +
+    '<span class="chip' + (tipoFilter === "receita" ? " active" : "") + '" data-tipo="receita">Receitas</span>' +
+    '<span class="chip' + (tipoFilter === "despesa" ? " active" : "") + '" data-tipo="despesa">Despesas</span>' +
+  '</div>';
+
+  const periodHtml = '<div class="periodrow">' +
+    '<select id="periodo">' +
+      '<option value="all"' + (periodo === "all" ? " selected" : "") + '>Tudo</option>' +
+      '<option value="this"' + (periodo === "this" ? " selected" : "") + '>Este mês</option>' +
+      '<option value="last"' + (periodo === "last" ? " selected" : "") + '>Mês passado</option>' +
+    '</select>' +
+  '</div>';
+
+  const rowsHtml = lancamentos.length === 0
+    ? '<p class="msg">Nenhum lançamento ainda. Toque em "+ Novo lançamento" para começar.</p>'
+    : (shown.length === 0
+        ? '<p class="msg" id="no-match">Nenhum lançamento neste filtro.</p>'
+        : '<div class="card" id="list-card">' + shown.map(entryRowHtml).join("") + '</div>');
+
+  root.innerHTML = navHeader() + statsHtml + chips + periodHtml + rowsHtml +
+    '<button class="primary full addrow-btn" id="new-lanc">+ Novo lançamento</button>';
+
+  wireMenuButton();
+
+  document.getElementById("periodo").addEventListener("change", (e) => {
+    periodo = e.target.value;
+    loadLancamentos();
+  });
+  root.querySelectorAll(".chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      tipoFilter = chip.dataset.tipo;
+      redraw();
+    });
+  });
+  wireRows();
+  document.getElementById("new-lanc").addEventListener("click", () => openLancModal(null));
+}
+
+function redraw(){
+  const shown = lancamentos.filter(l => !tipoFilter || l.tipo === tipoFilter);
+  root.querySelectorAll(".chip").forEach(chip =>
+    chip.classList.toggle("active", chip.dataset.tipo === tipoFilter));
+  const card = document.getElementById("list-card") || document.getElementById("no-match");
+  const html = shown.length === 0
+    ? '<p class="msg" id="no-match">Nenhum lançamento neste filtro.</p>'
+    : '<div class="card" id="list-card">' + shown.map(entryRowHtml).join("") + '</div>';
+  if(card){
+    card.outerHTML = html;
+    wireRows();
+  }
+}
+
+function wireRows(){
+  root.querySelectorAll("[data-edit]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.closest(".entry").dataset.id;
+      openLancModal(lancamentos.find(l => l.id === id));
+    });
+  });
+  root.querySelectorAll("[data-del]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if(!(await confirmModal("Remover este lançamento?"))) return;
+      const id = btn.closest(".entry").dataset.id;
+      try{
+        await api("financeiro_lancamento_delete", { id });
+        listToast("Lançamento removido");
+        loadLancamentos();
+      }catch(e){
+        if(e.unauthorized) return handleAuthError(e, loadLancamentos);
+        listToast("Não foi possível remover", true);
+      }
+    });
+  });
+}
+
+function openLancModal(l){
+  const isEdit = !!l;
+  const dateVal = isEdit ? l.occurred_at.slice(0,10) : new Date().toISOString().slice(0,10);
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-card">' +
+      '<h3>' + (isEdit ? "Editar lançamento" : "Novo lançamento") + '</h3>' +
+      '<label>Tipo</label>' +
+      '<div class="chiprow" id="lanc-tipo-chips">' +
+        '<span class="chip' + (!isEdit || l.tipo === "despesa" ? " active" : "") + '" data-tipo="despesa">Despesa</span>' +
+        '<span class="chip' + (isEdit && l.tipo === "receita" ? " active" : "") + '" data-tipo="receita">Receita</span>' +
+      '</div>' +
+      '<label for="lanc-amount">Valor</label>' +
+      '<span class="field" style="width:100%;margin-bottom:14px">' +
+        '<span class="prefix">R$</span>' +
+        '<input class="num-input" type="text" inputmode="numeric" id="lanc-amount" ' +
+          'style="flex:1 1 auto;width:auto" value="' + esc(isEdit ? fmtPriceInput(l.amount) : "") + '">' +
+      '</span>' +
+      '<label for="lanc-categoria">Categoria</label>' +
+      '<input type="text" id="lanc-categoria" list="lanc-cat-list" ' +
+        'value="' + esc(isEdit ? l.categoria : "") + '" placeholder="ex: ingredientes">' +
+      '<datalist id="lanc-cat-list">' +
+        CATEGORIA_SUGGESTOES.map(c => '<option value="' + esc(c) + '">').join("") +
+      '</datalist>' +
+      '<label for="lanc-desc">Descrição</label>' +
+      '<input type="text" id="lanc-desc" value="' + esc(isEdit ? l.description : "") + '">' +
+      '<label for="lanc-date">Data</label>' +
+      '<input type="date" id="lanc-date" value="' + esc(dateVal) + '" ' +
+        'style="width:100%;margin-bottom:14px;padding:10px 12px;border-radius:10px;' +
+        'border:1px solid var(--border-strong);background:var(--card);color:var(--text)">' +
+      '<label for="lanc-note">Nota (opcional)</label>' +
+      '<input type="text" id="lanc-note" value="' + esc(isEdit ? (l.note || "") : "") + '">' +
+      '<div class="modal-actions">' +
+        '<button class="cancel" id="lanc-cancel">Cancelar</button>' +
+        '<button class="save" id="lanc-ok">Salvar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+
+  const amountEl = backdrop.querySelector("#lanc-amount");
+  wirePriceInput(amountEl);
+  let tipo = isEdit ? l.tipo : "despesa";
+  backdrop.querySelectorAll("#lanc-tipo-chips .chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      tipo = chip.dataset.tipo;
+      backdrop.querySelectorAll("#lanc-tipo-chips .chip").forEach(c => c.classList.toggle("active", c === chip));
+    });
+  });
+
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  function onKey(e){ if(e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
+  backdrop.querySelector("#lanc-cancel").addEventListener("click", close);
+
+  backdrop.querySelector("#lanc-ok").addEventListener("click", async () => {
+    const amount = centsToPrice(priceDigits(amountEl.value));
+    if(!amount || amount <= 0){ alert("Informe um valor válido."); return; }
+    const description = backdrop.querySelector("#lanc-desc").value.trim();
+    if(!description){ alert("A descrição não pode ficar vazia."); return; }
+    const date = backdrop.querySelector("#lanc-date").value;
+    if(!date){ alert("Informe a data."); return; }
+    const payload = {
+      tipo, amount, description,
+      categoria: backdrop.querySelector("#lanc-categoria").value.trim() || "outros",
+      occurred_at: new Date(date + "T12:00:00").toISOString(),
+      note: backdrop.querySelector("#lanc-note").value.trim() || null,
+    };
+    try{
+      if(isEdit){
+        await api("financeiro_lancamento_update", Object.assign({ id: l.id }, payload));
+      }else{
+        await api("financeiro_lancamento_create", payload);
+      }
+      close();
+      listToast(isEdit ? "Lançamento atualizado" : "Lançamento criado");
+      loadLancamentos();
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadLancamentos);
+      listToast("Não foi possível salvar", true);
+    }
+  });
+
+  backdrop.querySelector("#lanc-desc").focus();
+}
+
+loadLancamentos();
+</script>
+</body>
+</html>
