@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tarefas">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<title>Tarefas pendentes</title>
+<!--
+  Data-free shell for the daily-summary checklist. Hosted on public GitHub
+  Pages. It contains NO keys and NO data: it asks for a passphrase and then
+  talks only to the gated Supabase Edge Function (checklist-api), which holds
+  the service-role key and enforces the passphrase server-side. Without the
+  passphrase, all anyone sees here is a login box.
+
+  Renamed from index.html — this repo's original single page — when the
+  dashboard took over that filename. No redirect stub at the old name, per
+  the user's explicit choice.
+-->
+<link rel="stylesheet" href="shared-base.css">
+<link rel="stylesheet" href="shared-menu.css">
+<link rel="stylesheet" href="shared-modal.css">
+<style>
+  /* A flex column at least one viewport tall, so .bar (its last child)
+     naturally sits at the bottom via normal layout flow instead of
+     position:fixed -- fixed is pinned to the layout viewport, which
+     visibly jumps on mobile Firefox/Safari when the address bar
+     collapses/expands during scroll and resizes that viewport. */
+  .page{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
+  .wrap{
+    flex:1 0 auto;max-width:640px;margin:0 auto;
+    padding:max(16px,env(safe-area-inset-top)) 16px 16px;
+  }
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 16px}
+  .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
+  h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
+  .row{display:flex;align-items:flex-start;gap:12px;padding:16px 14px;border-bottom:1px solid var(--border);transition:background-color .15s ease}
+  .row:hover{background:rgba(127,127,127,.06)}
+  .row:last-child{border-bottom:none}
+  .row label{flex:1;min-width:0;display:flex;align-items:flex-start;gap:12px;cursor:pointer}
+  input[type=checkbox]{width:24px;height:24px;margin:1px 0 0;flex:none;accent-color:var(--accent)}
+  .badge{font-size:20px;line-height:1.2;flex:none;width:26px;text-align:center}
+  .body{min-width:0;flex:1}
+  .body .txt{font-size:15px;line-height:1.35;margin:0;word-wrap:break-word}
+  .body .meta{font-size:12px;color:var(--muted);margin:3px 0 0}
+  .bar{
+    position:sticky;bottom:0;
+    padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+    background:var(--bg);
+    display:flex;justify-content:center;
+  }
+  .addrow{display:flex;gap:8px;padding:14px}
+  .addrow input{
+    flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+  }
+  .addrow button{
+    flex:none;font:inherit;font-weight:600;font-size:14px;padding:10px 14px;border-radius:10px;
+    border:none;background:var(--accent);color:var(--accent-text);cursor:pointer;
+    transition:filter .15s ease,transform .1s ease;
+  }
+  .addrow button:hover:not(:disabled){filter:brightness(1.1)}
+  .addrow button:active:not(:disabled){transform:scale(.97)}
+  .addrow button:disabled{opacity:.5}
+  .addcard{margin-bottom:12px}
+  .icon-btn.lg{font-size:23px;padding:7px}
+  /* The one dialog anywhere that wants its <select> full-width like a text
+     input — shared-modal.css deliberately leaves .modal-card select narrow
+     for the compact unit pickers elsewhere, so this page opts back in. */
+  .modal-card select{width:100%;margin-bottom:14px}
+  #done-wrap{margin-top:16px}
+  #done-list{
+    max-height:0;opacity:0;overflow:hidden;
+    transition:max-height .3s ease,opacity .25s ease;
+  }
+  #done-list.open{opacity:1}
+  .done-card{margin-bottom:8px}
+  .body .txt.done{text-decoration:line-through;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="page">
+  <div id="root" class="wrap"><p class="msg">Carregando…</p></div>
+  <div class="bar" id="bar" style="display:none">
+    <button class="primary" id="done-btn"><span>✓</span> <span id="btn-label">Concluir selecionados</span></button>
+  </div>
+</div>
+
+<script>
+const root = document.getElementById("root");
+const bar = document.getElementById("bar");
+const doneBtn = document.getElementById("done-btn");
+const btnLabel = document.getElementById("btn-label");
+
+const PAGE_LOGIN = {
+  title: "Tarefas pendentes",
+  subtitle: "Digite a senha para acessar seu checklist.",
+  onSuccess: () => load(),
+  beforeShow: () => { bar.style.display = "none"; },
+};
+</script>
+<script src="shared-api.js"></script>
+<script src="shared-menu.js"></script>
+<script src="shared-ui.js"></script>
+<script src="shared-format.js"></script>
+<script>
+
+const SOURCE_META = {
+  email:            { emoji:"📧", label:"E-mail" },
+  whatsapp:         { emoji:"💬", label:"WhatsApp" },
+  calendar:         { emoji:"📅", label:"Agenda" },
+  self_instruction: { emoji:"🔔", label:"Instrução" },
+  work:             { emoji:"💼", label:"Trabalho" },
+  system:           { emoji:"⚙️", label:"Sistema" },
+  manual:           { emoji:"📝", label:"Manual" }
+};
+
+const CURRENT_PAGE = "tarefas";
+
+const DONE_PAGE_SIZE = 5;
+let doneItems = [];
+let doneOffset = 0;
+let doneHasMore = false;
+let doneLoading = false;
+let doneObserver = null;
+let doneExpanded = false;
+
+function updateBar(){
+  const n = document.querySelectorAll("#root input[data-id]:checked").length;
+  doneBtn.disabled = n === 0;
+  btnLabel.textContent = n === 0 ? "Concluir selecionados"
+    : (n === 1 ? "Concluir 1 item" : "Concluir " + n + " itens");
+}
+
+function render(rows){
+  // The done-tasks section always starts collapsed on a fresh render
+  // (login, initial load, or after any create/edit/delete/done action).
+  if(doneObserver){ doneObserver.disconnect(); doneObserver = null; }
+  doneItems = [];
+  doneOffset = 0;
+  doneHasMore = false;
+  doneExpanded = false;
+
+  const header = '<header><div class="hleft">' +
+    '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
+    '<h1>Tarefas pendentes</h1>' +
+    '</div></header>';
+  const addForm = '<div class="card addcard"><div class="addrow">' +
+    '<input type="text" id="new-text" placeholder="Nova ação..." />' +
+    '<button id="add-btn">Adicionar</button>' +
+    '</div></div>';
+  const doneWrap = '<div id="done-wrap">' +
+    '<button class="link" id="toggle-done">Ver ações concluídas</button>' +
+    '<div id="done-list"></div>' +
+    '</div>';
+  if(rows.length === 0){
+    root.innerHTML = header + addForm +
+      '<p class="msg">🎉 Nenhuma ação pendente.</p>' + doneWrap;
+    bar.style.display = "none";
+    wireHeader();
+    wireAddForm();
+    wireDoneToggle();
+    return;
+  }
+  root.innerHTML = header + addForm +
+    '<div class="card">' + rows.map(it => {
+      const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
+      return '<div class="row">' +
+        '<label>' +
+        '<input type="checkbox" data-id="' + esc(it.id) + '">' +
+        '<span class="badge">' + m.emoji + '</span>' +
+        '<span class="body"><p class="txt">' + esc(it.text) + '</p>' +
+        '<p class="meta">' + m.label + ' · desde ' + fmtDateTime(it.first_seen) + '</p></span>' +
+        '</label>' +
+        '<button class="icon-btn" data-edit-id="' + esc(it.id) + '" title="Editar">✎</button>' +
+        '<button class="icon-btn danger" data-del-id="' + esc(it.id) + '" title="Excluir" aria-label="Excluir">🗑</button>' +
+        '</div>';
+    }).join("") + '</div>' + doneWrap;
+  bar.style.display = "flex";
+  root.querySelectorAll("input[data-id]").forEach(cb => cb.addEventListener("change", updateBar));
+  wireHeader();
+  wireAddForm();
+  wireDeleteButtons();
+  wireEditControls(rows);
+  wireDoneToggle();
+  updateBar();
+}
+
+function wireHeader(){
+  wireMenuButton();
+}
+
+function wireAddForm(){
+  const btn = document.getElementById("add-btn");
+  const input = document.getElementById("new-text");
+  if(!btn || !input) return;
+  const submit = async () => {
+    const text = input.value.trim();
+    if(!text) return;
+    btn.disabled = true;
+    btn.textContent = "Salvando…";
+    try{
+      await api("action_create", { text });
+      await load();
+    }catch(e){
+      if(e.unauthorized){ handleAuthError(e, load); return; }
+      btn.textContent = "Erro — tente de novo"; btn.disabled = false;
+    }
+  };
+  btn.addEventListener("click", submit);
+  input.addEventListener("keydown", e => { if(e.key === "Enter") submit(); });
+}
+
+function wireDeleteButtons(){
+  root.querySelectorAll("[data-del-id]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if(!(await confirmModal("Excluir esta ação?"))) return;
+      const id = btn.dataset.delId;
+      btn.disabled = true;
+      try{
+        await api("action_delete", { ids: [id] });
+        await load();
+      }catch(e){
+        if(e.unauthorized){ handleAuthError(e, load); return; }
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+async function saveEdit(id, patch){
+  try{
+    await api("action_edit", Object.assign({ id }, patch));
+    await load();
+  }catch(e){
+    if(e.unauthorized){ handleAuthError(e, load); return; }
+    alert("Não foi possível salvar.");
+  }
+}
+
+function openEditModal(it){
+  const optionsHtml = Object.keys(SOURCE_META).map(key => {
+    const meta = SOURCE_META[key];
+    return '<option value="' + key + '"' + (key === it.source ? ' selected' : '') + '>' +
+      meta.emoji + ' ' + meta.label + '</option>';
+  }).join("");
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-card">' +
+      '<h3>Editar ação</h3>' +
+      '<label for="edit-text-input">Texto</label>' +
+      '<input type="text" id="edit-text-input" value="' + esc(it.text) + '">' +
+      '<label for="edit-cat-select">Categoria</label>' +
+      '<select id="edit-cat-select">' + optionsHtml + '</select>' +
+      '<div class="modal-actions">' +
+        '<button class="cancel" id="edit-cancel">Cancelar</button>' +
+        '<button class="save" id="edit-save">Salvar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  function onKey(e){ if(e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
+  document.getElementById("edit-cancel").addEventListener("click", close);
+
+  const textInput = document.getElementById("edit-text-input");
+  textInput.focus();
+  textInput.select();
+
+  document.getElementById("edit-save").addEventListener("click", async () => {
+    const text = textInput.value.trim();
+    const source = document.getElementById("edit-cat-select").value;
+    if(!text){ alert("O texto não pode ficar vazio."); return; }
+    const patch = {};
+    if(text !== it.text) patch.text = text;
+    if(source !== it.source) patch.source = source;
+    close();
+    if(Object.keys(patch).length === 0) return;
+    await saveEdit(it.id, patch);
+  });
+}
+
+function wireEditControls(rows){
+  root.querySelectorAll("[data-edit-id]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const it = rows.find(r => r.id === btn.dataset.editId);
+      if(it) openEditModal(it);
+    });
+  });
+}
+
+function wireDoneToggle(){
+  const btn = document.getElementById("toggle-done");
+  if(!btn) return;
+  btn.addEventListener("click", () => {
+    doneExpanded = !doneExpanded;
+    btn.textContent = doneExpanded ? "Ocultar ações concluídas" : "Ver ações concluídas";
+    const list = document.getElementById("done-list");
+    if(list) list.classList.toggle("open", doneExpanded);
+    updateDoneListHeight();
+    if(doneExpanded && doneItems.length === 0) loadDoneTasks(true);
+  });
+}
+
+// max-height is set from the content's actual scrollHeight rather than a
+// fixed CSS value, since more items can be appended after the section is
+// already open (infinite scroll) -- a static cap would eventually clip the
+// list once loaded content grew past it.
+function updateDoneListHeight(){
+  const list = document.getElementById("done-list");
+  if(!list) return;
+  list.style.maxHeight = doneExpanded ? (list.scrollHeight + "px") : "0px";
+}
+
+async function loadDoneTasks(reset){
+  if(doneLoading) return;
+  if(reset){ doneItems = []; doneOffset = 0; doneHasMore = false; }
+  doneLoading = true;
+  try{
+    const data = await api("list_done", { offset: doneOffset, limit: DONE_PAGE_SIZE });
+    const rows = data.actions || [];
+    doneItems = doneItems.concat(rows);
+    doneOffset += rows.length;
+    doneHasMore = !!data.has_more;
+    renderDoneSection();
+  }catch(e){
+    if(e.unauthorized) handleAuthError(e, load);
+  }finally{
+    doneLoading = false;
+  }
+}
+
+function renderDoneSection(){
+  const list = document.getElementById("done-list");
+  if(!list) return;
+  list.classList.toggle("open", doneExpanded);
+  if(doneObserver){ doneObserver.disconnect(); doneObserver = null; }
+
+  if(doneItems.length === 0){
+    list.innerHTML = '<p class="msg">Nenhuma ação concluída ainda.</p>';
+    updateDoneListHeight();
+    return;
+  }
+
+  list.innerHTML =
+    '<div class="card done-card">' + doneItems.map(it => {
+      const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
+      return '<div class="row">' +
+        '<span class="badge">' + m.emoji + '</span>' +
+        '<span class="body"><p class="txt done">' + esc(it.text) + '</p>' +
+        '<p class="meta">Concluído em ' + fmtDateTime(it.done_at) + '</p></span>' +
+        '<button class="icon-btn lg" data-undo-id="' + esc(it.id) + '" title="Desfazer" aria-label="Desfazer">↩</button>' +
+        '</div>';
+    }).join("") + '</div>' +
+    (doneHasMore ? '<p class="msg"><button class="link" id="load-more-done">Carregar mais</button></p>' : '') +
+    '<div id="done-sentinel"></div>';
+
+  list.querySelectorAll("[data-undo-id]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try{
+        await api("undo_done", { ids: [btn.dataset.undoId] });
+        await load();
+      }catch(e){
+        if(e.unauthorized){ handleAuthError(e, load); return; }
+        btn.disabled = false;
+      }
+    });
+  });
+
+  const loadMoreBtn = document.getElementById("load-more-done");
+  if(loadMoreBtn) loadMoreBtn.addEventListener("click", () => loadDoneTasks(false));
+
+  if(doneHasMore){
+    const sentinel = document.getElementById("done-sentinel");
+    doneObserver = new IntersectionObserver(entries => {
+      if(entries[0].isIntersecting) loadDoneTasks(false);
+    });
+    doneObserver.observe(sentinel);
+  }
+
+  updateDoneListHeight();
+}
+
+async function load(){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  bar.style.display = "none";
+  if(!getPass()){ showLogin(); return; }
+  try{
+    const data = await api("list");
+    render(data.actions || []);
+  }catch(e){
+    if(e.unauthorized){
+      localStorage.removeItem(PASS_KEY);
+      showLogin("Senha incorreta.");
+    }else{
+      root.innerHTML = '<p class="msg err">Não foi possível carregar agora.</p>' +
+        '<p class="msg"><button class="link" onclick="load()">Tentar novamente</button></p>';
+    }
+  }
+}
+
+doneBtn.addEventListener("click", async () => {
+  const ids = Array.from(document.querySelectorAll("#root input[data-id]:checked")).map(cb => cb.dataset.id);
+  if(ids.length === 0) return;
+  doneBtn.disabled = true;
+  btnLabel.textContent = "Salvando…";
+  try{
+    await api("done", { ids });
+    await load();
+  }catch(e){
+    if(e.unauthorized){ handleAuthError(e, load); return; }
+    btnLabel.textContent = "Erro ao salvar — tente de novo"; doneBtn.disabled = false;
+  }
+});
+
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vendas">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<title>Vendas</title>
+<!--
+  Data-free shell for the Vendas module — one sale (event, order, booking)
+  per row, tracked from the first lead through payment. Same pattern as
+  every other page here: hosted on public GitHub Pages, holds NO keys and
+  NO data, asks for the shared passphrase, then talks only to the gated
+  Supabase Edge Function (checklist-api).
+
+  A sale can be created by hand at ANY pipeline stage — logging a lead the
+  moment an inquiry comes in is as normal a gesture as recording a
+  confirmed booking, not something only a future AI-lead-detection pass
+  would do. Payments are an editable ledger (venda_pagamentos), not a
+  purchased-style flag, because a mistyped amount is a correction, not
+  grounds to delete and redo. Confirming a payment is the one genuine
+  integration with Financeiro: it auto-posts a receita there in the same
+  request, which is what makes the ledger trustworthy without a second
+  manual entry.
+-->
+<link rel="stylesheet" href="shared-base.css">
+<link rel="stylesheet" href="shared-menu.css">
+<link rel="stylesheet" href="shared-modal.css">
+<link rel="stylesheet" href="shared-toast.css">
+<link rel="stylesheet" href="shared-inputs.css">
+<style>
+  body{
+    padding:max(16px,env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom));
+  }
+  .wrap{max-width:640px;margin:0 auto}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 8px}
+  .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
+  .subheader{display:flex;align-items:baseline;justify-content:space-between;gap:10px;min-width:0;margin:0 0 16px}
+  h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
+  h2{font-size:17px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
+  h3{font-size:14px;font-weight:650;margin:22px 0 8px;color:var(--muted)}
+  .searchrow{display:flex;gap:8px;margin:0 0 10px}
+  .searchrow input[type=search]{
+    flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+    -webkit-appearance:none;
+  }
+  .chiprow{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+  .chip{
+    font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:999px;cursor:pointer;
+    background:rgba(127,127,127,.1);color:var(--muted);border:1px solid transparent;
+    transition:background-color .15s ease,color .15s ease;
+  }
+  .chip.active{background:var(--accent);color:var(--accent-text)}
+  .row{display:flex;flex-direction:column;gap:6px;padding:14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background-color .15s ease}
+  .row:hover{background:rgba(127,127,127,.06)}
+  .row:last-child{border-bottom:none}
+  .row .top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+  .row .txt{font-size:15px;font-weight:600;margin:0;word-wrap:break-word;flex:1;min-width:0}
+  .row .price{font-size:14px;font-weight:650;white-space:nowrap}
+  .row .meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+  .pill{
+    display:inline-block;font-size:11.5px;font-weight:650;padding:3px 9px;border-radius:999px;
+    white-space:nowrap;
+  }
+  .pill.st-lead{background:rgba(127,127,127,.14);color:var(--muted)}
+  .pill.st-orcamento{background:rgba(180,83,9,.14);color:var(--warn)}
+  .pill.st-confirmado{background:rgba(37,99,235,.14);color:var(--accent)}
+  .pill.st-entregue{background:rgba(22,163,74,.14);color:#16a34a}
+  .pill.st-cancelado{background:rgba(220,38,38,.14);color:var(--danger)}
+  .pill.pay-pend{background:rgba(127,127,127,.14);color:var(--muted)}
+  .pill.pay-partial{background:rgba(180,83,9,.14);color:var(--warn)}
+  .pill.pay-paid{background:rgba(22,163,74,.14);color:#16a34a}
+  @media (prefers-color-scheme: dark){
+    .pill.st-entregue{color:#4ade80}
+    .pill.pay-paid{color:#4ade80}
+  }
+  /* ---- detail ---- */
+  .venda-head{margin:0 0 14px}
+  .venda-head .name{font-size:19px;font-weight:650;margin:0 0 6px;word-wrap:break-word;cursor:pointer}
+  .venda-head .name:hover{opacity:.75}
+  .cli-block{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:12px 14px;border-radius:12px;background:rgba(127,127,127,.06);margin:10px 0;
+  }
+  .cli-block .who{min-width:0}
+  .cli-block .who .nm{font-size:15px;font-weight:650;margin:0}
+  .cli-block .who .sub{font-size:12.5px;color:var(--muted);margin:2px 0 0;word-wrap:break-word}
+  .statusline, .datefield{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:10px 0;border-top:1px solid var(--border);
+  }
+  .statusline .lbl, .datefield .lbl{font-size:12px;color:var(--muted);margin:0}
+  .detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
+  .totals-card{padding:14px}
+  .totals-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px}
+  .totals-grid .t{grid-column:1 / -1;border-top:1px solid var(--border);margin-top:2px;padding-top:10px}
+  .totals-grid .lbl{font-size:12px;color:var(--muted);margin:0}
+  .totals-grid .val{font-size:16px;font-weight:650;margin:2px 0 0}
+  .totals-grid .val.pos{color:#16a34a}
+  .totals-grid .val.neg{color:var(--danger)}
+  @media (prefers-color-scheme: dark){ .totals-grid .val.pos{color:#4ade80} }
+  .item-row, .pay-row{
+    display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);
+  }
+  .item-row:last-child, .pay-row:last-child{border-bottom:none}
+  .item-row .badge, .pay-row .badge{font-size:18px;flex:none;width:24px;text-align:center}
+  .item-row .body, .pay-row .body{flex:1;min-width:0}
+  .item-row .body .txt, .pay-row .body .txt{font-size:14.5px;margin:0;word-wrap:break-word}
+  .item-row .body .meta, .pay-row .body .meta{font-size:12.5px;color:var(--muted);margin:3px 0 0}
+  .item-row .amt{font-size:14.5px;font-weight:650;white-space:nowrap}
+  .row-actions{display:flex;gap:2px;flex:none}
+  .addrow-btn{margin:8px 0 0}
+  button.primary.full{width:100%}
+  /* ---- cliente picker ---- */
+  .cli-list{max-height:44vh;overflow-y:auto;margin:0 0 14px;-webkit-overflow-scrolling:touch}
+  .cli-opt{
+    display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+    background:none;border:none;border-bottom:1px solid var(--border);
+    color:var(--text);font:inherit;font-size:15px;padding:11px 4px;cursor:pointer;
+    transition:background-color .15s ease;
+  }
+  .cli-opt:last-child{border-bottom:none}
+  .cli-opt:hover{background:rgba(127,127,127,.08)}
+  .cli-opt .nm{flex:1;min-width:0}
+  .cli-opt .nm .sub{display:block;font-size:12px;color:var(--muted);font-weight:400}
+  .cli-opt.create{color:var(--accent)}
+  /* ---- status picker ---- */
+  .status-list{display:flex;flex-direction:column;gap:8px;margin:0 0 14px}
+  .status-opt{
+    display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;
+    background:rgba(127,127,127,.06);border:none;border-radius:10px;
+    color:var(--text);font:inherit;font-size:15px;padding:12px 14px;cursor:pointer;
+    transition:background-color .15s ease;
+  }
+  .status-opt:hover{background:rgba(127,127,127,.12)}
+  .status-opt.current{outline:2px solid var(--accent)}
+</style>
+</head>
+<body>
+<div id="root" class="wrap"><p class="msg">Carregando…</p></div>
+
+<script>
+const root = document.getElementById("root");
+let vendas = [];
+let searchTerm = "";
+let statusFilter = "";
+let clienteCache = null;
+
+const PAGE_LOGIN = {
+  title: "Vendas",
+  subtitle: "Digite a senha para acessar.",
+  onSuccess: () => loadVendas(),
+};
+</script>
+<script src="shared-api.js"></script>
+<script src="shared-menu.js"></script>
+<script src="shared-ui.js"></script>
+<script src="shared-format.js"></script>
+<script src="shared-inputs.js"></script>
+<script>
+
+const CURRENT_PAGE = "vendas";
+
+const STATUS_META = {
+  lead:       { label: "Lead" },
+  orcamento:  { label: "Orçamento" },
+  confirmado: { label: "Confirmado" },
+  entregue:   { label: "Entregue" },
+  cancelado:  { label: "Cancelado" },
+};
+const STATUS_ORDER = ["lead", "orcamento", "confirmado", "entregue", "cancelado"];
+
+function statusPillHtml(status){
+  const m = STATUS_META[status] || { label: status };
+  return '<span class="pill st-' + esc(status) + '">' + esc(m.label) + '</span>';
+}
+
+// Payment status is computed, not stored — it is a read of total_paid vs
+// total_price, so it can never drift from the payments actually recorded.
+function paymentStatus(v){
+  const price = Number(v.total_price) || 0;
+  const paid = Number(v.total_paid) || 0;
+  if(price <= 0 || paid <= 0) return { label: "Pendente", cls: "pend" };
+  if(paid >= price) return { label: "Pago", cls: "paid" };
+  return { label: "Parcial", cls: "partial" };
+}
+function paymentPillHtml(v){
+  const p = paymentStatus(v);
+  return '<span class="pill pay-' + p.cls + '">' + p.label + '</span>';
+}
+
+function navHeader(title, backAction){
+  const topRow = '<header><div class="hleft">' +
+    '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
+    '<h1 style="flex:1">' + (backAction ? 'Vendas' : esc(title)) + '</h1>' +
+    '</div></header>';
+  if(!backAction) return topRow;
+  return topRow + '<div class="subheader">' +
+    '<button class="link" id="back">← Vendas</button>' +
+  '</div>';
+}
+function wireNav(backAction){
+  wireMenuButton();
+  if(backAction) document.getElementById("back").addEventListener("click", backAction);
+}
+
+// ---- list screen ----
+
+async function loadVendas(){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  if(!getPass()){ showLogin(); return; }
+  try{
+    const data = await api("vendas");
+    vendas = data.vendas || [];
+    const wanted = new URLSearchParams(location.search).get("id");
+    if(wanted){
+      history.replaceState(null, "", location.pathname);
+      openVenda(wanted);
+      return;
+    }
+    renderList();
+  }catch(e){ handleAuthError(e, loadVendas); }
+}
+
+function matchesSearch(v, term){
+  if(!term) return true;
+  const t = term.toLowerCase();
+  if(String(v.name || "").toLowerCase().indexOf(t) >= 0) return true;
+  if(String((v.cliente && v.cliente.name) || "").toLowerCase().indexOf(t) >= 0) return true;
+  return false;
+}
+
+function vendaRowHtml(v){
+  const cliName = v.cliente ? v.cliente.name : "sem cliente";
+  const bits = [statusPillHtml(v.status), paymentPillHtml(v)];
+  if(v.event_date) bits.push('<span>' + esc(fmtDate(v.event_date + "T00:00:00")) + '</span>');
+  return '<div class="row" data-id="' + esc(v.id) + '">' +
+    '<div class="top">' +
+      '<p class="txt">' + esc(v.name) + '</p>' +
+      '<span class="price">' + fmtMoney(v.total_price) + '</span>' +
+    '</div>' +
+    '<div class="meta"><span>' + esc(cliName) + '</span>' + bits.join("") + '</div>' +
+  '</div>';
+}
+
+function renderList(){
+  const shown = vendas.filter(v =>
+    matchesSearch(v, searchTerm) && (!statusFilter || v.status === statusFilter));
+
+  const chips = '<div class="chiprow">' +
+    '<span class="chip' + (statusFilter === "" ? " active" : "") + '" data-status="">Todas</span>' +
+    STATUS_ORDER.map(s =>
+      '<span class="chip' + (statusFilter === s ? " active" : "") + '" data-status="' + s + '">' +
+        esc(STATUS_META[s].label) + '</span>').join("") +
+  '</div>';
+
+  const rowsHtml = vendas.length === 0
+    ? '<p class="msg">Nenhuma venda ainda. Toque em "+ Nova venda" para começar.</p>'
+    : (shown.length === 0
+        ? '<p class="msg" id="no-match">Nenhuma venda encontrada.</p>'
+        : '<div class="card" id="list-card">' + shown.map(vendaRowHtml).join("") + '</div>');
+
+  root.innerHTML = navHeader("Vendas", null) +
+    '<div class="searchrow">' +
+      '<input type="search" id="search" placeholder="Buscar por venda ou cliente" ' +
+        'value="' + esc(searchTerm) + '">' +
+    '</div>' +
+    chips +
+    rowsHtml +
+    '<button class="primary full addrow-btn" id="new-venda">+ Nova venda</button>';
+
+  wireNav(null);
+
+  const search = document.getElementById("search");
+  search.addEventListener("input", () => {
+    searchTerm = search.value.trim();
+    redrawList();
+  });
+  root.querySelectorAll(".chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      statusFilter = chip.dataset.status;
+      redrawList();
+    });
+  });
+  wireListRows();
+  document.getElementById("new-venda").addEventListener("click", openCreateModal);
+}
+
+function redrawList(){
+  const shown = vendas.filter(v =>
+    matchesSearch(v, searchTerm) && (!statusFilter || v.status === statusFilter));
+  root.querySelectorAll(".chip").forEach(chip =>
+    chip.classList.toggle("active", chip.dataset.status === statusFilter));
+  const card = document.getElementById("list-card") || document.getElementById("no-match");
+  const html = shown.length === 0
+    ? '<p class="msg" id="no-match">Nenhuma venda encontrada.</p>'
+    : '<div class="card" id="list-card">' + shown.map(vendaRowHtml).join("") + '</div>';
+  if(card){
+    card.outerHTML = html;
+    wireListRows();
+  }
+}
+
+function wireListRows(){
+  root.querySelectorAll(".row[data-id]").forEach(row => {
+    row.addEventListener("click", () => openVenda(row.dataset.id));
+  });
+}
+
+// ---- cliente picker (page-local: a cliente is a different entity from an
+// ingredient, with different fields, so this is its own small
+// implementation rather than a forced reuse of shared-catalog.js's picker) ----
+
+async function clientePickerModal(){
+  return new Promise(async resolve => {
+    let all;
+    try{
+      if(!clienteCache) clienteCache = (await api("clientes")).clientes || [];
+      all = clienteCache;
+    }catch(e){
+      if(e.unauthorized){ handleAuthError(e, loadVendas); return resolve(null); }
+      listToast("Não foi possível carregar os clientes", true);
+      return resolve(null);
+    }
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>Cliente</h3>' +
+        '<label for="cli-q">Buscar ou criar</label>' +
+        '<input type="text" id="cli-q" placeholder="nome do cliente" autocomplete="off">' +
+        '<div class="cli-list" id="cli-list"></div>' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="cli-cancel">Cancelar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+
+    const qEl = backdrop.querySelector("#cli-q");
+    const listEl = backdrop.querySelector("#cli-list");
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+
+    function draw(){
+      const term = qEl.value.trim();
+      const t = term.toLowerCase();
+      const shown = all.filter(c => !t || String(c.name).toLowerCase().indexOf(t) >= 0);
+      const exact = all.some(c => String(c.name).toLowerCase() === t);
+      let html = "";
+      if(term && !exact){
+        html += '<button class="cli-opt create" data-create>➕ Criar "' + esc(term) + '"</button>';
+      }
+      html += shown.map(c => {
+        const sub = [c.organization, c.phone].filter(Boolean).join(" · ");
+        return '<button class="cli-opt" data-pick="' + esc(c.id) + '">' +
+          '<span class="nm">' + esc(c.name) +
+            (sub ? '<span class="sub">' + esc(sub) + '</span>' : '') +
+          '</span></button>';
+      }).join("");
+      if(!html) html = '<p class="msg small">Nenhum cliente ainda. Digite acima para criar o primeiro.</p>';
+      listEl.innerHTML = html;
+
+      const create = listEl.querySelector("[data-create]");
+      if(create){
+        create.addEventListener("click", async () => {
+          try{
+            const res = await api("cliente_create", { name: qEl.value.trim() });
+            clienteCache = null;
+            close(res.cliente);
+          }catch(err){
+            if(err.unauthorized){ handleAuthError(err, loadVendas); return close(null); }
+            listToast("Não foi possível criar o cliente", true);
+          }
+        });
+      }
+      listEl.querySelectorAll("[data-pick]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          close(all.find(c => c.id === btn.dataset.pick) || null);
+        });
+      });
+    }
+
+    function onKey(e){
+      if(e.key === "Escape") close(null);
+      if(e.key === "Enter"){
+        e.preventDefault();
+        const first = listEl.querySelector(".cli-opt");
+        if(first) first.click();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#cli-cancel").addEventListener("click", () => close(null));
+    qEl.addEventListener("input", draw);
+    draw();
+    qEl.focus();
+  });
+}
+
+function statusPickerModal(current){
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>Status da venda</h3>' +
+        '<div class="status-list">' +
+          STATUS_ORDER.map(s =>
+            '<button class="status-opt' + (s === current ? ' current' : '') + '" data-status="' + s + '">' +
+              esc(STATUS_META[s].label) +
+              (s === current ? ' ✓' : '') +
+            '</button>').join("") +
+        '</div>' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="st-cancel">Cancelar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    function onKey(e){ if(e.key === "Escape") close(null); }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#st-cancel").addEventListener("click", () => close(null));
+    backdrop.querySelectorAll("[data-status]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        if(btn.dataset.status === current) return close(null);
+        close(btn.dataset.status);
+      });
+    });
+  });
+}
+
+// ---- create ----
+
+function openCreateModal(){
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-card">' +
+      '<h3>Nova venda</h3>' +
+      '<label>Cliente</label>' +
+      '<button type="button" class="status-opt" id="nv-cliente-btn" style="margin-bottom:14px">' +
+        'Selecionar cliente…</button>' +
+      '<label for="nv-name">Nome da venda</label>' +
+      '<input type="text" id="nv-name" placeholder="ex: Bolo de aniversário — Maria">' +
+      '<label for="nv-status">Status</label>' +
+      '<select id="nv-status" style="width:100%;margin-bottom:14px">' +
+        STATUS_ORDER.map(s => '<option value="' + s + '"' +
+          (s === "confirmado" ? " selected" : "") + '>' + esc(STATUS_META[s].label) + '</option>').join("") +
+      '</select>' +
+      '<label for="nv-date">Data do evento (opcional)</label>' +
+      '<input type="date" id="nv-date" style="width:100%;margin-bottom:14px;padding:10px 12px;' +
+        'border-radius:10px;border:1px solid var(--border-strong);background:var(--card);color:var(--text)">' +
+      '<label for="nv-notes">Notas (opcional)</label>' +
+      '<input type="text" id="nv-notes" placeholder="detalhes, origem do contato…">' +
+      '<div class="modal-actions">' +
+        '<button class="cancel" id="nv-cancel">Cancelar</button>' +
+        '<button class="save" id="nv-ok">Criar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+
+  let chosenCliente = null;
+  const cliBtn = backdrop.querySelector("#nv-cliente-btn");
+  cliBtn.addEventListener("click", async () => {
+    const c = await clientePickerModal();
+    if(c){ chosenCliente = c; cliBtn.textContent = c.name; }
+  });
+
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  function onKey(e){ if(e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
+  backdrop.querySelector("#nv-cancel").addEventListener("click", close);
+
+  backdrop.querySelector("#nv-ok").addEventListener("click", async () => {
+    if(!chosenCliente){ alert("Selecione um cliente."); return; }
+    const name = backdrop.querySelector("#nv-name").value.trim();
+    if(!name){ alert("O nome da venda não pode ficar vazio."); return; }
+    const status = backdrop.querySelector("#nv-status").value;
+    const event_date = backdrop.querySelector("#nv-date").value || null;
+    const notes = backdrop.querySelector("#nv-notes").value.trim() || null;
+    try{
+      const res = await api("venda_create", {
+        cliente_id: chosenCliente.id, name, status, event_date, notes,
+      });
+      close();
+      vendas = [];
+      openVenda(res.venda.id);
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      listToast("Não foi possível criar a venda", true);
+    }
+  });
+}
+
+// ---- detail screen ----
+
+async function openVenda(id){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  try{
+    const data = await api("venda_detail", { id });
+    if(!data.found){
+      root.innerHTML = navHeader("Vendas", loadVendas) + '<p class="msg">Venda não encontrada.</p>';
+      wireNav(loadVendas);
+      return;
+    }
+    renderVenda(data);
+  }catch(e){ handleAuthError(e, loadVendas); }
+}
+
+function itemRowHtml(it){
+  const badge = it.tipo === "servico" ? "🛠" : "🎂";
+  const meta = fmtStockQty(it.quantity) + ' × ' + fmtMoney(it.unit_price) +
+    (Number(it.unit_cost) > 0 ? ' · custo ' + fmtMoney(it.unit_cost) : '');
+  const amt = Number(it.quantity) * Number(it.unit_price);
+  return '<div class="item-row" data-item="' + esc(it.id) + '">' +
+    '<span class="badge">' + badge + '</span>' +
+    '<span class="body">' +
+      '<p class="txt">' + esc(it.description) + '</p>' +
+      '<p class="meta">' + esc(meta) + '</p>' +
+    '</span>' +
+    '<span class="amt">' + fmtMoney(amt) + '</span>' +
+    '<span class="row-actions">' +
+      '<button class="icon-btn" data-edit-item title="Editar">✎</button>' +
+      '<button class="icon-btn danger" data-del-item title="Remover">🗑</button>' +
+    '</span>' +
+  '</div>';
+}
+
+function payRowHtml(p){
+  return '<div class="pay-row" data-pay="' + esc(p.id) + '">' +
+    '<span class="badge">💰</span>' +
+    '<span class="body">' +
+      '<p class="txt">' + fmtMoney(p.amount) + (p.method ? ' · ' + esc(p.method) : '') + '</p>' +
+      '<p class="meta">' + esc(fmtDateTime(p.received_at)) +
+        (p.note ? ' · ' + esc(p.note) : '') + '</p>' +
+    '</span>' +
+    '<span class="row-actions">' +
+      '<button class="icon-btn" data-edit-pay title="Editar">✎</button>' +
+      '<button class="icon-btn danger" data-del-pay title="Remover">🗑</button>' +
+    '</span>' +
+  '</div>';
+}
+
+function renderVenda(data){
+  const v = data.venda;
+  const itens = data.itens || [];
+  const pagamentos = data.pagamentos || [];
+  const cli = v.cliente;
+
+  const cliBlock = '<div class="cli-block">' +
+    '<div class="who">' +
+      '<p class="nm">' + (cli ? esc(cli.name) : 'Sem cliente') + '</p>' +
+      (cli ? '<p class="sub">' + esc([cli.organization, cli.phone, cli.email].filter(Boolean).join(" · ")) + '</p>' : '') +
+    '</div>' +
+    '<button class="link" id="change-cliente">Trocar</button>' +
+  '</div>';
+
+  const itensHtml = itens.length === 0
+    ? '<p class="msg small">Nenhum item ainda.</p>'
+    : '<div class="card" id="itens-card">' + itens.map(itemRowHtml).join("") + '</div>';
+  const paysHtml = pagamentos.length === 0
+    ? '<p class="msg small">Nenhum pagamento registrado ainda.</p>'
+    : '<div class="card" id="pays-card">' + pagamentos.map(payRowHtml).join("") + '</div>';
+
+  const profitCls = data.profit > 0 ? "pos" : (data.profit < 0 ? "neg" : "");
+  const balanceCls = data.balance_due > 0 ? "neg" : (data.balance_due < 0 ? "pos" : "");
+
+  root.innerHTML = navHeader("Vendas", loadVendas) +
+    '<div class="venda-head">' +
+      '<p class="name" id="venda-name">' + esc(v.name) + '</p>' +
+      statusPillHtml(v.status) + ' ' + paymentPillHtml(data) +
+    cliBlock +
+    '<div class="statusline">' +
+      '<span class="lbl">Status</span>' +
+      '<button class="link" id="change-status">' + esc(STATUS_META[v.status].label) + ' — alterar</button>' +
+    '</div>' +
+    '<div class="datefield">' +
+      '<span class="lbl">Data do evento</span>' +
+      '<input type="date" id="event-date" value="' + esc(v.event_date || "") + '" ' +
+        'style="border:none;background:none;color:var(--text);font:inherit;font-size:14px;text-align:right">' +
+    '</div>' +
+    '<div class="detail-actions">' +
+      '<button class="primary small alt danger" id="del-venda">🗑 Remover</button>' +
+    '</div>' +
+    '</div>' +
+    '<div class="card totals-card">' +
+      '<div class="totals-grid">' +
+        '<div><p class="lbl">Custo total</p><p class="val">' + fmtMoney(data.total_cost) + '</p></div>' +
+        '<div><p class="lbl">Preço total</p><p class="val">' + fmtMoney(data.total_price) + '</p></div>' +
+        '<div class="t"><p class="lbl">Lucro</p><p class="val ' + profitCls + '">' + fmtMoney(data.profit) + '</p></div>' +
+        '<div><p class="lbl">Margem</p><p class="val ' + profitCls + '">' +
+          (data.margin_pct == null ? "—" : data.margin_pct.toFixed(1).replace(".", ",") + "%") + '</p></div>' +
+        '<div class="t"><p class="lbl">Total pago</p><p class="val">' + fmtMoney(data.total_paid) + '</p></div>' +
+        '<div><p class="lbl">Saldo devedor</p><p class="val ' + balanceCls + '">' + fmtMoney(data.balance_due) + '</p></div>' +
+      '</div>' +
+    '</div>' +
+    '<h3>Itens</h3>' + itensHtml +
+    '<button class="primary small alt addrow-btn" id="add-item">+ Item</button>' +
+    '<h3>Pagamentos</h3>' + paysHtml +
+    '<button class="primary addrow-btn" id="confirm-pay">Confirmar pagamento</button>';
+
+  wireNav(loadVendas);
+
+  document.getElementById("venda-name").addEventListener("click", async () => {
+    const name = await promptModal("Editar venda", "Nome", v.name);
+    if(name === null) return;
+    const trimmed = name.trim();
+    if(!trimmed){ alert("O nome não pode ficar vazio."); return; }
+    if(trimmed === v.name) return;
+    try{
+      await api("venda_update", { id: v.id, name: trimmed });
+      vendas = [];
+      openVenda(v.id);
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      listToast("Não foi possível salvar", true);
+    }
+  });
+
+  document.getElementById("change-cliente").addEventListener("click", async () => {
+    const c = await clientePickerModal();
+    if(!c) return;
+    try{
+      await api("venda_update", { id: v.id, cliente_id: c.id });
+      vendas = [];
+      openVenda(v.id);
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      listToast("Não foi possível salvar", true);
+    }
+  });
+
+  document.getElementById("change-status").addEventListener("click", async () => {
+    const status = await statusPickerModal(v.status);
+    if(!status) return;
+    try{
+      await api("venda_update", { id: v.id, status });
+      vendas = [];
+      openVenda(v.id);
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      listToast("Não foi possível salvar", true);
+    }
+  });
+
+  document.getElementById("event-date").addEventListener("change", async (e) => {
+    try{
+      await api("venda_update", { id: v.id, event_date: e.target.value || null });
+      vendas = [];
+      listToast("Data salva");
+    }catch(err){
+      if(err.unauthorized) return handleAuthError(err, loadVendas);
+      listToast("Não foi possível salvar a data", true);
+    }
+  });
+
+  document.getElementById("del-venda").addEventListener("click", async () => {
+    if(!(await confirmModal('Remover "' + v.name + '"?', "Remover"))) return;
+    try{
+      let res = await api("venda_delete", { id: v.id });
+      if(res.ok === false && res.reason === "has_content"){
+        const bits = [];
+        if(res.items) bits.push(res.items + (res.items === 1 ? " item" : " itens"));
+        if(res.payments) bits.push(res.payments +
+          (res.payments === 1 ? " pagamento" : " pagamentos") +
+          " (" + fmtMoney(res.total_paid) + " recebidos)");
+        if(!(await confirmModal(
+          "Esta venda tem " + bits.join(" e ") + ". Removê-la apaga os itens e os pagamentos — " +
+          "o valor já recebido continua no Financeiro. Não dá para desfazer.",
+          "Remover mesmo assim"))) return;
+        res = await api("venda_delete", { id: v.id, force: true });
+      }
+      vendas = [];
+      listToast("Venda removida");
+      loadVendas();
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      listToast("Não foi possível remover", true);
+    }
+  });
+
+  document.getElementById("add-item").addEventListener("click", async () => {
+    const added = await itemModal(null);
+    if(!added) return;
+    try{
+      await api("venda_item_add", Object.assign({ venda_id: v.id }, added));
+      vendas = [];
+      openVenda(v.id);
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      listToast("Não foi possível salvar o item", true);
+    }
+  });
+  root.querySelectorAll("[data-edit-item]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.closest(".item-row").dataset.item;
+      const it = itens.find(x => x.id === id);
+      const edited = await itemModal(it);
+      if(!edited) return;
+      try{
+        await api("venda_item_update", Object.assign({ id }, edited));
+        vendas = [];
+        openVenda(v.id);
+      }catch(e){
+        if(e.unauthorized) return handleAuthError(e, loadVendas);
+        listToast("Não foi possível salvar o item", true);
+      }
+    });
+  });
+  root.querySelectorAll("[data-del-item]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if(!(await confirmModal("Remover este item?"))) return;
+      const id = btn.closest(".item-row").dataset.item;
+      try{
+        await api("venda_item_delete", { id });
+        vendas = [];
+        openVenda(v.id);
+      }catch(e){
+        if(e.unauthorized) return handleAuthError(e, loadVendas);
+        listToast("Não foi possível remover", true);
+      }
+    });
+  });
+
+  document.getElementById("confirm-pay").addEventListener("click", async () => {
+    const confirmed = await paymentConfirmModal(data.balance_due);
+    if(!confirmed) return;
+    try{
+      await api("venda_payment_confirm", Object.assign({ venda_id: v.id }, confirmed));
+      vendas = [];
+      listToast("Pagamento confirmado");
+      openVenda(v.id);
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      listToast("Não foi possível confirmar o pagamento", true);
+    }
+  });
+  root.querySelectorAll("[data-edit-pay]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.closest(".pay-row").dataset.pay;
+      const p = pagamentos.find(x => x.id === id);
+      const edited = await paymentEditModal(p);
+      if(!edited) return;
+      try{
+        await api("venda_payment_update", Object.assign({ id }, edited));
+        vendas = [];
+        openVenda(v.id);
+      }catch(e){
+        if(e.unauthorized) return handleAuthError(e, loadVendas);
+        listToast("Não foi possível salvar o pagamento", true);
+      }
+    });
+  });
+  root.querySelectorAll("[data-del-pay]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if(!(await confirmModal(
+        "Remover este pagamento? O lançamento no Financeiro continua registrado, sem vínculo com a venda."))) return;
+      const id = btn.closest(".pay-row").dataset.pay;
+      try{
+        await api("venda_payment_delete", { id });
+        vendas = [];
+        openVenda(v.id);
+      }catch(e){
+        if(e.unauthorized) return handleAuthError(e, loadVendas);
+        listToast("Não foi possível remover", true);
+      }
+    });
+  });
+}
+
+// ---- item modal ----
+
+function itemModal(it){
+  const isEdit = !!it;
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>' + (isEdit ? "Editar item" : "Novo item") + '</h3>' +
+        '<label>Tipo</label>' +
+        '<select id="it-tipo" style="width:100%;margin-bottom:14px">' +
+          '<option value="produto"' + (isEdit && it.tipo !== "servico" ? " selected" : "") + '>🎂 Produto</option>' +
+          '<option value="servico"' + (isEdit && it.tipo === "servico" ? " selected" : "") + '>🛠 Serviço</option>' +
+        '</select>' +
+        '<label for="it-desc">Descrição</label>' +
+        '<input type="text" id="it-desc" value="' + esc(isEdit ? it.description : "") + '">' +
+        '<div class="fields-row">' +
+          '<div class="col grow">' +
+            '<label for="it-qty">Quantidade</label>' +
+            '<span class="field"><input class="num-input" type="text" inputmode="decimal" id="it-qty" ' +
+              'value="' + esc(isEdit ? fmtStockQty(it.quantity) : "1") + '"></span>' +
+          '</div>' +
+          '<div class="col grow">' +
+            '<label for="it-cost">Custo (un.)</label>' +
+            '<span class="field"><span class="prefix">R$</span>' +
+              '<input class="num-input" type="text" inputmode="numeric" id="it-cost" ' +
+              'value="' + esc(isEdit ? fmtPriceInput(it.unit_cost) : "") + '"></span>' +
+          '</div>' +
+          '<div class="col grow">' +
+            '<label for="it-price">Preço (un.)</label>' +
+            '<span class="field"><span class="prefix">R$</span>' +
+              '<input class="num-input" type="text" inputmode="numeric" id="it-price" ' +
+              'value="' + esc(isEdit ? fmtPriceInput(it.unit_price) : "") + '"></span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="it-cancel">Cancelar</button>' +
+          '<button class="save" id="it-ok">Salvar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+
+    const qtyEl = backdrop.querySelector("#it-qty");
+    const costEl = backdrop.querySelector("#it-cost");
+    const priceEl = backdrop.querySelector("#it-price");
+    wireQtyInput(qtyEl);
+    wirePriceInput(costEl);
+    wirePriceInput(priceEl);
+
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    const ok = () => {
+      const description = backdrop.querySelector("#it-desc").value.trim();
+      if(!description){ alert("A descrição não pode ficar vazia."); return; }
+      const quantity = parseQtyInput(qtyEl.value);
+      if(quantity === null){ alert("Quantidade inválida."); return; }
+      close({
+        tipo: backdrop.querySelector("#it-tipo").value,
+        description,
+        quantity,
+        unit_cost: centsToPrice(priceDigits(costEl.value)) || 0,
+        unit_price: centsToPrice(priceDigits(priceEl.value)) || 0,
+      });
+    };
+    function onKey(e){
+      if(e.key === "Escape") close(null);
+      if(e.key === "Enter"){ e.preventDefault(); ok(); }
+    }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#it-cancel").addEventListener("click", () => close(null));
+    backdrop.querySelector("#it-ok").addEventListener("click", ok);
+    backdrop.querySelector("#it-desc").focus();
+  });
+}
+
+// ---- payment modals ----
+
+function paymentConfirmModal(suggested){
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>Confirmar pagamento</h3>' +
+        '<label for="pay-amount">Valor</label>' +
+        '<span class="field" style="width:100%;margin-bottom:14px">' +
+          '<span class="prefix">R$</span>' +
+          '<input class="num-input" type="text" inputmode="numeric" id="pay-amount" ' +
+            'style="flex:1 1 auto;width:auto" ' +
+            'value="' + esc(suggested > 0 ? fmtPriceInput(suggested) : "") + '">' +
+        '</span>' +
+        '<label>Forma</label>' +
+        '<div class="chiprow" id="pay-method-chips">' +
+          '<span class="chip active" data-method="Pix">Pix</span>' +
+          '<span class="chip" data-method="Dinheiro">Dinheiro</span>' +
+          '<span class="chip" data-method="Cartão">Cartão</span>' +
+        '</div>' +
+        '<label for="pay-date">Data</label>' +
+        '<input type="date" id="pay-date" value="' + new Date().toISOString().slice(0,10) + '" ' +
+          'style="width:100%;margin-bottom:14px;padding:10px 12px;border-radius:10px;' +
+          'border:1px solid var(--border-strong);background:var(--card);color:var(--text)">' +
+        '<label for="pay-note">Nota (opcional)</label>' +
+        '<input type="text" id="pay-note" placeholder="ex: sinal, parcela 2…">' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="pay-cancel">Cancelar</button>' +
+          '<button class="save" id="pay-ok">Confirmar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+
+    const amountEl = backdrop.querySelector("#pay-amount");
+    wirePriceInput(amountEl);
+    let method = "Pix";
+    backdrop.querySelectorAll("#pay-method-chips .chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        method = chip.dataset.method;
+        backdrop.querySelectorAll("#pay-method-chips .chip").forEach(c => c.classList.toggle("active", c === chip));
+      });
+    });
+
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    const ok = () => {
+      const amount = centsToPrice(priceDigits(amountEl.value));
+      if(!amount || amount <= 0){ alert("Informe um valor válido."); return; }
+      const date = backdrop.querySelector("#pay-date").value;
+      close({
+        amount, method,
+        received_at: date ? new Date(date + "T12:00:00").toISOString() : undefined,
+        note: backdrop.querySelector("#pay-note").value.trim() || undefined,
+      });
+    };
+    function onKey(e){
+      if(e.key === "Escape") close(null);
+      if(e.key === "Enter"){ e.preventDefault(); ok(); }
+    }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#pay-cancel").addEventListener("click", () => close(null));
+    backdrop.querySelector("#pay-ok").addEventListener("click", ok);
+    amountEl.focus();
+    amountEl.select();
+  });
+}
+
+function paymentEditModal(p){
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>Editar pagamento</h3>' +
+        '<label for="pe-amount">Valor</label>' +
+        '<span class="field" style="width:100%;margin-bottom:14px">' +
+          '<span class="prefix">R$</span>' +
+          '<input class="num-input" type="text" inputmode="numeric" id="pe-amount" ' +
+            'style="flex:1 1 auto;width:auto" value="' + esc(fmtPriceInput(p.amount)) + '">' +
+        '</span>' +
+        '<label for="pe-method">Forma (opcional)</label>' +
+        '<input type="text" id="pe-method" value="' + esc(p.method || "") + '">' +
+        '<label for="pe-date">Data</label>' +
+        '<input type="date" id="pe-date" value="' + esc((p.received_at || "").slice(0,10)) + '" ' +
+          'style="width:100%;margin-bottom:14px;padding:10px 12px;border-radius:10px;' +
+          'border:1px solid var(--border-strong);background:var(--card);color:var(--text)">' +
+        '<label for="pe-note">Nota (opcional)</label>' +
+        '<input type="text" id="pe-note" value="' + esc(p.note || "") + '">' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="pe-cancel">Cancelar</button>' +
+          '<button class="save" id="pe-ok">Salvar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+
+    const amountEl = backdrop.querySelector("#pe-amount");
+    wirePriceInput(amountEl);
+
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    const ok = () => {
+      const amount = centsToPrice(priceDigits(amountEl.value));
+      if(!amount || amount <= 0){ alert("Informe um valor válido."); return; }
+      const date = backdrop.querySelector("#pe-date").value;
+      if(!date){ alert("Informe a data."); return; }
+      close({
+        amount,
+        method: backdrop.querySelector("#pe-method").value.trim() || null,
+        received_at: new Date(date + "T12:00:00").toISOString(),
+        note: backdrop.querySelector("#pe-note").value.trim() || null,
+      });
+    };
+    function onKey(e){
+      if(e.key === "Escape") close(null);
+      if(e.key === "Enter"){ e.preventDefault(); ok(); }
+    }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#pe-cancel").addEventListener("click", () => close(null));
+    backdrop.querySelector("#pe-ok").addEventListener("click", ok);
+    amountEl.focus();
+    amountEl.select();
+  });
+}
+
+loadVendas();
+</script>
+</body>
+</html>

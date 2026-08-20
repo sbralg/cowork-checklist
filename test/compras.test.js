@@ -1,4 +1,4 @@
-// Headless UI test for shopping.html — the scanner, the barcode validation,
+// Headless UI test for compras.html — the scanner, the barcode validation,
 // the camera/lens picker, the price and quantity fields, and the scan
 // confirmation dialog.
 //
@@ -6,7 +6,7 @@
 //   KEEP_SHOTS=1 node test/...          # also prints where screenshots went
 //
 // It lives in this repo rather than in cowork-personal-daily-summary because
-// shopping.html does too: the page has exactly one copy, and the test that
+// compras.html does too: the page has exactly one copy, and the test that
 // guards it sits next to it.
 //
 // It serves the repo root over http rather than using file://, because that
@@ -56,7 +56,7 @@ function serve() {
   return new Promise(resolve => {
     const server = http.createServer((req, res) => {
       const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '');
-      const file = path.join(WEB_DIR, rel || 'shopping.html');
+      const file = path.join(WEB_DIR, rel || 'compras.html');
       // Refuse anything that escapes the served root, even in a test.
       if (!file.startsWith(WEB_DIR)) { res.writeHead(403).end(); return; }
       fs.readFile(file, (err, body) => {
@@ -123,7 +123,7 @@ function handleScan(body) {
 (async () => {
   const failures = [];
   const server = await serve();
-  const PAGE = 'http://127.0.0.1:' + server.address().port + '/shopping.html';
+  const PAGE = 'http://127.0.0.1:' + server.address().port + '/compras.html';
   const browser = await chromium.launch({
     // Honour an explicit browser path when one is provided (this sandbox
     // ships Chromium outside playwright's own cache); otherwise let
@@ -404,7 +404,7 @@ function handleScan(body) {
   const geom = await page.evaluate(() => {
     const box = s => document.querySelector(s).getBoundingClientRect();
     const card = box('.modal-card'), price = box('#scan-price'),
-          prefix = box('.scan-fields .prefix'), qty = box('#scan-qty');
+          prefix = box('.fields-row .prefix'), qty = box('#scan-qty');
     return {
       insideCard: price.right <= card.right && price.left >= card.left,
       joinedToPrefix: Math.abs(price.left - prefix.right) < 1,
@@ -445,7 +445,7 @@ function handleScan(body) {
   check('package amount field is not collapsed', packGeom.amountVisible);
   check('package amount does not overlap the unit picker', packGeom.notOverlapping);
 
-  await page.click('.scan-fields .step-btn[data-step="1"]');
+  await page.click('.fields-row .step-btn[data-step="1"]');
   await page.waitForTimeout(100);
   check('dialog stepper raises the quantity', (await page.inputValue('#scan-qty')) === '2');
   await page.locator('#scan-price').pressSequentially('675');

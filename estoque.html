@@ -29,25 +29,14 @@
   refused, and the shortfall is offered as an explicit retroactive purchase
   at the last known price instead of being silently swallowed.
 -->
+<link rel="stylesheet" href="shared-base.css">
+<link rel="stylesheet" href="shared-menu.css">
+<link rel="stylesheet" href="shared-modal.css">
+<link rel="stylesheet" href="shared-toast.css">
+<link rel="stylesheet" href="shared-inputs.css">
+<link rel="stylesheet" href="shared-catalog.css">
 <style>
-  :root{
-    --bg:#f7f7f8; --card:#ffffff; --text:#1a1a1a; --muted:#6b7280;
-    --border:#e5e7eb; --border-strong:#d1d5db; --accent:#2563eb;
-    --accent-text:#ffffff; --danger:#dc2626;
-  }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --muted:#94a3b8;
-      --border:#334155; --border-strong:#475569; --accent:#3b82f6;
-      --accent-text:#ffffff; --danger:#f87171;
-    }
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;padding:0}
   body{
-    background:var(--bg); color:var(--text);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    -webkit-font-smoothing:antialiased;
     padding:max(16px,env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom));
   }
   .wrap{max-width:640px;margin:0 auto}
@@ -63,41 +52,6 @@
   .sec-toggle:hover{color:var(--text)}
   .sec-toggle .caret{transition:transform .2s ease;display:inline-block}
   .sec-toggle.open .caret{transform:rotate(90deg)}
-  .link{
-    background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;
-    text-decoration:none;display:inline-block;transition:color .15s ease,opacity .1s ease;
-  }
-  .link:hover{color:var(--text);text-decoration:underline}
-  .link:active{opacity:.6}
-  .menu-btn{
-    background:none;border:none;color:var(--text);font-size:22px;padding:2px 8px 2px 0;
-    cursor:pointer;line-height:1;flex:none;align-self:center;
-    transition:opacity .15s ease,transform .1s ease;
-  }
-  .menu-btn:hover{opacity:.7}
-  .menu-btn:active{transform:scale(.9)}
-  .menu-backdrop{
-    position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;
-    animation:modalFadeIn .15s ease;
-  }
-  .menu-panel{
-    position:fixed;top:0;left:0;bottom:0;width:min(280px,80vw);
-    background:var(--card);box-shadow:2px 0 24px rgba(0,0,0,.3);
-    display:flex;flex-direction:column;
-    padding:max(16px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-bottom));
-    transform:translateX(-100%);transition:transform .25s cubic-bezier(.2,.8,.2,1);
-  }
-  .menu-panel.open{transform:translateX(0)}
-  .menu-item{
-    display:flex;align-items:center;gap:12px;padding:14px 20px;font-size:15px;
-    color:var(--text);text-decoration:none;background:none;border:none;width:100%;
-    text-align:left;cursor:pointer;transition:background-color .15s ease;
-  }
-  .menu-item:hover{background:rgba(127,127,127,.08)}
-  .menu-item.active{color:var(--accent);font-weight:600}
-  .menu-spacer{flex:1}
-  .menu-item.logout{border-top:1px solid var(--border);color:var(--danger)}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
   .card.hidden{display:none}
   .row{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);transition:background-color .15s ease}
   .row:hover{background:rgba(127,127,127,.06)}
@@ -105,11 +59,6 @@
   .body{min-width:0;flex:1;cursor:pointer}
   .body .txt{font-size:15px;line-height:1.35;margin:0;word-wrap:break-word}
   .body .meta{font-size:12px;color:var(--muted);margin:3px 0 0}
-  .thumb{
-    width:44px;height:44px;flex:none;border-radius:10px;object-fit:contain;
-    background:rgba(127,127,127,.08);border:1px solid var(--border);
-  }
-  .thumb.ph{display:flex;align-items:center;justify-content:center;font-size:20px}
   /* The ingredient chip. Tappable, and it does NOT open the product sheet —
      categorising a product is quick enough to belong right here, on the
      screen where you are already looking at the shelf. Muted when unset,
@@ -123,29 +72,6 @@
   .ing-chip:hover{filter:brightness(1.12)}
   .ing-chip:active{transform:scale(.97)}
   .ing-chip.none{background:rgba(127,127,127,.12);color:var(--muted)}
-  /* ---- ingredient picker (same dialog as Produtos) ---- */
-  .ing-list{max-height:44vh;overflow-y:auto;margin:0 0 14px;-webkit-overflow-scrolling:touch}
-  .ing-opt{
-    display:flex;align-items:center;gap:10px;width:100%;text-align:left;
-    background:none;border:none;border-bottom:1px solid var(--border);
-    color:var(--text);font:inherit;font-size:15px;padding:11px 4px;cursor:pointer;
-    transition:background-color .15s ease;
-  }
-  .ing-opt:last-child{border-bottom:none}
-  .ing-opt:hover{background:rgba(127,127,127,.08)}
-  .ing-opt .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .ing-opt .cnt{font-size:12px;color:var(--muted);flex:none}
-  .ing-opt.current{color:var(--accent);font-weight:650}
-  .ing-opt.create{color:var(--accent)}
-  .ing-opt.clear{color:var(--muted)}
-  .ing-opt .hintbadge{
-    font-size:11px;padding:2px 7px;border-radius:999px;flex:none;
-    background:rgba(37,99,235,.14);color:var(--accent);
-  }
-  /* Which product is being categorised. Needed HERE and not in Produtos'
-     copy of this dialog: there it opens from the product's own sheet, with
-     the name already on screen behind it. */
-  .modal-card .who{font-size:13px;color:var(--muted);margin:-8px 0 16px}
   /* The stepper, same shape as the shopping list's: − and + flank the
      count and carry the rounded ends, so the three read as one control.
      The count in the middle is a BUTTON, not an input — typing a number
@@ -173,98 +99,18 @@
   }
   .qty-val:hover{background:rgba(127,127,127,.1)}
   .qty-val.zero{color:var(--muted)}
-  .msg{padding:28px 8px;text-align:center;color:var(--muted);font-size:15px}
-  .msg.err{color:var(--danger)}
-  .msg.small{padding:16px 8px;font-size:14px}
-  .login{max-width:360px;margin:12vh auto 0;text-align:center}
-  .login h2{font-size:18px;margin:0 0 4px}
-  .login p{color:var(--muted);font-size:14px;margin:0 0 20px}
-  input[type=password]{
-    width:100%;font:inherit;font-size:16px;padding:14px;border-radius:12px;
-    border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:12px;
-  }
-  button.primary{
-    font:inherit;font-weight:600;font-size:16px;border:none;border-radius:14px;
-    padding:15px 20px;min-height:52px;cursor:pointer;width:100%;max-width:640px;
-    background:var(--accent);color:var(--accent-text);
-    display:flex;align-items:center;justify-content:center;gap:8px;
-    transition:filter .15s ease,transform .1s ease;
-  }
-  button.primary:hover:not(:disabled){filter:brightness(1.1)}
-  button.primary:active:not(:disabled){transform:scale(.98)}
-  button.primary:disabled{opacity:.5}
-  .loginerr{color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px}
   .searchrow{display:flex;gap:8px;margin:0 0 14px}
   .searchrow input[type=search]{
     flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
     border:1px solid var(--border-strong);background:var(--card);color:var(--text);
     -webkit-appearance:none;
   }
-  .modal-backdrop{
-    position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;
-    display:flex;align-items:center;justify-content:center;padding:16px;
-    animation:modalFadeIn .15s ease;
-  }
-  .modal-card{
-    background:var(--card);border-radius:16px;padding:20px;width:100%;max-width:400px;
-    animation:modalPopIn .18s cubic-bezier(.2,.8,.2,1);
-    max-height:90vh;overflow:auto;
-  }
-  @keyframes modalFadeIn{from{opacity:0} to{opacity:1}}
-  @keyframes modalPopIn{
-    from{opacity:0;transform:scale(.95) translateY(6px)}
-    to{opacity:1;transform:scale(1) translateY(0)}
-  }
-  .modal-card h3{margin:0 0 14px;font-size:16px;color:var(--text)}
-  .modal-card p{font-size:15px;line-height:1.4;margin:0 0 18px}
-  .modal-card label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
-  .modal-card .hint{font-size:12px;color:var(--muted);line-height:1.4;margin:-6px 0 16px}
-  /* Excludes .num-input for the same reason shopping.html does: the compact
-     amount/price controls are type=text too (a number input can't hold
-     "5,50"), and this rule outranks .num-input on specificity. */
-  .modal-card input[type=text]:not(.num-input){
-    width:100%;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
-    border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:14px;
-  }
-  .field{display:flex;align-items:center;flex:none}
-  .field .prefix{
-    font-size:12px;color:var(--muted);background:rgba(127,127,127,.1);
-    border:1px solid var(--border-strong);border-right:none;border-radius:8px 0 0 8px;
-    padding:9px 7px;line-height:1;white-space:nowrap;
-  }
-  .num-input{
-    width:70px;flex:none;font:inherit;font-size:14px;padding:8px;
-    border:1px solid var(--border-strong);border-radius:0 8px 8px 0;
-    background:var(--card);color:var(--text);text-align:right;
-  }
-  .modal-fields{display:flex;gap:12px;align-items:flex-end;margin:0 0 6px}
-  .modal-fields .col{display:flex;flex-direction:column;gap:6px;min-width:0}
-  .modal-fields .col.grow{flex:1}
-  .modal-fields .col.grow .field{width:100%}
-  .modal-fields .col.grow .num-input{flex:1 1 auto;width:auto;min-width:0}
-  .modal-fields label{margin:0;font-size:13px;color:var(--muted)}
-  .modal-fields .num-input.solo{border-radius:8px}
-  .modal-actions{display:flex;gap:8px;justify-content:flex-end}
-  .modal-actions button{
-    font:inherit;font-weight:600;font-size:14px;padding:10px 16px;border-radius:10px;
-    border:none;cursor:pointer;transition:filter .15s ease,transform .1s ease,background-color .15s ease;
-  }
-  .modal-actions button:active{transform:scale(.97)}
-  .modal-actions .cancel{background:none;color:var(--muted)}
-  .modal-actions .cancel:hover{background:rgba(127,127,127,.12);color:var(--text)}
-  .modal-actions .save{background:var(--accent);color:var(--accent-text)}
-  .modal-actions .save:hover{filter:brightness(1.1)}
-  .toast{
-    position:fixed;left:16px;right:16px;
-    bottom:max(16px,env(safe-area-inset-bottom));
-    margin:0 auto;max-width:420px;text-align:center;z-index:95;
-    background:var(--text);color:var(--bg);
-    font-size:14px;font-weight:600;padding:12px 14px;border-radius:12px;
-    opacity:0;transform:translateY(8px);pointer-events:none;
-    transition:opacity .2s ease,transform .2s ease;
-  }
-  .toast.show{opacity:1;transform:translateY(0)}
-  .toast.err{background:var(--danger);color:#fff}
+  /* .fields-row is the shared amount-field row layout (shared-inputs.css);
+     .num-input.solo is this page's own override for a single standalone
+     field inside it (the recount / shortfall dialogs have no .prefix chip
+     to pair with, so it wants the all-corners radius, same as produtos.html's
+     package-size field). */
+  .fields-row .num-input.solo{border-radius:8px}
   @keyframes rowFlash{from{background:rgba(37,99,235,.22)} to{background:transparent}}
   .row.flash{animation:rowFlash 1.4s ease-out}
 </style>
@@ -273,10 +119,21 @@
 <div id="root" class="wrap"><p class="msg">Carregando…</p></div>
 
 <script>
-const API = "https://opehbckfmfschpvbhxvo.supabase.co/functions/v1/checklist-api";
-const PASS_KEY = "checklist_pass";
-
 const root = document.getElementById("root");
+const CURRENT_PAGE = "estoque";
+const PAGE_LOGIN = {
+  title: "Estoque",
+  subtitle: "Digite a senha para acessar.",
+  onSuccess: () => loadStock()
+};
+</script>
+<script src="shared-api.js"></script>
+<script src="shared-menu.js"></script>
+<script src="shared-ui.js"></script>
+<script src="shared-format.js"></script>
+<script src="shared-inputs.js"></script>
+<script src="shared-catalog.js"></script>
+<script>
 // The whole catalogue with its balances, loaded once and filtered in the
 // browser. Movements update the matching entry in place so the numbers on
 // screen and the numbers here never disagree.
@@ -284,243 +141,14 @@ let stock = [];
 let searchTerm = "";
 let showEmpty = false;
 
-function getPass(){ return localStorage.getItem(PASS_KEY) || ""; }
-
-async function api(action, extra){
-  const r = await fetch(API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-checklist-pass": getPass() },
-    body: JSON.stringify(Object.assign({ action }, extra || {}))
-  });
-  if(r.status === 401){ const e = new Error("unauthorized"); e.unauthorized = true; throw e; }
-  if(!r.ok){
-    // 400 means the API rejected the input itself, which deserves a
-    // different message from a connection failure.
-    const e = new Error("http " + r.status);
-    e.badRequest = r.status === 400;
-    throw e;
-  }
-  return await r.json();
-}
-
-function esc(s){
-  return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-}
-function fmtMoney(v){
-  return new Intl.NumberFormat("pt-BR", { style:"currency", currency:"BRL" }).format(Number(v) || 0);
-}
-
-const CURRENT_PAGE = "estoque";
-const MENU_ITEMS = [
-  { page: "hoje", href: "hoje.html", emoji: "☀️", label: "Hoje" },
-  { page: "index", href: "index.html", emoji: "✓", label: "Tarefas" },
-  { page: "shopping", href: "shopping.html", emoji: "🛒", label: "Compras" },
-  { page: "estoque", href: "estoque.html", emoji: "📦", label: "Estoque" },
-  { page: "produtos", href: "produtos.html", emoji: "🏷️", label: "Produtos" },
-];
-
-function wireMenuButton(){
-  const btn = document.getElementById("menu-btn");
-  if(btn) btn.addEventListener("click", openMenu);
-}
-
-function openMenu(){
-  const itemsHtml = MENU_ITEMS.map(item => {
-    if(item.page === CURRENT_PAGE){
-      return '<span class="menu-item active">' + item.emoji + ' ' + item.label + '</span>';
-    }
-    return '<a class="menu-item" href="' + item.href + '">' + item.emoji + ' ' + item.label + '</a>';
-  }).join("");
-
-  const backdrop = document.createElement("div");
-  backdrop.className = "menu-backdrop";
-  backdrop.innerHTML =
-    '<div class="menu-panel" id="menu-panel">' +
-      itemsHtml +
-      '<div class="menu-spacer"></div>' +
-      '<button class="menu-item logout" id="menu-logout">🚪 Sair</button>' +
-    '</div>';
-  document.body.appendChild(backdrop);
-  const panel = document.getElementById("menu-panel");
-  requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.add("open")));
-
-  const close = () => {
-    panel.classList.remove("open");
-    document.removeEventListener("keydown", onKey);
-    setTimeout(() => backdrop.remove(), 250);
-  };
-  function onKey(e){ if(e.key === "Escape") close(); }
-  document.addEventListener("keydown", onKey);
-  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
-  document.getElementById("menu-logout").addEventListener("click", () => {
-    localStorage.removeItem(PASS_KEY);
-    close();
-    showLogin();
-  });
-}
-
-let listToastTimer = null;
-function listToast(msg, isErr){
-  let el = document.getElementById("list-toast");
-  if(!el){
-    el = document.createElement("div");
-    el.id = "list-toast";
-    el.className = "toast";
-    document.body.appendChild(el);
-  }
-  el.textContent = msg;
-  el.classList.toggle("err", !!isErr);
-  el.classList.add("show");
-  clearTimeout(listToastTimer);
-  listToastTimer = setTimeout(() => el.classList.remove("show"), 2600);
-}
-
-// ---- shared formatting (duplicated verbatim from shopping.html) ----
-
-function fmtQty(q){
-  const n = Number(q);
-  if(!Number.isFinite(n)) return "0";
-  return Number.isInteger(n) ? String(n) : n.toLocaleString("pt-BR");
-}
-
-function fmtNetQty(qty, unit){
-  const n = Number(qty);
-  if(!Number.isFinite(n) || n <= 0 || !unit) return "";
-  if(unit === "g" && n >= 1000) return (n / 1000).toLocaleString("pt-BR") + " kg";
-  if(unit === "ml" && n >= 1000) return (n / 1000).toLocaleString("pt-BR") + " L";
-  return n.toLocaleString("pt-BR") + " " + unit;
-}
-
-function sanitizeQtyInput(raw){
-  let s = String(raw ?? "").replace(/[^\d.,]/g, "").replace(/\./g, ",");
-  const first = s.indexOf(",");
-  if(first !== -1) s = s.slice(0, first + 1) + s.slice(first + 1).replace(/,/g, "");
-  return s;
-}
-// Positive-only, same as the shopping list. The zero case is handled by the
-// callers that accept it, since "0" is a legitimate recount here.
-function parseQtyInput(raw){
-  const n = Number(String(raw ?? "").replace(",", "."));
-  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
-}
 // "There are none left" is a real answer when recounting a shelf, so this
-// variant accepts zero where parseQtyInput would reject it.
+// variant accepts zero where shared-inputs.js's parseQtyInput would reject
+// it. One consumer (the recount dialog), so it stays page-local.
 function parseCountInput(raw){
   const s = String(raw ?? "").trim();
   if(s === "") return null;
   const n = Number(s.replace(",", "."));
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
-}
-function wireQtyInput(el){
-  el.addEventListener("input", () => {
-    const clean = sanitizeQtyInput(el.value);
-    if(clean !== el.value) el.value = clean;
-  });
-  const selectAll = () => { try{ el.select(); }catch(_){ /* not focusable */ } };
-  el.addEventListener("focus", selectAll);
-  el.addEventListener("click", selectAll);
-  el.addEventListener("pointerup", selectAll);
-}
-
-// Cents-first currency input: digits fill in from the right — 1 → 0,01,
-// 12 → 0,12, 123 → 1,23 — so the separator key is never needed.
-const PRICE_MAX_DIGITS = 9;
-function priceDigits(raw){
-  return String(raw ?? "").replace(/\D/g, "").slice(0, PRICE_MAX_DIGITS).replace(/^0+/, "");
-}
-function centsToPrice(digits){
-  return digits === "" ? null : Number(digits) / 100;
-}
-function fmtPriceInput(v){
-  if(v === null || v === undefined || v === "") return "";
-  const n = Number(v);
-  if(!Number.isFinite(n)) return "";
-  return n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-function wirePriceInput(el){
-  const caretToEnd = () => {
-    if(el.selectionStart !== el.selectionEnd) return;
-    const end = el.value.length;
-    try{ el.setSelectionRange(end, end); }catch(_){ /* not focusable */ }
-  };
-  const selectAll = () => { try{ el.select(); }catch(_){ /* not focusable */ } };
-  el.addEventListener("focus", selectAll);
-  el.addEventListener("click", selectAll);
-  el.addEventListener("pointerup", selectAll);
-  el.addEventListener("input", () => {
-    el.value = fmtPriceInput(centsToPrice(priceDigits(el.value)));
-    caretToEnd();
-  });
-}
-
-const PT_SMALL_WORDS = ["de","da","do","das","dos","e","com","em","no","na",
-  "nos","nas","a","o","as","os","ao","aos","para","sem","por","um","uma"];
-function tidyShouted(raw){
-  const s = String(raw || "").trim().replace(/\s+/g, " ");
-  if(!s || /\p{Ll}/u.test(s)) return s;
-  return s.toLowerCase().replace(/\S+/gu, (word, offset) =>
-    (offset > 0 && PT_SMALL_WORDS.indexOf(word) >= 0)
-      ? word
-      : word.charAt(0).toUpperCase() + word.slice(1));
-}
-
-function thumbHtml(p){
-  return p.image_url
-    ? '<img class="thumb" src="' + esc(p.image_url) + '" alt="" loading="lazy">'
-    : '<span class="thumb ph">📦</span>';
-}
-
-// Words worth matching a product name against, for the picker's suggestion.
-// Two characters or fewer is noise ("de", "e"), and digits are sizes.
-function nameWords(s){
-  return String(s || "").toLowerCase()
-    .replace(/[^\p{L}\s]/gu, " ")
-    .split(/\s+/)
-    .filter(w => w.length > 2 && PT_SMALL_WORDS.indexOf(w) < 0);
-}
-
-// An existing ingredient whose every word appears in this product's name is
-// very likely the right answer — a second brand of creme de leite finds the
-// first one's ingredient without typing. Only a suggestion: it reorders the
-// list, it never picks for you.
-function looksLikely(ingName, productName){
-  const words = nameWords(ingName);
-  if(words.length === 0) return false;
-  const target = " " + nameWords(productName).join(" ") + " ";
-  return words.every(w => target.indexOf(" " + w + " ") >= 0);
-}
-
-// ---- login / shell ----
-
-function showLogin(errText){
-  root.innerHTML =
-    '<div class="login">' +
-      '<h2>Estoque</h2>' +
-      '<p>Digite a senha para acessar.</p>' +
-      '<div class="loginerr">' + (errText ? esc(errText) : "") + '</div>' +
-      '<input type="password" id="pw" autocomplete="current-password" placeholder="Senha" />' +
-      '<button class="primary" id="enter">Entrar</button>' +
-    '</div>';
-  const pw = document.getElementById("pw");
-  const go = () => {
-    const v = pw.value.trim();
-    if(!v) return;
-    localStorage.setItem(PASS_KEY, v);
-    loadStock();
-  };
-  document.getElementById("enter").addEventListener("click", go);
-  pw.addEventListener("keydown", e => { if(e.key === "Enter") go(); });
-  pw.focus();
-}
-
-function handleAuthError(e, retry){
-  if(e.unauthorized){
-    localStorage.removeItem(PASS_KEY);
-    showLogin("Sessão expirada, entre novamente.");
-  }else{
-    root.innerHTML = '<p class="msg err">Não foi possível carregar agora.</p>' +
-      '<p class="msg"><button class="link" onclick="(' + retry.toString() + ')()">Tentar novamente</button></p>';
-  }
 }
 
 function navHeader(title){
@@ -593,15 +221,8 @@ function stockMeta(p){
   return bits.join(" · ");
 }
 
-// What a product IS, as opposed to which SKU it is — the link a recipe
-// reads, and the reason three brands of leite condensado can answer one
-// question. Assigned by hand here and on Produtos; see the API's comment for
-// why Open Food Facts' own categories can't do it (they group by dairy
-// shelf, and 8 of 19 products have no category at all).
-function ingredientName(p){
-  return (p && p.ingredient && p.ingredient.name) ? p.ingredient.name : "";
-}
-
+// ingredientName() lives in shared-catalog.js now — what a product IS, as
+// opposed to which SKU it is, the link a recipe reads.
 function ingredientChipHtml(p){
   const name = ingredientName(p);
   return '<button class="ing-chip' + (name ? '' : ' none') + '" data-ing ' +
@@ -623,7 +244,7 @@ function stockRowHtml(p){
       '<button class="step-btn" data-step="-1" aria-label="Tirar um"' +
         '>−</button>' +
       '<button class="qty-val' + (n === 0 ? ' zero' : '') + '" data-qty ' +
-        'aria-label="Definir quantidade exata">' + fmtQty(n) + '</button>' +
+        'aria-label="Definir quantidade exata">' + fmtStockQty(n) + '</button>' +
       '<button class="step-btn" data-step="1" aria-label="Guardar um">+</button>' +
     '</span>' +
   '</div>';
@@ -737,7 +358,7 @@ function wireStockRow(row){
 function applyQty(p, row, qty){
   p.qty = qty;
   const el = row.querySelector("[data-qty]");
-  el.textContent = fmtQty(qty);
+  el.textContent = fmtStockQty(qty);
   el.classList.toggle("zero", qty === 0);
   const meta = row.querySelector("[data-meta]");
   if(meta) meta.textContent = stockMeta(p);
@@ -812,7 +433,7 @@ async function recount(p, row){
     const res = await api("stock_set", { gtin: p.gtin, quantity: target });
     if(res.ok === false) return;
     applyQty(p, row, Number(res.qty));
-    if(!res.unchanged) listToast(p.name + ": " + fmtQty(res.qty));
+    if(!res.unchanged) listToast(p.name + ": " + fmtStockQty(res.qty));
   }catch(e){
     if(e.unauthorized) return handleAuthError(e, loadStock);
     listToast("Não foi possível ajustar", true);
@@ -823,7 +444,7 @@ async function recount(p, row){
 // No reload — the rest of the page is untouched by this, and a reload here
 // would re-sort the list out from under the finger that just tapped.
 async function setIngredient(p, row){
-  const chosen = await ingredientModal(p);
+  const chosen = await ingredientModal(p, { onAuthError: e => handleAuthError(e, loadStock) });
   if(!chosen) return;
   try{
     const res = await api("product_set_ingredient", { gtin: p.gtin, ...chosen.payload });
@@ -841,117 +462,7 @@ async function setIngredient(p, row){
   }
 }
 
-// The picker, duplicated verbatim from produtos.html per this repo's
-// no-shared-module convention — one input that filters the existing
-// ingredients AND names a new one, because those are the same question.
-// Resolves with {payload} for product_set_ingredient, or null. Fetched on
-// first open rather than at page load: most visits never touch it.
-let ingredientCache = null;
-
-function ingredientModal(p){
-  return new Promise(async resolve => {
-    let all;
-    try{
-      if(!ingredientCache) ingredientCache = (await api("ingredients")).ingredients || [];
-      all = ingredientCache;
-    }catch(e){
-      if(e.unauthorized){ handleAuthError(e, loadStock); return resolve(null); }
-      listToast("Não foi possível carregar os ingredientes", true);
-      return resolve(null);
-    }
-
-    const currentId = p.ingredient ? p.ingredient.id : null;
-    const backdrop = document.createElement("div");
-    backdrop.className = "modal-backdrop";
-    backdrop.innerHTML =
-      '<div class="modal-card">' +
-        '<h3>Ingrediente</h3>' +
-        '<p class="who">' + esc(p.name) + '</p>' +
-        '<label for="ing-q">Buscar ou criar</label>' +
-        '<input type="text" id="ing-q" placeholder="ex: leite condensado" autocomplete="off">' +
-        '<p class="hint">O que este produto É, para as receitas. Marcas ' +
-          'diferentes da mesma coisa compartilham o ingrediente — é assim que ' +
-          '"tenho leite condensado?" passa a ter resposta.</p>' +
-        '<div class="ing-list" id="ing-list"></div>' +
-        '<div class="modal-actions">' +
-          '<button class="cancel" id="ing-cancel">Cancelar</button>' +
-        '</div>' +
-      '</div>';
-    document.body.appendChild(backdrop);
-
-    const qEl = backdrop.querySelector("#ing-q");
-    const listEl = backdrop.querySelector("#ing-list");
-
-    const close = (result) => {
-      backdrop.remove();
-      document.removeEventListener("keydown", onKey);
-      resolve(result);
-    };
-
-    function draw(){
-      const term = qEl.value.trim();
-      const t = term.toLowerCase();
-      const shown = all.filter(i => !t || String(i.name).toLowerCase().indexOf(t) >= 0);
-      const ranked = t ? shown : shown.slice().sort((a, b) =>
-        (looksLikely(b.name, p.name) ? 1 : 0) - (looksLikely(a.name, p.name) ? 1 : 0));
-      const exact = all.some(i => String(i.name).toLowerCase() === t);
-
-      let html = "";
-      if(term && !exact){
-        html += '<button class="ing-opt create" data-create>' +
-          '<span class="nm">➕ Criar "' + esc(term) + '"</span></button>';
-      }
-      if(currentId){
-        html += '<button class="ing-opt clear" data-clear>' +
-          '<span class="nm">✕ Sem ingrediente</span></button>';
-      }
-      html += ranked.map(i =>
-        '<button class="ing-opt' + (i.id === currentId ? ' current' : '') + '" ' +
-          'data-pick="' + esc(i.id) + '">' +
-          '<span class="nm">' + (i.id === currentId ? '✓ ' : '') + esc(i.name) + '</span>' +
-          (!t && i.id !== currentId && looksLikely(i.name, p.name)
-            ? '<span class="hintbadge">provável</span>' : '') +
-          // How many products already point at it — the difference between
-          // "this is the one we use" and a near-duplicate typed by mistake.
-          '<span class="cnt">' + (i.product_count || 0) +
-            ((i.product_count === 1) ? ' produto' : ' produtos') + '</span>' +
-        '</button>').join("");
-      if(!html){
-        html = '<p class="msg small">Nenhum ingrediente ainda. Digite acima para criar o primeiro.</p>';
-      }
-      listEl.innerHTML = html;
-
-      const create = listEl.querySelector("[data-create]");
-      if(create){
-        create.addEventListener("click", () =>
-          close({ payload: { ingredient_name: qEl.value.trim() } }));
-      }
-      const clear = listEl.querySelector("[data-clear]");
-      if(clear) clear.addEventListener("click", () => close({ payload: { ingredient_id: null } }));
-      listEl.querySelectorAll("[data-pick]").forEach(btn => {
-        btn.addEventListener("click", () => {
-          if(btn.dataset.pick === currentId) return close(null);
-          close({ payload: { ingredient_id: btn.dataset.pick } });
-        });
-      });
-    }
-
-    function onKey(e){
-      if(e.key === "Escape") close(null);
-      if(e.key === "Enter"){
-        e.preventDefault();
-        const first = listEl.querySelector(".ing-opt");
-        if(first) first.click();
-      }
-    }
-    document.addEventListener("keydown", onKey);
-    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
-    backdrop.querySelector("#ing-cancel").addEventListener("click", () => close(null));
-    qEl.addEventListener("input", draw);
-    draw();
-    qEl.focus();
-  });
-}
+// ingredientModal() and its ingredientCache live in shared-catalog.js now.
 
 // The zero floor, made useful. The packages are real and were really paid
 // for; what is missing is the record. So this offers to write that purchase
@@ -976,7 +487,7 @@ async function resolveShortfall(p, row, wanted, info){
       return loadStock();
     }
     applyQty(p, row, Number(res.qty));
-    listToast("Compra registrada · " + fmtQty(decision.qty) + " × " +
+    listToast("Compra registrada · " + fmtStockQty(decision.qty) + " × " +
       (decision.price != null ? fmtMoney(decision.price) : "sem preço"));
   }catch(e){
     if(e.unauthorized) return handleAuthError(e, loadStock);
@@ -997,11 +508,11 @@ function countModal(p){
       '<div class="modal-card">' +
         '<h3>Quantos tem em casa?</h3>' +
         '<label for="ct-qty">' + esc(p.name) + '</label>' +
-        '<div class="modal-fields">' +
+        '<div class="fields-row">' +
           '<div class="col grow">' +
             '<span class="field">' +
               '<input class="num-input solo" type="text" inputmode="decimal" id="ct-qty" ' +
-                'aria-label="Quantidade em estoque" value="' + esc(fmtQty(qtyOf(p))) + '">' +
+                'aria-label="Quantidade em estoque" value="' + esc(fmtStockQty(qtyOf(p))) + '">' +
             '</span>' +
           '</div>' +
         '</div>' +
@@ -1053,15 +564,15 @@ function shortfallModal(p, info, wanted){
     backdrop.innerHTML =
       '<div class="modal-card">' +
         '<h3>Não tem isso em estoque</h3>' +
-        '<p>' + esc(p.name) + ' está com <strong>' + fmtQty(available) + '</strong> em ' +
-          'estoque, e você quer usar ' + fmtQty(wanted) + '. Provavelmente a compra ' +
+        '<p>' + esc(p.name) + ' está com <strong>' + fmtStockQty(available) + '</strong> em ' +
+          'estoque, e você quer usar ' + fmtStockQty(wanted) + '. Provavelmente a compra ' +
           'não foi registrada — dá para lançar agora, para o custo não se perder.</p>' +
-        '<div class="modal-fields">' +
+        '<div class="fields-row">' +
           '<div class="col">' +
             '<label for="sf-qty">Comprou quantos?</label>' +
             '<span class="field">' +
               '<input class="num-input solo" type="text" inputmode="decimal" id="sf-qty" ' +
-                'aria-label="Pacotes comprados" value="' + esc(fmtQty(deficit)) + '">' +
+                'aria-label="Pacotes comprados" value="' + esc(fmtStockQty(deficit)) + '">' +
             '</span>' +
           '</div>' +
           '<div class="col grow">' +
@@ -1099,7 +610,7 @@ function shortfallModal(p, info, wanted){
       // Fewer than the shortfall would leave the balance short and the
       // consumption would be refused all over again.
       if(n < deficit){
-        alert("Precisa ser pelo menos " + fmtQty(deficit) + " para cobrir o que falta.");
+        alert("Precisa ser pelo menos " + fmtStockQty(deficit) + " para cobrir o que falta.");
         qtyEl.focus();
         return;
       }

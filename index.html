@@ -4,639 +4,110 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Tarefas">
+<meta name="apple-mobile-web-app-title" content="Cowork">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<title>Tarefas pendentes</title>
+<title>Início</title>
 <!--
-  Data-free shell for the daily-summary checklist. Hosted on public GitHub
-  Pages. It contains NO keys and NO data: it asks for a passphrase and then
-  talks only to the gated Supabase Edge Function (checklist-api), which holds
-  the service-role key and enforces the passphrase server-side. Without the
-  passphrase, all anyone sees here is a login box.
+  Data-free shell for the dashboard — the landing page. Same pattern as
+  every other page here: hosted on public GitHub Pages, holds NO keys and
+  NO data, asks for the shared passphrase, then talks only to the gated
+  Supabase Edge Function (checklist-api) — which in this page's case means
+  only the login round trip itself, since the dashboard shows module tiles
+  and nothing live.
+
+  Deliberately module tiles only, no live data, to start (the user's own
+  call when this page was planned) — a quick summary per module is a
+  reasonable next step once there's something worth summarizing on the
+  busier modules (Vendas/Financeiro), but bolting that on before those
+  exist would be building it for data that isn't there yet.
+
+  This page took over `index.html` from the daily-task checklist, which
+  moved to `tarefas.html` — deliberately with NO redirect stub at the old
+  name, so a stale bookmark to "index.html" now lands here instead of on
+  tasks, which is a one-time surprise rather than a redirect to maintain
+  forever.
 -->
+<link rel="stylesheet" href="shared-base.css">
+<link rel="stylesheet" href="shared-menu.css">
 <style>
-  :root{
-    --bg:#f7f7f8; --card:#ffffff; --text:#1a1a1a; --muted:#6b7280;
-    --border:#e5e7eb; --border-strong:#d1d5db; --accent:#2563eb;
-    --accent-text:#ffffff; --danger:#dc2626;
-  }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --muted:#94a3b8;
-      --border:#334155; --border-strong:#475569; --accent:#3b82f6;
-      --accent-text:#ffffff; --danger:#f87171;
-    }
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;padding:0}
-  body{
-    background:var(--bg); color:var(--text);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    -webkit-font-smoothing:antialiased;
-  }
-  /* A flex column at least one viewport tall, so .bar (its last child)
-     naturally sits at the bottom via normal layout flow instead of
-     position:fixed -- fixed is pinned to the layout viewport, which
-     visibly jumps on mobile Firefox/Safari when the address bar
-     collapses/expands during scroll and resizes that viewport. */
   .page{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
   .wrap{
-    flex:1 0 auto;max-width:640px;margin:0 auto;
-    padding:max(16px,env(safe-area-inset-top)) 16px 16px;
+    flex:1 0 auto;max-width:640px;margin:0 auto;width:100%;
+    padding:max(16px,env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
   }
-  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 16px}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 20px}
   .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
   h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
-  .link{
-    background:none;border:none;color:var(--muted);font-size:13px;padding:4px;cursor:pointer;
-    text-decoration:none;display:inline-block;transition:color .15s ease,opacity .1s ease;
+  .sub{font-size:13px;color:var(--muted);margin:2px 0 24px}
+
+  .tiles{
+    display:grid;grid-template-columns:repeat(2,1fr);gap:12px;
   }
-  .link:hover{color:var(--text);text-decoration:underline}
-  .link:active{opacity:.6}
-  .menu-btn{
-    background:none;border:none;color:var(--text);font-size:22px;padding:2px 8px 2px 0;
-    cursor:pointer;line-height:1;flex:none;align-self:center;
-    transition:opacity .15s ease,transform .1s ease;
+  .tile{
+    display:flex;flex-direction:column;align-items:flex-start;gap:8px;
+    background:var(--card);border:1px solid var(--border);border-radius:16px;
+    padding:18px 16px;text-decoration:none;color:var(--text);
+    transition:background-color .15s ease,transform .1s ease,border-color .15s ease;
   }
-  .menu-btn:hover{opacity:.7}
-  .menu-btn:active{transform:scale(.9)}
-  .menu-backdrop{
-    position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;
-    animation:modalFadeIn .15s ease;
-  }
-  .menu-panel{
-    position:fixed;top:0;left:0;bottom:0;width:min(280px,80vw);
-    background:var(--card);box-shadow:2px 0 24px rgba(0,0,0,.3);
-    display:flex;flex-direction:column;
-    padding:max(16px,env(safe-area-inset-top)) 0 max(16px,env(safe-area-inset-bottom));
-    transform:translateX(-100%);transition:transform .25s cubic-bezier(.2,.8,.2,1);
-  }
-  .menu-panel.open{transform:translateX(0)}
-  .menu-item{
-    display:flex;align-items:center;gap:12px;padding:14px 20px;font-size:15px;
-    color:var(--text);text-decoration:none;background:none;border:none;width:100%;
-    text-align:left;cursor:pointer;transition:background-color .15s ease;
-  }
-  .menu-item:hover{background:rgba(127,127,127,.08)}
-  .menu-item.active{color:var(--accent);font-weight:600}
-  .menu-spacer{flex:1}
-  .menu-item.logout{border-top:1px solid var(--border);color:var(--danger)}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
-  .row{display:flex;align-items:flex-start;gap:12px;padding:16px 14px;border-bottom:1px solid var(--border);transition:background-color .15s ease}
-  .row:hover{background:rgba(127,127,127,.06)}
-  .row:last-child{border-bottom:none}
-  .row label{flex:1;min-width:0;display:flex;align-items:flex-start;gap:12px;cursor:pointer}
-  input[type=checkbox]{width:24px;height:24px;margin:1px 0 0;flex:none;accent-color:var(--accent)}
-  .badge{font-size:20px;line-height:1.2;flex:none;width:26px;text-align:center}
-  .body{min-width:0;flex:1}
-  .body .txt{font-size:15px;line-height:1.35;margin:0;word-wrap:break-word}
-  .body .meta{font-size:12px;color:var(--muted);margin:3px 0 0}
-  .msg{padding:28px 8px;text-align:center;color:var(--muted);font-size:15px}
-  .msg.err{color:var(--danger)}
-  .login{max-width:360px;margin:12vh auto 0;text-align:center}
-  .login h2{font-size:18px;margin:0 0 4px}
-  .login p{color:var(--muted);font-size:14px;margin:0 0 20px}
-  input[type=password]{
-    width:100%;font:inherit;font-size:16px;padding:14px;border-radius:12px;
-    border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:12px;
-  }
-  .bar{
-    position:sticky;bottom:0;
-    padding:12px 16px calc(12px + env(safe-area-inset-bottom));
-    background:var(--bg);
-    display:flex;justify-content:center;
-  }
-  button.primary{
-    font:inherit;font-weight:600;font-size:16px;border:none;border-radius:14px;
-    padding:15px 20px;min-height:52px;cursor:pointer;width:100%;max-width:640px;
-    background:var(--accent);color:var(--accent-text);
-    display:flex;align-items:center;justify-content:center;gap:8px;
-    transition:filter .15s ease,transform .1s ease;
-  }
-  button.primary:hover:not(:disabled){filter:brightness(1.1)}
-  button.primary:active:not(:disabled){transform:scale(.98)}
-  button.primary:disabled{opacity:.5}
-  .loginerr{color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px}
-  .addrow{display:flex;gap:8px;padding:14px}
-  .addrow input{
-    flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
-    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
-  }
-  .addrow button{
-    flex:none;font:inherit;font-weight:600;font-size:14px;padding:10px 14px;border-radius:10px;
-    border:none;background:var(--accent);color:var(--accent-text);cursor:pointer;
-    transition:filter .15s ease,transform .1s ease;
-  }
-  .addrow button:hover:not(:disabled){filter:brightness(1.1)}
-  .addrow button:active:not(:disabled){transform:scale(.97)}
-  .addrow button:disabled{opacity:.5}
-  .addcard{margin-bottom:12px}
-  .icon-btn{
-    background:none;border:none;color:var(--muted);font-size:16px;padding:6px;cursor:pointer;
-    flex:none;line-height:1;align-self:flex-start;border-radius:8px;
-    transition:background-color .15s ease,color .15s ease,transform .1s ease;
-  }
-  .icon-btn:hover{background:rgba(127,127,127,.15);color:var(--text)}
-  .icon-btn:active{transform:scale(.9)}
-  .icon-btn.danger{color:var(--danger)}
-  .icon-btn.danger:hover{background:rgba(220,38,38,.15);color:var(--danger)}
-  .icon-btn.lg{font-size:23px;padding:7px}
-  .modal-backdrop{
-    position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;
-    display:flex;align-items:center;justify-content:center;padding:16px;
-    animation:modalFadeIn .15s ease;
-  }
-  .modal-card{
-    background:var(--card);border-radius:16px;padding:20px;width:100%;max-width:400px;
-    animation:modalPopIn .18s cubic-bezier(.2,.8,.2,1);
-  }
-  @keyframes modalFadeIn{from{opacity:0} to{opacity:1}}
-  @keyframes modalPopIn{
-    from{opacity:0;transform:scale(.95) translateY(6px)}
-    to{opacity:1;transform:scale(1) translateY(0)}
-  }
-  .modal-card h3{margin:0 0 14px;font-size:16px}
-  .modal-card label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px}
-  .modal-card input[type=text], .modal-card select{
-    width:100%;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
-    border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:14px;
-  }
-  .modal-actions{display:flex;gap:8px;justify-content:flex-end}
-  .modal-actions button{
-    font:inherit;font-weight:600;font-size:14px;padding:10px 16px;border-radius:10px;
-    border:none;cursor:pointer;transition:filter .15s ease,transform .1s ease,background-color .15s ease;
-  }
-  .modal-actions button:active{transform:scale(.97)}
-  .modal-actions .cancel{background:none;color:var(--muted)}
-  .modal-actions .cancel:hover{background:rgba(127,127,127,.12);color:var(--text)}
-  .modal-actions .save{background:var(--accent);color:var(--accent-text)}
-  .modal-actions .save.danger{background:var(--danger)}
-  .modal-actions .save:hover{filter:brightness(1.1)}
-  .modal-card p{font-size:15px;line-height:1.4;margin:0 0 18px}
-  #done-wrap{margin-top:16px}
-  #done-list{
-    max-height:0;opacity:0;overflow:hidden;
-    transition:max-height .3s ease,opacity .25s ease;
-  }
-  #done-list.open{opacity:1}
-  .done-card{margin-bottom:8px}
-  .body .txt.done{text-decoration:line-through;color:var(--muted)}
+  .tile:hover{background:rgba(127,127,127,.06);border-color:var(--border-strong)}
+  .tile:active{transform:scale(.98)}
+  .tile .emoji{font-size:28px;line-height:1}
+  .tile .label{font-size:15px;font-weight:650}
+  .tile .desc{font-size:12px;color:var(--muted);line-height:1.35;margin:0}
 </style>
 </head>
 <body>
-<div class="page">
-  <div id="root" class="wrap"><p class="msg">Carregando…</p></div>
-  <div class="bar" id="bar" style="display:none">
-    <button class="primary" id="done-btn"><span>✓</span> <span id="btn-label">Concluir selecionados</span></button>
-  </div>
-</div>
+<div id="root" class="wrap"><p class="msg">Carregando…</p></div>
 
 <script>
-const API = "https://opehbckfmfschpvbhxvo.supabase.co/functions/v1/checklist-api";
-const PASS_KEY = "checklist_pass";
-
 const root = document.getElementById("root");
-const bar = document.getElementById("bar");
-const doneBtn = document.getElementById("done-btn");
-const btnLabel = document.getElementById("btn-label");
 
-function getPass(){ return localStorage.getItem(PASS_KEY) || ""; }
-
-async function api(action, extra){
-  const r = await fetch(API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-checklist-pass": getPass() },
-    body: JSON.stringify(Object.assign({ action }, extra || {}))
-  });
-  if(r.status === 401){ const e = new Error("unauthorized"); e.unauthorized = true; throw e; }
-  if(!r.ok) throw new Error("http " + r.status);
-  return await r.json();
-}
-
-function esc(s){
-  return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-}
-function fmtDate(iso){
-  if(!iso) return "";
-  try{
-    const d = new Date(iso);
-    return d.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"}) + " " +
-           d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
-  }catch(e){ return ""; }
-}
-const SOURCE_META = {
-  email:            { emoji:"📧", label:"E-mail" },
-  whatsapp:         { emoji:"💬", label:"WhatsApp" },
-  calendar:         { emoji:"📅", label:"Agenda" },
-  self_instruction: { emoji:"🔔", label:"Instrução" },
-  work:             { emoji:"💼", label:"Trabalho" },
-  system:           { emoji:"⚙️", label:"Sistema" },
-  manual:           { emoji:"📝", label:"Manual" }
+const PAGE_LOGIN = {
+  title: "Cowork",
+  subtitle: "Digite a senha para acessar.",
+  onSuccess: () => render(),
 };
+</script>
+<script src="shared-api.js"></script>
+<script src="shared-menu.js"></script>
+<script src="shared-ui.js"></script>
+<script>
 
-const CURRENT_PAGE = "index";
-const MENU_ITEMS = [
-  { page: "hoje", href: "hoje.html", emoji: "☀️", label: "Hoje" },
-  { page: "index", href: "index.html", emoji: "✓", label: "Tarefas" },
-  { page: "shopping", href: "shopping.html", emoji: "🛒", label: "Compras" },
-  { page: "estoque", href: "estoque.html", emoji: "📦", label: "Estoque" },
-  { page: "produtos", href: "produtos.html", emoji: "🏷️", label: "Produtos" },
+const CURRENT_PAGE = "home";
+
+// One tile per module, in the same order as the hamburger menu — the
+// dashboard and the in-page menu are two ways to reach the same list, not
+// competing navigations. `home` itself is excluded: this page IS home.
+const TILES = [
+  { href: "hoje.html", emoji: "☀️", label: "Hoje", desc: "Resumo da manhã" },
+  { href: "tarefas.html", emoji: "✓", label: "Tarefas", desc: "Ações pendentes" },
+  { href: "compras.html", emoji: "🛒", label: "Compras", desc: "Listas de compras" },
+  { href: "estoque.html", emoji: "📦", label: "Estoque", desc: "O que tem no armário" },
+  { href: "produtos.html", emoji: "🏷️", label: "Produtos", desc: "Catálogo de códigos" },
+  { href: "vendas.html", emoji: "🧾", label: "Vendas", desc: "Eventos e pedidos" },
+  { href: "financeiro.html", emoji: "💰", label: "Financeiro", desc: "Custos e receitas" },
 ];
 
-const DONE_PAGE_SIZE = 5;
-let doneItems = [];
-let doneOffset = 0;
-let doneHasMore = false;
-let doneLoading = false;
-let doneObserver = null;
-let doneExpanded = false;
-
-function showLogin(errText){
-  bar.style.display = "none";
+function render(){
   root.innerHTML =
-    '<div class="login">' +
-      '<h2>Tarefas pendentes</h2>' +
-      '<p>Digite a senha para acessar seu checklist.</p>' +
-      '<div class="loginerr">' + (errText ? esc(errText) : "") + '</div>' +
-      '<input type="password" id="pw" autocomplete="current-password" placeholder="Senha" />' +
-      '<button class="primary" id="enter">Entrar</button>' +
+    '<header><div class="hleft">' +
+      '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
+      '<h1>Início</h1>' +
+    '</div></header>' +
+    '<div class="tiles">' +
+      TILES.map(t =>
+        '<a class="tile" href="' + t.href + '">' +
+          '<span class="emoji">' + t.emoji + '</span>' +
+          '<span class="label">' + esc(t.label) + '</span>' +
+          '<p class="desc">' + esc(t.desc) + '</p>' +
+        '</a>'
+      ).join("") +
     '</div>';
-  const pw = document.getElementById("pw");
-  const go = () => {
-    const v = pw.value.trim();
-    if(!v) return;
-    localStorage.setItem(PASS_KEY, v);
-    load();
-  };
-  document.getElementById("enter").addEventListener("click", go);
-  pw.addEventListener("keydown", e => { if(e.key === "Enter") go(); });
-  pw.focus();
-}
-
-function updateBar(){
-  const n = document.querySelectorAll("#root input[data-id]:checked").length;
-  doneBtn.disabled = n === 0;
-  btnLabel.textContent = n === 0 ? "Concluir selecionados"
-    : (n === 1 ? "Concluir 1 item" : "Concluir " + n + " itens");
-}
-
-function render(rows){
-  // The done-tasks section always starts collapsed on a fresh render
-  // (login, initial load, or after any create/edit/delete/done action).
-  if(doneObserver){ doneObserver.disconnect(); doneObserver = null; }
-  doneItems = [];
-  doneOffset = 0;
-  doneHasMore = false;
-  doneExpanded = false;
-
-  const header = '<header><div class="hleft">' +
-    '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
-    '<h1>Tarefas pendentes</h1>' +
-    '</div></header>';
-  const addForm = '<div class="card addcard"><div class="addrow">' +
-    '<input type="text" id="new-text" placeholder="Nova ação..." />' +
-    '<button id="add-btn">Adicionar</button>' +
-    '</div></div>';
-  const doneWrap = '<div id="done-wrap">' +
-    '<button class="link" id="toggle-done">Ver ações concluídas</button>' +
-    '<div id="done-list"></div>' +
-    '</div>';
-  if(rows.length === 0){
-    root.innerHTML = header + addForm +
-      '<p class="msg">🎉 Nenhuma ação pendente.</p>' + doneWrap;
-    bar.style.display = "none";
-    wireHeader();
-    wireAddForm();
-    wireDoneToggle();
-    return;
-  }
-  root.innerHTML = header + addForm +
-    '<div class="card">' + rows.map(it => {
-      const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
-      return '<div class="row">' +
-        '<label>' +
-        '<input type="checkbox" data-id="' + esc(it.id) + '">' +
-        '<span class="badge">' + m.emoji + '</span>' +
-        '<span class="body"><p class="txt">' + esc(it.text) + '</p>' +
-        '<p class="meta">' + m.label + ' · desde ' + fmtDate(it.first_seen) + '</p></span>' +
-        '</label>' +
-        '<button class="icon-btn" data-edit-id="' + esc(it.id) + '" title="Editar">✎</button>' +
-        '<button class="icon-btn danger" data-del-id="' + esc(it.id) + '" title="Excluir" aria-label="Excluir">🗑</button>' +
-        '</div>';
-    }).join("") + '</div>' + doneWrap;
-  bar.style.display = "flex";
-  root.querySelectorAll("input[data-id]").forEach(cb => cb.addEventListener("change", updateBar));
-  wireHeader();
-  wireAddForm();
-  wireDeleteButtons();
-  wireEditControls(rows);
-  wireDoneToggle();
-  updateBar();
-}
-
-function wireHeader(){
   wireMenuButton();
 }
 
-function wireMenuButton(){
-  const btn = document.getElementById("menu-btn");
-  if(btn) btn.addEventListener("click", openMenu);
-}
-
-function openMenu(){
-  const itemsHtml = MENU_ITEMS.map(item => {
-    if(item.page === CURRENT_PAGE){
-      return '<span class="menu-item active">' + item.emoji + ' ' + item.label + '</span>';
-    }
-    return '<a class="menu-item" href="' + item.href + '">' + item.emoji + ' ' + item.label + '</a>';
-  }).join("");
-
-  const backdrop = document.createElement("div");
-  backdrop.className = "menu-backdrop";
-  backdrop.innerHTML =
-    '<div class="menu-panel" id="menu-panel">' +
-      itemsHtml +
-      '<div class="menu-spacer"></div>' +
-      '<button class="menu-item logout" id="menu-logout">🚪 Sair</button>' +
-    '</div>';
-  document.body.appendChild(backdrop);
-  const panel = document.getElementById("menu-panel");
-  requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.add("open")));
-
-  const close = () => {
-    panel.classList.remove("open");
-    document.removeEventListener("keydown", onKey);
-    setTimeout(() => backdrop.remove(), 250);
-  };
-  function onKey(e){ if(e.key === "Escape") close(); }
-  document.addEventListener("keydown", onKey);
-  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
-  document.getElementById("menu-logout").addEventListener("click", () => {
-    localStorage.removeItem(PASS_KEY);
-    close();
-    showLogin();
-  });
-}
-
-function wireAddForm(){
-  const btn = document.getElementById("add-btn");
-  const input = document.getElementById("new-text");
-  if(!btn || !input) return;
-  const submit = async () => {
-    const text = input.value.trim();
-    if(!text) return;
-    btn.disabled = true;
-    btn.textContent = "Salvando…";
-    try{
-      await api("action_create", { text });
-      await load();
-    }catch(e){
-      if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
-      else { btn.textContent = "Erro — tente de novo"; btn.disabled = false; }
-    }
-  };
-  btn.addEventListener("click", submit);
-  input.addEventListener("keydown", e => { if(e.key === "Enter") submit(); });
-}
-
-function confirmModal(message, confirmLabel){
-  return new Promise(resolve => {
-    const backdrop = document.createElement("div");
-    backdrop.className = "modal-backdrop";
-    backdrop.innerHTML =
-      '<div class="modal-card">' +
-        '<p>' + esc(message) + '</p>' +
-        '<div class="modal-actions">' +
-          '<button class="cancel" id="confirm-cancel">Cancelar</button>' +
-          '<button class="save danger" id="confirm-ok">' + esc(confirmLabel || "Excluir") + '</button>' +
-        '</div>' +
-      '</div>';
-    document.body.appendChild(backdrop);
-    const close = (result) => {
-      backdrop.remove();
-      document.removeEventListener("keydown", onKey);
-      resolve(result);
-    };
-    function onKey(e){ if(e.key === "Escape") close(false); }
-    document.addEventListener("keydown", onKey);
-    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(false); });
-    document.getElementById("confirm-cancel").addEventListener("click", () => close(false));
-    document.getElementById("confirm-ok").addEventListener("click", () => close(true));
-  });
-}
-
-function wireDeleteButtons(){
-  root.querySelectorAll("[data-del-id]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      if(!(await confirmModal("Excluir esta ação?"))) return;
-      const id = btn.dataset.delId;
-      btn.disabled = true;
-      try{
-        await api("action_delete", { ids: [id] });
-        await load();
-      }catch(e){
-        if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
-        else { btn.disabled = false; }
-      }
-    });
-  });
-}
-
-async function saveEdit(id, patch){
-  try{
-    await api("action_edit", Object.assign({ id }, patch));
-    await load();
-  }catch(e){
-    if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
-    else alert("Não foi possível salvar.");
-  }
-}
-
-function openEditModal(it){
-  const optionsHtml = Object.keys(SOURCE_META).map(key => {
-    const meta = SOURCE_META[key];
-    return '<option value="' + key + '"' + (key === it.source ? ' selected' : '') + '>' +
-      meta.emoji + ' ' + meta.label + '</option>';
-  }).join("");
-
-  const backdrop = document.createElement("div");
-  backdrop.className = "modal-backdrop";
-  backdrop.innerHTML =
-    '<div class="modal-card">' +
-      '<h3>Editar ação</h3>' +
-      '<label for="edit-text-input">Texto</label>' +
-      '<input type="text" id="edit-text-input" value="' + esc(it.text) + '">' +
-      '<label for="edit-cat-select">Categoria</label>' +
-      '<select id="edit-cat-select">' + optionsHtml + '</select>' +
-      '<div class="modal-actions">' +
-        '<button class="cancel" id="edit-cancel">Cancelar</button>' +
-        '<button class="save" id="edit-save">Salvar</button>' +
-      '</div>' +
-    '</div>';
-  document.body.appendChild(backdrop);
-
-  const close = () => {
-    backdrop.remove();
-    document.removeEventListener("keydown", onKey);
-  };
-  function onKey(e){ if(e.key === "Escape") close(); }
-  document.addEventListener("keydown", onKey);
-  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
-  document.getElementById("edit-cancel").addEventListener("click", close);
-
-  const textInput = document.getElementById("edit-text-input");
-  textInput.focus();
-  textInput.select();
-
-  document.getElementById("edit-save").addEventListener("click", async () => {
-    const text = textInput.value.trim();
-    const source = document.getElementById("edit-cat-select").value;
-    if(!text){ alert("O texto não pode ficar vazio."); return; }
-    const patch = {};
-    if(text !== it.text) patch.text = text;
-    if(source !== it.source) patch.source = source;
-    close();
-    if(Object.keys(patch).length === 0) return;
-    await saveEdit(it.id, patch);
-  });
-}
-
-function wireEditControls(rows){
-  root.querySelectorAll("[data-edit-id]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const it = rows.find(r => r.id === btn.dataset.editId);
-      if(it) openEditModal(it);
-    });
-  });
-}
-
-function wireDoneToggle(){
-  const btn = document.getElementById("toggle-done");
-  if(!btn) return;
-  btn.addEventListener("click", () => {
-    doneExpanded = !doneExpanded;
-    btn.textContent = doneExpanded ? "Ocultar ações concluídas" : "Ver ações concluídas";
-    const list = document.getElementById("done-list");
-    if(list) list.classList.toggle("open", doneExpanded);
-    updateDoneListHeight();
-    if(doneExpanded && doneItems.length === 0) loadDoneTasks(true);
-  });
-}
-
-// max-height is set from the content's actual scrollHeight rather than a
-// fixed CSS value, since more items can be appended after the section is
-// already open (infinite scroll) -- a static cap would eventually clip the
-// list once loaded content grew past it.
-function updateDoneListHeight(){
-  const list = document.getElementById("done-list");
-  if(!list) return;
-  list.style.maxHeight = doneExpanded ? (list.scrollHeight + "px") : "0px";
-}
-
-async function loadDoneTasks(reset){
-  if(doneLoading) return;
-  if(reset){ doneItems = []; doneOffset = 0; doneHasMore = false; }
-  doneLoading = true;
-  try{
-    const data = await api("list_done", { offset: doneOffset, limit: DONE_PAGE_SIZE });
-    const rows = data.actions || [];
-    doneItems = doneItems.concat(rows);
-    doneOffset += rows.length;
-    doneHasMore = !!data.has_more;
-    renderDoneSection();
-  }catch(e){
-    if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
-  }finally{
-    doneLoading = false;
-  }
-}
-
-function renderDoneSection(){
-  const list = document.getElementById("done-list");
-  if(!list) return;
-  list.classList.toggle("open", doneExpanded);
-  if(doneObserver){ doneObserver.disconnect(); doneObserver = null; }
-
-  if(doneItems.length === 0){
-    list.innerHTML = '<p class="msg">Nenhuma ação concluída ainda.</p>';
-    updateDoneListHeight();
-    return;
-  }
-
-  list.innerHTML =
-    '<div class="card done-card">' + doneItems.map(it => {
-      const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
-      return '<div class="row">' +
-        '<span class="badge">' + m.emoji + '</span>' +
-        '<span class="body"><p class="txt done">' + esc(it.text) + '</p>' +
-        '<p class="meta">Concluído em ' + fmtDate(it.done_at) + '</p></span>' +
-        '<button class="icon-btn lg" data-undo-id="' + esc(it.id) + '" title="Desfazer" aria-label="Desfazer">↩</button>' +
-        '</div>';
-    }).join("") + '</div>' +
-    (doneHasMore ? '<p class="msg"><button class="link" id="load-more-done">Carregar mais</button></p>' : '') +
-    '<div id="done-sentinel"></div>';
-
-  list.querySelectorAll("[data-undo-id]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      try{
-        await api("undo_done", { ids: [btn.dataset.undoId] });
-        await load();
-      }catch(e){
-        if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
-        else { btn.disabled = false; }
-      }
-    });
-  });
-
-  const loadMoreBtn = document.getElementById("load-more-done");
-  if(loadMoreBtn) loadMoreBtn.addEventListener("click", () => loadDoneTasks(false));
-
-  if(doneHasMore){
-    const sentinel = document.getElementById("done-sentinel");
-    doneObserver = new IntersectionObserver(entries => {
-      if(entries[0].isIntersecting) loadDoneTasks(false);
-    });
-    doneObserver.observe(sentinel);
-  }
-
-  updateDoneListHeight();
-}
-
-async function load(){
-  root.innerHTML = '<p class="msg">Carregando…</p>';
-  bar.style.display = "none";
-  if(!getPass()){ showLogin(); return; }
-  try{
-    const data = await api("list");
-    render(data.actions || []);
-  }catch(e){
-    if(e.unauthorized){
-      localStorage.removeItem(PASS_KEY);
-      showLogin("Senha incorreta.");
-    }else{
-      root.innerHTML = '<p class="msg err">Não foi possível carregar agora.</p>' +
-        '<p class="msg"><button class="link" onclick="load()">Tentar novamente</button></p>';
-    }
-  }
-}
-
-doneBtn.addEventListener("click", async () => {
-  const ids = Array.from(document.querySelectorAll("#root input[data-id]:checked")).map(cb => cb.dataset.id);
-  if(ids.length === 0) return;
-  doneBtn.disabled = true;
-  btnLabel.textContent = "Salvando…";
-  try{
-    await api("done", { ids });
-    await load();
-  }catch(e){
-    if(e.unauthorized){ localStorage.removeItem(PASS_KEY); showLogin("Sessão expirada, entre novamente."); }
-    else { btnLabel.textContent = "Erro ao salvar — tente de novo"; doneBtn.disabled = false; }
-  }
-});
-
-load();
+if(!getPass()){ showLogin(); } else { render(); }
 </script>
 </body>
 </html>
