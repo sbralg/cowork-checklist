@@ -54,6 +54,10 @@
     transition:background-color .15s ease,color .15s ease;
   }
   .chip.active{background:var(--accent);color:var(--accent-text)}
+  #done-wrap{margin-top:16px}
+  #done-list{max-height:0;opacity:0;overflow:hidden;transition:max-height .3s ease,opacity .25s ease}
+  #done-list.open{opacity:1}
+  .done-card{margin-top:8px}
   .row{display:flex;flex-direction:column;gap:6px;padding:14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background-color .15s ease}
   .row:hover{background:rgba(127,127,127,.06)}
   .row:last-child{border-bottom:none}
@@ -74,6 +78,7 @@
   .pill.pay-pend{background:rgba(127,127,127,.14);color:var(--muted)}
   .pill.pay-partial{background:rgba(180,83,9,.14);color:var(--warn)}
   .pill.pay-paid{background:rgba(22,163,74,.14);color:#16a34a}
+  .pill.pay-overdue{background:rgba(220,38,38,.14);color:var(--danger)}
   @media (prefers-color-scheme: dark){
     .pill.st-lead{color:#c084fc}
     .pill.st-entregue{color:#4ade80}
@@ -153,6 +158,7 @@ let eventos = [];
 let searchTerm = "";
 let statusFilter = "";
 let clienteCache = null;
+let doneExpanded = false;
 
 const PAGE_LOGIN = {
   title: "Eventos",
@@ -185,16 +191,27 @@ function statusPillHtml(status){
 
 // Payment status is computed, not stored — it is a read of total_paid vs
 // total_price, so it can never drift from the payments actually recorded.
-function paymentStatus(v){
+// An event already marked "entregue" with money still owed is overdue —
+// flagged red regardless of whether it's unpaid or only partially paid.
+function paymentStatus(v, status){
   const price = Number(v.total_price) || 0;
   const paid = Number(v.total_paid) || 0;
-  if(price <= 0 || paid <= 0) return { label: "Não pago", cls: "pend" };
-  if(paid >= price) return { label: "Pago", cls: "paid" };
-  return { label: "Parcial", cls: "partial" };
+  let label, cls;
+  if(price <= 0 || paid <= 0){ label = "Não pago"; cls = "pend"; }
+  else if(paid >= price){ label = "Pago"; cls = "paid"; }
+  else { label = "Parcial"; cls = "partial"; }
+  if((status !== undefined ? status : v.status) === "entregue" && cls !== "paid") cls = "overdue";
+  return { label, cls };
 }
-function paymentPillHtml(v){
-  const p = paymentStatus(v);
+function paymentPillHtml(v, status){
+  const p = paymentStatus(v, status);
   return '<span class="pill pay-' + p.cls + '">' + p.label + '</span>';
+}
+
+// A delivered, fully-paid event has nothing left to act on — it's archived
+// into the collapsed "concluídos" section instead of the main list.
+function isEventoDone(v){
+  return v.status === "entregue" && paymentStatus(v).cls === "paid";
 }
 
 function navHeader(title, backAction){
@@ -273,8 +290,15 @@ function eventoRowHtml(v){
   '</div>';
 }
 
+// Fully-paid, delivered events are archived: they never match the active
+// list (whatever the search/status filter says), same as tarefas.html
+// keeps done tasks out of the pending list regardless of anything typed
+// into its own search.
 function renderList(){
-  const shown = eventos.filter(v =>
+  doneExpanded = false;
+  const active = eventos.filter(v => !isEventoDone(v));
+  const done = eventos.filter(isEventoDone);
+  const shown = active.filter(v =>
     matchesSearch(v, searchTerm) && (!statusFilter || v.status === statusFilter));
 
   const chips = '<div class="chiprow">' +
@@ -290,6 +314,11 @@ function renderList(){
         ? '<p class="msg" id="no-match">Nenhum evento encontrado.</p>'
         : '<div class="card" id="list-card">' + shown.map(eventoRowHtml).join("") + '</div>');
 
+  const doneWrap = done.length === 0 ? "" : '<div id="done-wrap">' +
+    '<button class="link" id="toggle-done">Ver eventos concluídos (' + done.length + ')</button>' +
+    '<div id="done-list"><div class="card done-card">' + done.map(eventoRowHtml).join("") + '</div></div>' +
+  '</div>';
+
   root.innerHTML = navHeader("Eventos", null) +
     '<div class="searchrow">' +
       '<input type="search" id="search" placeholder="Buscar por evento ou cliente" ' +
@@ -297,7 +326,8 @@ function renderList(){
     '</div>' +
     chips +
     rowsHtml +
-    '<button class="primary full addrow-btn" id="new-evento">+ Novo evento</button>';
+    '<button class="primary full addrow-btn" id="new-evento">+ Novo evento</button>' +
+    doneWrap;
 
   wireNav(null);
 
@@ -312,12 +342,29 @@ function renderList(){
       redrawList();
     });
   });
-  wireListRows();
+  wireListRows(root);
+  wireDoneToggle();
   document.getElementById("new-evento").addEventListener("click", openCreateModal);
 }
 
+function wireDoneToggle(){
+  const btn = document.getElementById("toggle-done");
+  if(!btn) return;
+  btn.addEventListener("click", () => {
+    doneExpanded = !doneExpanded;
+    btn.textContent = (doneExpanded ? "Ocultar" : "Ver") + " eventos concluídos (" +
+      eventos.filter(isEventoDone).length + ")";
+    const list = document.getElementById("done-list");
+    if(list){
+      list.classList.toggle("open", doneExpanded);
+      list.style.maxHeight = doneExpanded ? (list.scrollHeight + "px") : "0px";
+    }
+  });
+}
+
 function redrawList(){
-  const shown = eventos.filter(v =>
+  const active = eventos.filter(v => !isEventoDone(v));
+  const shown = active.filter(v =>
     matchesSearch(v, searchTerm) && (!statusFilter || v.status === statusFilter));
   root.querySelectorAll(".chip").forEach(chip =>
     chip.classList.toggle("active", chip.dataset.status === statusFilter));
@@ -327,12 +374,15 @@ function redrawList(){
     : '<div class="card" id="list-card">' + shown.map(eventoRowHtml).join("") + '</div>';
   if(card){
     card.outerHTML = html;
-    wireListRows();
+    // Scoped to the replaced node, not the whole page — the done-list rows
+    // are untouched by search/filter and must not get a fresh listener
+    // stacked on top of the one they already have every time this runs.
+    wireListRows(document.getElementById("list-card") || document.getElementById("no-match"));
   }
 }
 
-function wireListRows(){
-  root.querySelectorAll(".row[data-id]").forEach(row => {
+function wireListRows(container){
+  (container || root).querySelectorAll(".row[data-id]").forEach(row => {
     row.addEventListener("click", () => openEvento(row.dataset.id));
   });
 }
@@ -614,7 +664,7 @@ function renderEvento(data){
 
   root.innerHTML = navHeader(v.name, loadEventos) +
     '<div class="evento-head">' +
-      '<div class="pills-row">' + statusPillHtml(v.status) + paymentPillHtml(data) + '</div>' +
+      '<div class="pills-row">' + statusPillHtml(v.status) + paymentPillHtml(data, v.status) + '</div>' +
     '<p class="cli-lbl">Cliente</p>' +
     cliBlock +
     '<div class="statusline">' +
