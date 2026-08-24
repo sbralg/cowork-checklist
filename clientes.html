@@ -61,9 +61,8 @@
   .addrow-btn{margin:8px 0 0}
   button.primary.full{width:100%}
   /* ---- detail ---- */
-  .cli-head{margin:0 0 4px}
-  .cli-head .nm{font-size:19px;font-weight:650;margin:0;word-wrap:break-word;cursor:pointer}
-  .cli-head .nm:hover{opacity:.75}
+  .cli-title{font-size:16px;font-weight:650;margin:0;text-align:right;word-wrap:break-word;cursor:pointer}
+  .cli-title:hover{opacity:.75}
   .infofield{
     display:flex;align-items:baseline;justify-content:space-between;gap:10px;
     padding:10px 0;border-top:1px solid var(--border);
@@ -161,6 +160,7 @@ function navHeader(title, backAction){
   if(!backAction) return topRow;
   return topRow + '<div class="subheader">' +
     '<button class="link" id="back">← Clientes</button>' +
+    (title ? '<h2 class="cli-title" id="cliente-name">' + esc(title) + '</h2>' : '') +
   '</div>';
 }
 function wireNav(backAction){
@@ -337,7 +337,7 @@ async function openCliente(id){
   try{
     const data = await api("cliente_detail", { id });
     if(!data.found){
-      root.innerHTML = navHeader("Clientes", loadClientes) + '<p class="msg">Cliente não encontrado.</p>';
+      root.innerHTML = navHeader("", loadClientes) + '<p class="msg">Cliente não encontrado.</p>';
       wireNav(loadClientes);
       return;
     }
@@ -389,10 +389,7 @@ function renderCliente(data){
   const balanceCls = data.balance_due_all > 0 ? "neg" : (data.balance_due_all < 0 ? "pos" : "");
   const waDigits = waPhoneDigits(c.phone);
 
-  root.innerHTML = navHeader("Clientes", loadClientes) +
-    '<div class="cli-head">' +
-      '<p class="nm" id="cliente-name">' + esc(c.name) + '</p>' +
-    '</div>' +
+  root.innerHTML = navHeader(c.name, loadClientes) +
     infoFieldHtml("Empresa / organização", c.organization) +
     infoFieldHtml("Telefone", c.phone) +
     infoFieldHtml("E-mail", c.email) +
