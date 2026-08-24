@@ -3,10 +3,10 @@
 //   node test/financeiro.test.js         # exits non-zero on any failure
 //   KEEP_SHOTS=1 node test/...           # also prints where screenshots went
 //
-// Independent fake from vendas.test.js's, seeded with one pre-linked
+// Independent fake from eventos.test.js's, seeded with one pre-linked
 // auto-posted entry (as if a payment had already been confirmed on
-// Vendas) so the "automático" tag and the 🔗 deep link back to the sale
-// can be exercised without re-driving the whole Vendas flow here.
+// Eventos) so the "automático" tag and the 🔗 deep link back to the evento
+// can be exercised without re-driving the whole Eventos flow here.
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
@@ -47,10 +47,10 @@ const isoDaysAgo = (n) => new Date(NOW.getTime() - n * 86400000).toISOString();
 
 const state = {
   lancamentos: [
-    { id: 'L1', tipo: 'receita', amount: 40, categoria: 'venda',
+    { id: 'L1', tipo: 'receita', amount: 40, categoria: 'evento',
       description: 'Pagamento — Bolo de aniversário', occurred_at: isoDaysAgo(2),
-      venda_id: 'V1', venda_pagamento_id: 'P1', stock_movement_id: null,
-      source: 'venda_payment', note: null, created_at: isoDaysAgo(2), updated_at: isoDaysAgo(2) },
+      evento_id: 'V1', evento_pagamento_id: 'P1', stock_movement_id: null,
+      source: 'evento_payment', note: null, created_at: isoDaysAgo(2), updated_at: isoDaysAgo(2) },
   ],
   seq: 1,
 };
@@ -92,7 +92,7 @@ function totalsFor(rows) {
         id: uid('L'), tipo: body.tipo, amount: body.amount,
         categoria: body.categoria || 'outros', description: body.description,
         occurred_at: body.occurred_at || new Date().toISOString(),
-        venda_id: body.venda_id || null, venda_pagamento_id: null, stock_movement_id: null,
+        evento_id: body.evento_id || null, evento_pagamento_id: null, stock_movement_id: null,
         source: 'manual', note: body.note || null,
         created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       };
@@ -129,9 +129,9 @@ function totalsFor(rows) {
   // --- the seeded auto-posted entry renders its tag and deep link ---
   check('the seeded entry shows the "automático" tag',
     (await page.textContent('.entry')).includes('automático'));
-  check('the seeded entry links back to its venda, got href: ' +
+  check('the seeded entry links back to its evento, got href: ' +
       await page.getAttribute('.entry a.link', 'href'),
-    (await page.getAttribute('.entry a.link', 'href')) === 'vendas.html?id=V1');
+    (await page.getAttribute('.entry a.link', 'href')) === 'eventos.html?id=V1');
   check('the stats tiles show the seeded totals, got: ' + norm(await page.textContent('.stats')),
     norm(await page.textContent('.stats')).includes('R$ 40,00'));
 
@@ -157,11 +157,11 @@ function totalsFor(rows) {
   await page.click('#lanc-tipo-chips .chip[data-tipo="receita"]');
   await page.fill('#lanc-amount', '10000');
   await page.fill('#lanc-categoria', 'outros');
-  await page.fill('#lanc-desc', 'Venda avulsa no balcão');
+  await page.fill('#lanc-desc', 'Evento avulsa no balcão');
   await page.click('#lanc-ok');
   await page.waitForFunction(() => document.querySelectorAll('.entry').length === 3, null, { timeout: 6000 });
   check('a standalone receita was created',
-    state.lancamentos.some(l => l.description === 'Venda avulsa no balcão' && l.tipo === 'receita'));
+    state.lancamentos.some(l => l.description === 'Evento avulsa no balcão' && l.tipo === 'receita'));
 
   // --- edit an entry, confirm totals recompute ---
   const despesaId = state.lancamentos.find(l => l.description === 'Farinha e açúcar').id;

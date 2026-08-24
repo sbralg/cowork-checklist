@@ -1,15 +1,15 @@
-// Headless UI test for clientes.html — the contact record behind a venda:
-// full-field create/edit/delete, the vendas + pagamentos rollup read
+// Headless UI test for clientes.html — the contact record behind an evento:
+// full-field create/edit/delete, the eventos + pagamentos rollup read
 // through `cliente_detail`, and the wa.me WhatsApp compose link.
 //
 //   node test/clientes.test.js          # exits non-zero on any failure
 //   KEEP_SHOTS=1 node test/...          # also prints where screenshots went
 //
-// Same shape as vendas.test.js/financeiro.test.js: serves the repo root
+// Same shape as eventos.test.js/financeiro.test.js: serves the repo root
 // over http and answers checklist-api from an in-memory fake, so it never
 // touches Supabase and never needs a real passphrase. The fake keeps
-// relational state (clientes/vendas/pagamentos) but, unlike vendas.test.js,
-// stores each venda's totals directly rather than deriving them from line
+// relational state (clientes/eventos/pagamentos) but, unlike eventos.test.js,
+// stores each evento's totals directly rather than deriving them from line
 // items — this page only ever DISPLAYS those numbers (they come from
 // cliente_detail already computed), so re-deriving them here would just be
 // testing the fake against itself.
@@ -48,7 +48,7 @@ function serve() {
   });
 }
 
-const state = { clientes: [], vendas: [], pagamentos: [], seq: 0 };
+const state = { clientes: [], eventos: [], pagamentos: [], seq: 0 };
 const uid = (p) => p + (++state.seq);
 
 function clienteOf(id) { return state.clientes.find(c => c.id === id); }
@@ -89,24 +89,24 @@ function clienteOf(id) { return state.clientes.find(c => c.id === id); }
         resp = { ok: true, cliente: c };
       }
     } else if (body.action === 'cliente_delete') {
-      const linked = state.vendas.filter(v => v.cliente_id === body.id);
+      const linked = state.eventos.filter(v => v.cliente_id === body.id);
       linked.forEach(v => { v.cliente_id = null; });
       state.clientes = state.clientes.filter(c => c.id !== body.id);
-      resp = { ok: true, vendas_unlinked: linked.length };
+      resp = { ok: true, eventos_unlinked: linked.length };
     } else if (body.action === 'cliente_detail') {
       const c = clienteOf(body.id);
       if (!c) { resp = { found: false, id: body.id }; }
       else {
-        const vendas = state.vendas.filter(v => v.cliente_id === c.id);
-        const vendaIds = vendas.map(v => v.id);
+        const eventos = state.eventos.filter(v => v.cliente_id === c.id);
+        const eventoIds = eventos.map(v => v.id);
         const pagamentos = state.pagamentos
-          .filter(p => vendaIds.includes(p.venda_id))
-          .map(p => ({ ...p, venda: { name: state.vendas.find(v => v.id === p.venda_id).name } }))
+          .filter(p => eventoIds.includes(p.evento_id))
+          .map(p => ({ ...p, evento: { name: state.eventos.find(v => v.id === p.evento_id).name } }))
           .sort((a, b) => b.received_at.localeCompare(a.received_at));
-        const total_price_all = vendas.reduce((s, v) => s + v.total_price, 0);
-        const total_paid_all = vendas.reduce((s, v) => s + v.total_paid, 0);
+        const total_price_all = eventos.reduce((s, v) => s + v.total_price, 0);
+        const total_paid_all = eventos.reduce((s, v) => s + v.total_paid, 0);
         resp = {
-          found: true, cliente: c, vendas, pagamentos,
+          found: true, cliente: c, eventos, pagamentos,
           total_price_all, total_paid_all,
           balance_due_all: total_price_all - total_paid_all,
         };
@@ -145,9 +145,9 @@ function clienteOf(id) { return state.clientes.find(c => c.id === id); }
   check('detail shows the phone', (await page.textContent('#root')).includes('11994452426'));
   check('detail shows the email', (await page.textContent('#root')).includes('maria@example.com'));
   check('detail shows the notes', (await page.textContent('#root')).includes('Prefere contato à tarde'));
-  check('no vendas yet', (await page.textContent('#root')).includes('Nenhuma venda ainda'));
+  check('no eventos yet', (await page.textContent('#root')).includes('Nenhum evento ainda'));
   check('no pagamentos yet', (await page.textContent('#root')).includes('Nenhum pagamento registrado ainda'));
-  check('no totals card without vendas', (await page.$('.totals-card')) === null);
+  check('no totals card without eventos', (await page.$('.totals-card')) === null);
 
   const clienteId = state.clientes[0].id;
 
@@ -191,44 +191,44 @@ function clienteOf(id) { return state.clientes.find(c => c.id === id); }
   check('an already-prefixed number is not double-prefixed, got: ' + waHref2,
     waHref2.startsWith('https://wa.me/5511994452426?text='));
 
-  // --- vendas + pagamentos rollup, and totals ---
-  const vendaA = {
+  // --- eventos + pagamentos rollup, and totals ---
+  const eventoA = {
     id: uid('V'), cliente_id: clienteId, name: 'Bolo de aniversário', status: 'entregue',
     event_date: '2026-09-01', total_cost: 40, total_price: 100, total_paid: 100, balance_due: 0,
     profit: 60, margin_pct: 60,
   };
-  const vendaB = {
+  const eventoB = {
     id: uid('V'), cliente_id: clienteId, name: 'Docinhos para festa', status: 'confirmado',
     event_date: null, total_cost: 20, total_price: 60, total_paid: 30, balance_due: 30,
     profit: 40, margin_pct: 66.7,
   };
-  state.vendas.push(vendaA, vendaB);
+  state.eventos.push(eventoA, eventoB);
   state.pagamentos.push(
-    { id: uid('P'), venda_id: vendaA.id, amount: 100, method: 'Pix', received_at: '2026-09-01T15:00:00Z', note: null },
-    { id: uid('P'), venda_id: vendaB.id, amount: 30, method: 'Dinheiro', received_at: '2026-08-28T12:00:00Z', note: null },
+    { id: uid('P'), evento_id: eventoA.id, amount: 100, method: 'Pix', received_at: '2026-09-01T15:00:00Z', note: null },
+    { id: uid('P'), evento_id: eventoB.id, amount: 30, method: 'Dinheiro', received_at: '2026-08-28T12:00:00Z', note: null },
   );
 
   await page.goto(PAGE + '?id=' + clienteId);
   await page.waitForSelector('#cliente-name', { timeout: 6000 });
   check('deep link opens the right cliente directly',
     (await page.textContent('#cliente-name')).includes('Maria Silva'));
-  check('both vendas are listed', (await page.$$('.venda-row')).length === 2);
+  check('both eventos are listed', (await page.$$('.evento-row')).length === 2);
   check('both pagamentos are listed', (await page.$$('.pay-row')).length === 2);
-  check('venda A shows its status pill', (await page.textContent('#vendas-card')).includes('Entregue'));
-  check('venda B shows its status pill', (await page.textContent('#vendas-card')).includes('Confirmado'));
+  check('evento A shows its status pill', (await page.textContent('#eventos-card')).includes('Entregue'));
+  check('evento B shows its status pill', (await page.textContent('#eventos-card')).includes('Confirmado'));
   check('totals card sums total vendido (160,00), got: ' + norm(await page.textContent('.totals-card')),
     norm(await page.textContent('.totals-card')).includes('R$ 160,00'));
   check('totals card sums total pago (130,00)',
     norm(await page.textContent('.totals-card')).includes('R$ 130,00'));
   check('totals card shows saldo devedor (30,00)',
     norm(await page.textContent('.totals-card')).includes('R$ 30,00'));
-  check('the payment row shows which venda it belongs to',
+  check('the payment row shows which evento it belongs to',
     (await page.textContent('.pay-row')).includes('Docinhos para festa') ||
     (await page.textContent('#pays-card')).includes('Docinhos para festa'));
-  const vendaRow = await page.$('.venda-row[data-id="' + vendaA.id + '"]');
-  check('the venda row carries the deep-link id', vendaRow !== null);
-  const payRow = await page.$('.pay-row[data-venda="' + vendaB.id + '"]');
-  check('the pagamento row carries its venda id for the deep link', payRow !== null);
+  const eventoRow = await page.$('.evento-row[data-id="' + eventoA.id + '"]');
+  check('the evento row carries the deep-link id', eventoRow !== null);
+  const payRow = await page.$('.pay-row[data-evento="' + eventoB.id + '"]');
+  check('the pagamento row carries its evento id for the deep link', payRow !== null);
 
   // --- search on the list screen ---
   const cliente2 = await page.evaluate(async () => {
@@ -254,7 +254,7 @@ function clienteOf(id) { return state.clientes.find(c => c.id === id); }
   await page.waitForFunction(
     () => document.querySelectorAll('.row[data-id]').length === 2, null, { timeout: 6000 });
 
-  // --- delete: a cliente with linked vendas reports how many were unlinked ---
+  // --- delete: a cliente with linked eventos reports how many were unlinked ---
   await page.click('.row[data-id="' + clienteId + '"]');
   await page.waitForSelector('#del-cliente', { timeout: 6000 });
   await page.click('#del-cliente');
@@ -262,8 +262,8 @@ function clienteOf(id) { return state.clientes.find(c => c.id === id); }
   await page.click('#confirm-ok');
   await page.waitForSelector('#new-cliente', { timeout: 6000 });
   check('the cliente is gone from state', state.clientes.length === 1);
-  check('both vendas survive with cliente_id nulled',
-    state.vendas.every(v => v.cliente_id === null));
+  check('both eventos survive with cliente_id nulled',
+    state.eventos.every(v => v.cliente_id === null));
   check('only the remaining cliente shows in the list',
     (await page.textContent('#list-card')).includes('Clube Helvetia') &&
     !(await page.textContent('#list-card')).includes('Maria Silva'));

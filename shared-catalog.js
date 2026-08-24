@@ -1,6 +1,6 @@
 // shared-catalog.js — helpers specific to the product/ingredient catalogue,
 // loaded only by estoque.html and produtos.html (not hoje/tarefas/compras,
-// and deliberately NOT by vendas.html either — a cliente is a different
+// and deliberately NOT by eventos.html either — a cliente is a different
 // entity with different fields, and its picker is its own small page-local
 // implementation rather than a forced generalization of this one).
 //

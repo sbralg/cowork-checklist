@@ -4,21 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Vendas">
+<meta name="apple-mobile-web-app-title" content="Eventos">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<title>Vendas</title>
+<title>Eventos</title>
 <!--
-  Data-free shell for the Vendas module — one sale (event, order, booking)
-  per row, tracked from the first lead through payment. Same pattern as
+  Data-free shell for the Eventos module — one evento (sale, event, order,
+  booking) per row, tracked from the first lead through payment. Same pattern as
   every other page here: hosted on public GitHub Pages, holds NO keys and
   NO data, asks for the shared passphrase, then talks only to the gated
   Supabase Edge Function (checklist-api).
 
-  A sale can be created by hand at ANY pipeline stage — logging a lead the
+  An evento can be created by hand at ANY pipeline stage — logging a lead the
   moment an inquiry comes in is as normal a gesture as recording a
   confirmed booking, not something only a future AI-lead-detection pass
-  would do. Payments are an editable ledger (venda_pagamentos), not a
+  would do. Payments are an editable ledger (evento_pagamentos), not a
   purchased-style flag, because a mistyped amount is a correction, not
   grounds to delete and redo. Confirming a payment is the one genuine
   integration with Financeiro: it auto-posts a receita there in the same
@@ -78,9 +78,9 @@
     .pill.pay-paid{color:#4ade80}
   }
   /* ---- detail ---- */
-  .venda-head{margin:0 0 14px}
-  .venda-head .name{font-size:19px;font-weight:650;margin:0 0 6px;word-wrap:break-word;cursor:pointer}
-  .venda-head .name:hover{opacity:.75}
+  .evento-head{margin:0 0 14px}
+  .evento-head .name{font-size:19px;font-weight:650;margin:0 0 6px;word-wrap:break-word;cursor:pointer}
+  .evento-head .name:hover{opacity:.75}
   .cli-block{
     display:flex;align-items:center;justify-content:space-between;gap:10px;
     padding:12px 14px;border-radius:12px;background:rgba(127,127,127,.06);margin:10px 0;
@@ -145,15 +145,15 @@
 
 <script>
 const root = document.getElementById("root");
-let vendas = [];
+let eventos = [];
 let searchTerm = "";
 let statusFilter = "";
 let clienteCache = null;
 
 const PAGE_LOGIN = {
-  title: "Vendas",
+  title: "Eventos",
   subtitle: "Digite a senha para acessar.",
-  onSuccess: () => loadVendas(),
+  onSuccess: () => loadEventos(),
 };
 </script>
 <script src="shared-api.js"></script>
@@ -163,7 +163,7 @@ const PAGE_LOGIN = {
 <script src="shared-inputs.js"></script>
 <script>
 
-const CURRENT_PAGE = "vendas";
+const CURRENT_PAGE = "eventos";
 
 const STATUS_META = {
   lead:       { label: "Lead" },
@@ -196,11 +196,11 @@ function paymentPillHtml(v){
 function navHeader(title, backAction){
   const topRow = '<header><div class="hleft">' +
     '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
-    '<h1 style="flex:1">' + (backAction ? 'Vendas' : esc(title)) + '</h1>' +
+    '<h1 style="flex:1">' + (backAction ? 'Eventos' : esc(title)) + '</h1>' +
     '</div></header>';
   if(!backAction) return topRow;
   return topRow + '<div class="subheader">' +
-    '<button class="link" id="back">← Vendas</button>' +
+    '<button class="link" id="back">← Eventos</button>' +
   '</div>';
 }
 function wireNav(backAction){
@@ -210,20 +210,20 @@ function wireNav(backAction){
 
 // ---- list screen ----
 
-async function loadVendas(){
+async function loadEventos(){
   root.innerHTML = '<p class="msg">Carregando…</p>';
   if(!getPass()){ showLogin(); return; }
   try{
-    const data = await api("vendas");
-    vendas = data.vendas || [];
+    const data = await api("eventos");
+    eventos = data.eventos || [];
     const wanted = new URLSearchParams(location.search).get("id");
     if(wanted){
       history.replaceState(null, "", location.pathname);
-      openVenda(wanted);
+      openEvento(wanted);
       return;
     }
     renderList();
-  }catch(e){ handleAuthError(e, loadVendas); }
+  }catch(e){ handleAuthError(e, loadEventos); }
 }
 
 function matchesSearch(v, term){
@@ -234,7 +234,7 @@ function matchesSearch(v, term){
   return false;
 }
 
-function vendaRowHtml(v){
+function eventoRowHtml(v){
   const cliName = v.cliente ? v.cliente.name : "sem cliente";
   const bits = [statusPillHtml(v.status), paymentPillHtml(v)];
   if(v.event_date) bits.push('<span>' + esc(fmtDate(v.event_date + "T00:00:00")) + '</span>');
@@ -248,7 +248,7 @@ function vendaRowHtml(v){
 }
 
 function renderList(){
-  const shown = vendas.filter(v =>
+  const shown = eventos.filter(v =>
     matchesSearch(v, searchTerm) && (!statusFilter || v.status === statusFilter));
 
   const chips = '<div class="chiprow">' +
@@ -258,20 +258,20 @@ function renderList(){
         esc(STATUS_META[s].label) + '</span>').join("") +
   '</div>';
 
-  const rowsHtml = vendas.length === 0
-    ? '<p class="msg">Nenhuma venda ainda. Toque em "+ Nova venda" para começar.</p>'
+  const rowsHtml = eventos.length === 0
+    ? '<p class="msg">Nenhum evento ainda. Toque em "+ Novo evento" para começar.</p>'
     : (shown.length === 0
-        ? '<p class="msg" id="no-match">Nenhuma venda encontrada.</p>'
-        : '<div class="card" id="list-card">' + shown.map(vendaRowHtml).join("") + '</div>');
+        ? '<p class="msg" id="no-match">Nenhum evento encontrado.</p>'
+        : '<div class="card" id="list-card">' + shown.map(eventoRowHtml).join("") + '</div>');
 
-  root.innerHTML = navHeader("Vendas", null) +
+  root.innerHTML = navHeader("Eventos", null) +
     '<div class="searchrow">' +
-      '<input type="search" id="search" placeholder="Buscar por venda ou cliente" ' +
+      '<input type="search" id="search" placeholder="Buscar por evento ou cliente" ' +
         'value="' + esc(searchTerm) + '">' +
     '</div>' +
     chips +
     rowsHtml +
-    '<button class="primary full addrow-btn" id="new-venda">+ Nova venda</button>';
+    '<button class="primary full addrow-btn" id="new-evento">+ Novo evento</button>';
 
   wireNav(null);
 
@@ -287,18 +287,18 @@ function renderList(){
     });
   });
   wireListRows();
-  document.getElementById("new-venda").addEventListener("click", openCreateModal);
+  document.getElementById("new-evento").addEventListener("click", openCreateModal);
 }
 
 function redrawList(){
-  const shown = vendas.filter(v =>
+  const shown = eventos.filter(v =>
     matchesSearch(v, searchTerm) && (!statusFilter || v.status === statusFilter));
   root.querySelectorAll(".chip").forEach(chip =>
     chip.classList.toggle("active", chip.dataset.status === statusFilter));
   const card = document.getElementById("list-card") || document.getElementById("no-match");
   const html = shown.length === 0
-    ? '<p class="msg" id="no-match">Nenhuma venda encontrada.</p>'
-    : '<div class="card" id="list-card">' + shown.map(vendaRowHtml).join("") + '</div>';
+    ? '<p class="msg" id="no-match">Nenhum evento encontrado.</p>'
+    : '<div class="card" id="list-card">' + shown.map(eventoRowHtml).join("") + '</div>';
   if(card){
     card.outerHTML = html;
     wireListRows();
@@ -307,7 +307,7 @@ function redrawList(){
 
 function wireListRows(){
   root.querySelectorAll(".row[data-id]").forEach(row => {
-    row.addEventListener("click", () => openVenda(row.dataset.id));
+    row.addEventListener("click", () => openEvento(row.dataset.id));
   });
 }
 
@@ -322,7 +322,7 @@ async function clientePickerModal(){
       if(!clienteCache) clienteCache = (await api("clientes")).clientes || [];
       all = clienteCache;
     }catch(e){
-      if(e.unauthorized){ handleAuthError(e, loadVendas); return resolve(null); }
+      if(e.unauthorized){ handleAuthError(e, loadEventos); return resolve(null); }
       listToast("Não foi possível carregar os clientes", true);
       return resolve(null);
     }
@@ -376,7 +376,7 @@ async function clientePickerModal(){
             clienteCache = null;
             close(res.cliente);
           }catch(err){
-            if(err.unauthorized){ handleAuthError(err, loadVendas); return close(null); }
+            if(err.unauthorized){ handleAuthError(err, loadEventos); return close(null); }
             listToast("Não foi possível criar o cliente", true);
           }
         });
@@ -411,7 +411,7 @@ function statusPickerModal(current){
     backdrop.className = "modal-backdrop";
     backdrop.innerHTML =
       '<div class="modal-card">' +
-        '<h3>Status da venda</h3>' +
+        '<h3>Status do evento</h3>' +
         '<div class="status-list">' +
           STATUS_ORDER.map(s =>
             '<button class="status-opt' + (s === current ? ' current' : '') + '" data-status="' + s + '">' +
@@ -449,11 +449,11 @@ function openCreateModal(){
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML =
     '<div class="modal-card">' +
-      '<h3>Nova venda</h3>' +
+      '<h3>Novo evento</h3>' +
       '<label>Cliente</label>' +
       '<button type="button" class="status-opt" id="nv-cliente-btn" style="margin-bottom:14px">' +
         'Selecionar cliente…</button>' +
-      '<label for="nv-name">Nome da venda</label>' +
+      '<label for="nv-name">Nome do evento</label>' +
       '<input type="text" id="nv-name" placeholder="ex: Bolo de aniversário — Maria">' +
       '<label for="nv-status">Status</label>' +
       '<select id="nv-status" style="width:100%;margin-bottom:14px">' +
@@ -491,37 +491,37 @@ function openCreateModal(){
   backdrop.querySelector("#nv-ok").addEventListener("click", async () => {
     if(!chosenCliente){ alert("Selecione um cliente."); return; }
     const name = backdrop.querySelector("#nv-name").value.trim();
-    if(!name){ alert("O nome da venda não pode ficar vazio."); return; }
+    if(!name){ alert("O nome do evento não pode ficar vazio."); return; }
     const status = backdrop.querySelector("#nv-status").value;
     const event_date = backdrop.querySelector("#nv-date").value || null;
     const notes = backdrop.querySelector("#nv-notes").value.trim() || null;
     try{
-      const res = await api("venda_create", {
+      const res = await api("evento_create", {
         cliente_id: chosenCliente.id, name, status, event_date, notes,
       });
       close();
-      vendas = [];
-      openVenda(res.venda.id);
+      eventos = [];
+      openEvento(res.evento.id);
     }catch(e){
-      if(e.unauthorized) return handleAuthError(e, loadVendas);
-      listToast("Não foi possível criar a venda", true);
+      if(e.unauthorized) return handleAuthError(e, loadEventos);
+      listToast("Não foi possível criar o evento", true);
     }
   });
 }
 
 // ---- detail screen ----
 
-async function openVenda(id){
+async function openEvento(id){
   root.innerHTML = '<p class="msg">Carregando…</p>';
   try{
-    const data = await api("venda_detail", { id });
+    const data = await api("evento_detail", { id });
     if(!data.found){
-      root.innerHTML = navHeader("Vendas", loadVendas) + '<p class="msg">Venda não encontrada.</p>';
-      wireNav(loadVendas);
+      root.innerHTML = navHeader("Eventos", loadEventos) + '<p class="msg">Evento não encontrado.</p>';
+      wireNav(loadEventos);
       return;
     }
-    renderVenda(data);
-  }catch(e){ handleAuthError(e, loadVendas); }
+    renderEvento(data);
+  }catch(e){ handleAuthError(e, loadEventos); }
 }
 
 function itemRowHtml(it){
@@ -558,8 +558,8 @@ function payRowHtml(p){
   '</div>';
 }
 
-function renderVenda(data){
-  const v = data.venda;
+function renderEvento(data){
+  const v = data.evento;
   const itens = data.itens || [];
   const pagamentos = data.pagamentos || [];
   const cli = v.cliente;
@@ -585,9 +585,9 @@ function renderVenda(data){
   const profitCls = data.profit > 0 ? "pos" : (data.profit < 0 ? "neg" : "");
   const balanceCls = data.balance_due > 0 ? "neg" : (data.balance_due < 0 ? "pos" : "");
 
-  root.innerHTML = navHeader("Vendas", loadVendas) +
-    '<div class="venda-head">' +
-      '<p class="name" id="venda-name">' + esc(v.name) + '</p>' +
+  root.innerHTML = navHeader("Eventos", loadEventos) +
+    '<div class="evento-head">' +
+      '<p class="name" id="evento-name">' + esc(v.name) + '</p>' +
       statusPillHtml(v.status) + ' ' + paymentPillHtml(data) +
     cliBlock +
     '<div class="statusline">' +
@@ -600,7 +600,7 @@ function renderVenda(data){
         'style="border:none;background:none;color:var(--text);font:inherit;font-size:14px;text-align:right">' +
     '</div>' +
     '<div class="detail-actions">' +
-      '<button class="primary small alt danger" id="del-venda">🗑 Remover</button>' +
+      '<button class="primary small alt danger" id="del-evento">🗑 Remover</button>' +
     '</div>' +
     '</div>' +
     '<div class="card totals-card">' +
@@ -619,20 +619,20 @@ function renderVenda(data){
     '<h3>Pagamentos</h3>' + paysHtml +
     '<button class="primary addrow-btn" id="confirm-pay">Confirmar pagamento</button>';
 
-  wireNav(loadVendas);
+  wireNav(loadEventos);
 
-  document.getElementById("venda-name").addEventListener("click", async () => {
-    const name = await promptModal("Editar venda", "Nome", v.name);
+  document.getElementById("evento-name").addEventListener("click", async () => {
+    const name = await promptModal("Editar evento", "Nome", v.name);
     if(name === null) return;
     const trimmed = name.trim();
     if(!trimmed){ alert("O nome não pode ficar vazio."); return; }
     if(trimmed === v.name) return;
     try{
-      await api("venda_update", { id: v.id, name: trimmed });
-      vendas = [];
-      openVenda(v.id);
+      await api("evento_update", { id: v.id, name: trimmed });
+      eventos = [];
+      openEvento(v.id);
     }catch(e){
-      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      if(e.unauthorized) return handleAuthError(e, loadEventos);
       listToast("Não foi possível salvar", true);
     }
   });
@@ -641,11 +641,11 @@ function renderVenda(data){
     const c = await clientePickerModal();
     if(!c) return;
     try{
-      await api("venda_update", { id: v.id, cliente_id: c.id });
-      vendas = [];
-      openVenda(v.id);
+      await api("evento_update", { id: v.id, cliente_id: c.id });
+      eventos = [];
+      openEvento(v.id);
     }catch(e){
-      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      if(e.unauthorized) return handleAuthError(e, loadEventos);
       listToast("Não foi possível salvar", true);
     }
   });
@@ -654,30 +654,30 @@ function renderVenda(data){
     const status = await statusPickerModal(v.status);
     if(!status) return;
     try{
-      await api("venda_update", { id: v.id, status });
-      vendas = [];
-      openVenda(v.id);
+      await api("evento_update", { id: v.id, status });
+      eventos = [];
+      openEvento(v.id);
     }catch(e){
-      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      if(e.unauthorized) return handleAuthError(e, loadEventos);
       listToast("Não foi possível salvar", true);
     }
   });
 
   document.getElementById("event-date").addEventListener("change", async (e) => {
     try{
-      await api("venda_update", { id: v.id, event_date: e.target.value || null });
-      vendas = [];
+      await api("evento_update", { id: v.id, event_date: e.target.value || null });
+      eventos = [];
       listToast("Data salva");
     }catch(err){
-      if(err.unauthorized) return handleAuthError(err, loadVendas);
+      if(err.unauthorized) return handleAuthError(err, loadEventos);
       listToast("Não foi possível salvar a data", true);
     }
   });
 
-  document.getElementById("del-venda").addEventListener("click", async () => {
+  document.getElementById("del-evento").addEventListener("click", async () => {
     if(!(await confirmModal('Remover "' + v.name + '"?', "Remover"))) return;
     try{
-      let res = await api("venda_delete", { id: v.id });
+      let res = await api("evento_delete", { id: v.id });
       if(res.ok === false && res.reason === "has_content"){
         const bits = [];
         if(res.items) bits.push(res.items + (res.items === 1 ? " item" : " itens"));
@@ -685,16 +685,16 @@ function renderVenda(data){
           (res.payments === 1 ? " pagamento" : " pagamentos") +
           " (" + fmtMoney(res.total_paid) + " recebidos)");
         if(!(await confirmModal(
-          "Esta venda tem " + bits.join(" e ") + ". Removê-la apaga os itens e os pagamentos — " +
+          "Este evento tem " + bits.join(" e ") + ". Removê-lo apaga os itens e os pagamentos — " +
           "o valor já recebido continua no Financeiro. Não dá para desfazer.",
           "Remover mesmo assim"))) return;
-        res = await api("venda_delete", { id: v.id, force: true });
+        res = await api("evento_delete", { id: v.id, force: true });
       }
-      vendas = [];
-      listToast("Venda removida");
-      loadVendas();
+      eventos = [];
+      listToast("Evento removido");
+      loadEventos();
     }catch(e){
-      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      if(e.unauthorized) return handleAuthError(e, loadEventos);
       listToast("Não foi possível remover", true);
     }
   });
@@ -703,11 +703,11 @@ function renderVenda(data){
     const added = await itemModal(null);
     if(!added) return;
     try{
-      await api("venda_item_add", Object.assign({ venda_id: v.id }, added));
-      vendas = [];
-      openVenda(v.id);
+      await api("evento_item_add", Object.assign({ evento_id: v.id }, added));
+      eventos = [];
+      openEvento(v.id);
     }catch(e){
-      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      if(e.unauthorized) return handleAuthError(e, loadEventos);
       listToast("Não foi possível salvar o item", true);
     }
   });
@@ -718,11 +718,11 @@ function renderVenda(data){
       const edited = await itemModal(it);
       if(!edited) return;
       try{
-        await api("venda_item_update", Object.assign({ id }, edited));
-        vendas = [];
-        openVenda(v.id);
+        await api("evento_item_update", Object.assign({ id }, edited));
+        eventos = [];
+        openEvento(v.id);
       }catch(e){
-        if(e.unauthorized) return handleAuthError(e, loadVendas);
+        if(e.unauthorized) return handleAuthError(e, loadEventos);
         listToast("Não foi possível salvar o item", true);
       }
     });
@@ -732,11 +732,11 @@ function renderVenda(data){
       if(!(await confirmModal("Remover este item?"))) return;
       const id = btn.closest(".item-row").dataset.item;
       try{
-        await api("venda_item_delete", { id });
-        vendas = [];
-        openVenda(v.id);
+        await api("evento_item_delete", { id });
+        eventos = [];
+        openEvento(v.id);
       }catch(e){
-        if(e.unauthorized) return handleAuthError(e, loadVendas);
+        if(e.unauthorized) return handleAuthError(e, loadEventos);
         listToast("Não foi possível remover", true);
       }
     });
@@ -746,12 +746,12 @@ function renderVenda(data){
     const confirmed = await paymentConfirmModal(data.balance_due);
     if(!confirmed) return;
     try{
-      await api("venda_payment_confirm", Object.assign({ venda_id: v.id }, confirmed));
-      vendas = [];
+      await api("evento_payment_confirm", Object.assign({ evento_id: v.id }, confirmed));
+      eventos = [];
       listToast("Pagamento confirmado");
-      openVenda(v.id);
+      openEvento(v.id);
     }catch(e){
-      if(e.unauthorized) return handleAuthError(e, loadVendas);
+      if(e.unauthorized) return handleAuthError(e, loadEventos);
       listToast("Não foi possível confirmar o pagamento", true);
     }
   });
@@ -762,11 +762,11 @@ function renderVenda(data){
       const edited = await paymentEditModal(p);
       if(!edited) return;
       try{
-        await api("venda_payment_update", Object.assign({ id }, edited));
-        vendas = [];
-        openVenda(v.id);
+        await api("evento_payment_update", Object.assign({ id }, edited));
+        eventos = [];
+        openEvento(v.id);
       }catch(e){
-        if(e.unauthorized) return handleAuthError(e, loadVendas);
+        if(e.unauthorized) return handleAuthError(e, loadEventos);
         listToast("Não foi possível salvar o pagamento", true);
       }
     });
@@ -774,14 +774,14 @@ function renderVenda(data){
   root.querySelectorAll("[data-del-pay]").forEach(btn => {
     btn.addEventListener("click", async () => {
       if(!(await confirmModal(
-        "Remover este pagamento? O lançamento no Financeiro continua registrado, sem vínculo com a venda."))) return;
+        "Remover este pagamento? O lançamento no Financeiro continua registrado, sem vínculo com o evento."))) return;
       const id = btn.closest(".pay-row").dataset.pay;
       try{
-        await api("venda_payment_delete", { id });
-        vendas = [];
-        openVenda(v.id);
+        await api("evento_payment_delete", { id });
+        eventos = [];
+        openEvento(v.id);
       }catch(e){
-        if(e.unauthorized) return handleAuthError(e, loadVendas);
+        if(e.unauthorized) return handleAuthError(e, loadEventos);
         listToast("Não foi possível remover", true);
       }
     });
@@ -1002,7 +1002,7 @@ function paymentEditModal(p){
   });
 }
 
-loadVendas();
+loadEventos();
 </script>
 </body>
 </html>

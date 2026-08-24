@@ -10,7 +10,7 @@
    markup.
 
    `.num-input` radius: a base all-corners radius for a STANDALONE field
-   (produtos.html's package-size input, and the new vendas/financeiro
+   (produtos.html's package-size input, and the eventos/financeiro
    amount fields), with the right-only radius applied only when a
    `.num-input` immediately follows a `.prefix` chip inside the same
    `.field` — i.e. only where there's actually a chip for it to butt up

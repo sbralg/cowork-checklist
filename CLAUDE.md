@@ -2,10 +2,26 @@
 
 Context file for Claude Code / Claude sessions working on this repo.
 
-## Status (2026-08-24): + Clientes module shipped, front-end refactor + Vendas/Financeiro modules shipped 2026-08-20
+## Status (2026-08-24): + Clientes module shipped, front-end refactor + Eventos/Financeiro modules shipped 2026-08-20
 
 Full plan and reasoning in `sbralg/cowork-personal-daily-summary`'s
 `ROADMAP.md` — this entry is the short version.
+
+- **Module renamed: Vendas → Eventos (2026-08-24).** `vendas.html`→
+  `eventos.html` (plain `git mv`, no redirect stub — same convention as
+  the earlier `index.html`/`shopping.html` renames below), `test/
+  vendas.test.js`→`test/eventos.test.js`, the `MENU_ITEMS` entry, the
+  dashboard tile, and every cross-link/label on `clientes.html`/
+  `financeiro.html` updated to match. The underlying `checklist-api`
+  actions/tables were renamed too (`venda_*`→`evento_*`) — see the backend
+  repo's `CLAUDE.md` for the full DB migration. **The live Edge Function
+  had not been redeployed as of this rename** (the user redeploys it
+  themselves, on purpose — see that repo's gotcha #20), so until that
+  happens `eventos.html`'s API calls will 500. A mechanical find/replace
+  also breaks Portuguese gender agreement (`venda` is feminine, `evento`
+  is masculine) — swept for and fixed every "Nenhuma evento", "Nova
+  evento", "-la" pronoun, etc. that the substitution introduced, rather
+  than shipping it broken.
 
 - **The refactor** replaced "duplicate everything verbatim across pages"
   with the `shared-*.js`/`shared-*.css` files described under "Shared
@@ -26,27 +42,27 @@ Full plan and reasoning in `sbralg/cowork-personal-daily-summary`'s
     a real risk given they picked up real behavior changes — so
     `test/tarefas.test.js` and `test/hoje.test.js` were added alongside
     the refactor, not after.
-- **Vendas + Financeiro** are new modules for the household's side
-  business: `vendas.html` tracks one sale/event per row through a
+- **Eventos + Financeiro** are new modules for the household's side
+  business: `eventos.html` tracks one evento (sale/event/order) per row through a
   Lead→Orçamento→Confirmado→Entregue→Cancelado pipeline, with `clientes`,
   line items (produto/serviço), and an editable payment ledger.
-  `financeiro.html` is the cost/revenue ledger that Vendas auto-posts
+  `financeiro.html` is the cost/revenue ledger that Eventos auto-posts
   confirmed payments into. Full schema + Edge Function action list are in
   the backend repo's `CLAUDE.md`; see "What this is" below for what each
   page covers.
-- Deployed `checklist-api` v26 and **live-verified** the whole Vendas/
+- Deployed `checklist-api` v26 and **live-verified** the whole Eventos/
   Financeiro action set against the real project via the `http`-extension
   trick (see the backend repo's `CLAUDE.md` for the full sequence) before
   building either page against it.
 - **`clientes.html` (2026-08-24)** is the ninth page: the contact record
-  behind a venda — full-field create/edit/delete (not just the by-name-
-  only inline picker `vendas.html` already had), the vendas + pagamentos
+  behind an evento — full-field create/edit/delete (not just the by-name-
+  only inline picker `eventos.html` already had), the eventos + pagamentos
   rollup for that cliente read through the new `cliente_detail` action
   (`checklist-api` now v27, live-verified the same way as v26) and a
   "Enviar WhatsApp" composer that builds a `wa.me` deep link client-side —
   no backend, because this household's WhatsApp bridge is LAN-only and
   unreachable from the Edge Function (see the backend repo's `CLAUDE.md`
-  for why). `vendas.html`'s cliente block gained a "Ver cliente" link into
+  for why). `eventos.html`'s cliente block gained a "Ver cliente" link into
   it. **Message/e-mail history per contact is deliberately not built** —
   the page says so under the composer rather than leaving a silent gap;
   see the backend repo's Planned/future for what a real one would need.
@@ -77,18 +93,18 @@ build step, no framework:
 - `produtos.html` — the product catalogue: what a barcode means, its price
   history as a graph, the editor that corrects its metadata, and removal
   from the catalogue.
-- `clientes.html` — the contact record behind a venda: full-field create/
-  edit/delete, the vendas + pagamentos rollup for that cliente, and a
+- `clientes.html` — the contact record behind an evento: full-field create/
+  edit/delete, the eventos + pagamentos rollup for that cliente, and a
   `wa.me`-based "Enviar WhatsApp" composer.
-- `vendas.html` — the sales/event pipeline: a `clientes` picker (with a
+- `eventos.html` — the evento pipeline: a `clientes` picker (with a
   "Ver cliente" link into the full record on `clientes.html`), the full
   Lead→Orçamento→Confirmado→Entregue→Cancelado status, line items
   (produto/serviço) with cost and price, and an editable payment ledger.
   Confirming a payment auto-posts a receita to Financeiro in the same
   request — the one integration point between the two modules.
 - `financeiro.html` — the cost/revenue ledger: every receita and despesa,
-  most arriving automatically from Vendas, some logged directly (rent,
-  ingredients, marketing) for spending that never passed through a sale.
+  most arriving automatically from Eventos, some logged directly (rent,
+  ingredients, marketing) for spending that never passed through an evento.
 
 **Renamed with no redirect stubs, on purpose (2026-08-20).** A stale
 bookmark to the old `shopping.html` now 404s, and one to the old
@@ -183,9 +199,9 @@ what that changes and what stays the same).
   (`PACK_UNITS`/`unitOptions()`/`netQtyToFields()`/`fieldsToNetQty()`).
 - `shared-catalog.js`/`shared-catalog.css` — produtos/estoque-only:
   `thumbHtml()`, the ingredient-name matching helpers, and
-  `ingredientModal()`. **Not loaded by vendas.html** — a cliente is a
+  `ingredientModal()`. **Not loaded by eventos.html** — a cliente is a
   different entity with different fields, so its picker is its own small
-  page-local implementation (`clientePickerModal` in `vendas.html`) rather
+  page-local implementation (`clientePickerModal` in `eventos.html`) rather
   than a forced generalization of the ingredient one.
 - Matching CSS files (`shared-base.css`, `shared-menu.css`,
   `shared-modal.css`, `shared-toast.css`, `shared-inputs.css`) for the
@@ -220,22 +236,22 @@ in-memory fake, so none touches Supabase nor holds a passphrase.
   entry below). Cover the passphrase gate, the menu, and each page's core
   flow (create/edit/delete/done/undo for tarefas; day navigation and the
   live action-status overlay for hoje).
-- `test/vendas.test.js` — the cliente picker (find-or-create inline), the
+- `test/eventos.test.js` — the cliente picker (find-or-create inline), the
   full pipeline walk, line items, the payment ledger and its totals,
   editing/deleting a payment with the linked Financeiro lançamento
-  following or surviving correctly, the refusal-then-force venda delete,
+  following or surviving correctly, the refusal-then-force evento delete,
   the deep link, and a cliente delete that unlinks without breaking the
   detail sheet. Its fake keeps real relational state across all five
   tables, same reasoning as `stock.test.js`'s ledger.
 - `test/financeiro.test.js` — standalone lançamento create/edit/delete,
   the tipo and período filters, and a seeded auto-posted entry's
-  "automático" tag and 🔗 deep link back to its venda.
+  "automático" tag and 🔗 deep link back to its evento.
 - `test/clientes.test.js` — full-field create/edit/delete (including the
-  "N venda(s) unlinked" delete toast), search across name/organização/
-  telefone/e-mail, the vendas + pagamentos rollup and its summed totals
+  "N evento(s) unlinked" delete toast), search across name/organização/
+  telefone/e-mail, the eventos + pagamentos rollup and its summed totals
   read through `cliente_detail`, the wa.me phone normalization and its
-  href, and the deep link. Its fake keeps clientes/vendas/pagamentos as
-  real relational state, same reasoning as `vendas.test.js`.
+  href, and the deep link. Its fake keeps clientes/eventos/pagamentos as
+  real relational state, same reasoning as `eventos.test.js`.
 
 ## Conventions
 
@@ -251,7 +267,7 @@ in-memory fake, so none touches Supabase nor holds a passphrase.
   them look at the live page, iterate with another commit.
   - Run all seven test files BEFORE pushing, every time (`node
     test/compras.test.js`, `test/stock.test.js`, `test/tarefas.test.js`,
-    `test/hoje.test.js`, `test/vendas.test.js`, `test/financeiro.test.js`,
+    `test/hoje.test.js`, `test/eventos.test.js`, `test/financeiro.test.js`,
     `test/clientes.test.js`).
     They are the only gate left between a broken page and the live site.
     Any change to a `shared-*.js`/`shared-*.css` file can touch every
@@ -279,7 +295,7 @@ in-memory fake, so none touches Supabase nor holds a passphrase.
     only in `compras.html` — ~300 lines of camera, lens-picking and focus
     code that would be a genuine maintenance trap in a second copy.
     Estoque finds a product by search instead. Also not shared:
-    `vendas.html`'s cliente picker, on purpose (see "Shared files" above).
+    `eventos.html`'s cliente picker, on purpose (see "Shared files" above).
 - **Every mutating action should update the DOM in place and fire its
   API call in the background**, only reverting the change (or, for
   destructive actions, re-inserting the same detached DOM node) and

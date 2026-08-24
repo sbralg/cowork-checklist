@@ -15,11 +15,11 @@
   data, asks for the shared passphrase, then talks only to the gated
   Supabase Edge Function (checklist-api).
 
-  Most rows arrive on their own: confirming a payment on Vendas
-  auto-posts a receita here in the same request (source:"venda_payment"),
+  Most rows arrive on their own: confirming a payment on Eventos
+  auto-posts a receita here in the same request (source:"evento_payment"),
   which is what the 🔗 link and the muted "automático" tag point back to.
   This page also lets a cost be logged directly — rent, ingredients,
-  marketing — for spending that never passed through a sale. Reports are
+  marketing — for spending that never passed through an evento. Reports are
   future work; this is the ledger they will read from.
 -->
 <link rel="stylesheet" href="shared-base.css">
@@ -107,7 +107,7 @@ const PAGE_LOGIN = {
 
 const CURRENT_PAGE = "financeiro";
 
-const CATEGORIA_SUGGESTOES = ["aluguel", "ingredientes", "marketing", "taxas", "venda", "outros"];
+const CATEGORIA_SUGGESTOES = ["aluguel", "ingredientes", "marketing", "taxas", "evento", "outros"];
 
 // Client-side only: the boundaries just decide which date_from/date_to get
 // sent to financeiro_lancamentos, same fetch either way.
@@ -148,8 +148,8 @@ async function loadLancamentos(){
 
 function entryRowHtml(l){
   const sign = l.tipo === "receita" ? "+" : "−";
-  const linkHtml = l.venda_id
-    ? '<a class="link" href="vendas.html?id=' + encodeURIComponent(l.venda_id) + '">🔗 venda</a>'
+  const linkHtml = l.evento_id
+    ? '<a class="link" href="eventos.html?id=' + encodeURIComponent(l.evento_id) + '">🔗 evento</a>'
     : '';
   const autoHtml = l.source && l.source !== "manual"
     ? '<span class="auto">automático</span>' : '';

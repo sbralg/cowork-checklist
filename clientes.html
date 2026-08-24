@@ -9,9 +9,9 @@
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <title>Clientes</title>
 <!--
-  Data-free shell for the Clientes module — the contact record behind a
-  venda: name, organization, phone, e-mail, notes, plus everything Vendas
-  already knows about them (the sales pipeline, the payment ledger),
+  Data-free shell for the Clientes module — the contact record behind an
+  evento: name, organization, phone, e-mail, notes, plus everything Eventos
+  already knows about them (the pipeline, the payment ledger),
   fetched through one `cliente_detail` call. Same pattern as every other
   page here: hosted on public GitHub Pages, holds NO keys and NO data,
   asks for the shared passphrase, then talks only to the gated Supabase
@@ -90,16 +90,16 @@
   .pill.st-entregue{background:rgba(22,163,74,.14);color:#16a34a}
   .pill.st-cancelado{background:rgba(220,38,38,.14);color:var(--danger)}
   @media (prefers-color-scheme: dark){ .pill.st-entregue{color:#4ade80} }
-  .venda-row, .pay-row{
+  .evento-row, .pay-row{
     display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);
     cursor:pointer;transition:background-color .15s ease;
   }
-  .venda-row:hover, .pay-row:hover{background:rgba(127,127,127,.06)}
-  .venda-row:last-child, .pay-row:last-child{border-bottom:none}
-  .venda-row .body, .pay-row .body{flex:1;min-width:0}
-  .venda-row .body .txt, .pay-row .body .txt{font-size:14.5px;margin:0;word-wrap:break-word}
-  .venda-row .body .meta, .pay-row .body .meta{font-size:12.5px;color:var(--muted);margin:3px 0 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-  .venda-row .amt{font-size:14.5px;font-weight:650;white-space:nowrap;flex:none}
+  .evento-row:hover, .pay-row:hover{background:rgba(127,127,127,.06)}
+  .evento-row:last-child, .pay-row:last-child{border-bottom:none}
+  .evento-row .body, .pay-row .body{flex:1;min-width:0}
+  .evento-row .body .txt, .pay-row .body .txt{font-size:14.5px;margin:0;word-wrap:break-word}
+  .evento-row .body .meta, .pay-row .body .meta{font-size:12.5px;color:var(--muted);margin:3px 0 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .evento-row .amt{font-size:14.5px;font-weight:650;white-space:nowrap;flex:none}
   /* ---- WhatsApp compose ---- */
   .wa-card{padding:14px}
   .wa-card textarea{
@@ -262,7 +262,7 @@ function wireListRows(){
 
 // ---- create/edit modal ----
 // One modal for both: the full field set (name/organization/phone/email/
-// notes) either way, unlike vendas.html's inline picker which only ever
+// notes) either way, unlike eventos.html's inline picker which only ever
 // creates by name — this page IS the place to fill in the rest.
 
 function openClienteModal(c){
@@ -352,10 +352,10 @@ function infoFieldHtml(label, value){
   '</div>';
 }
 
-function vendaRowHtml(v){
+function eventoRowHtml(v){
   const meta = [statusPillHtml(v.status)];
   if(v.event_date) meta.push('<span>' + esc(fmtDate(v.event_date + "T00:00:00")) + '</span>');
-  return '<div class="venda-row" data-id="' + esc(v.id) + '">' +
+  return '<div class="evento-row" data-id="' + esc(v.id) + '">' +
     '<span class="body">' +
       '<p class="txt">' + esc(v.name) + '</p>' +
       '<p class="meta">' + meta.join("") + '</p>' +
@@ -365,23 +365,23 @@ function vendaRowHtml(v){
 }
 
 function pagamentoRowHtml(p){
-  return '<div class="pay-row" data-venda="' + esc(p.venda_id) + '">' +
+  return '<div class="pay-row" data-evento="' + esc(p.evento_id) + '">' +
     '<span class="body">' +
       '<p class="txt">' + fmtMoney(p.amount) + (p.method ? ' · ' + esc(p.method) : '') + '</p>' +
       '<p class="meta">' + esc(fmtDateTime(p.received_at)) +
-        (p.venda ? ' · ' + esc(p.venda.name) : '') + '</p>' +
+        (p.evento ? ' · ' + esc(p.evento.name) : '') + '</p>' +
     '</span>' +
   '</div>';
 }
 
 function renderCliente(data){
   const c = data.cliente;
-  const vendas = data.vendas || [];
+  const eventos = data.eventos || [];
   const pagamentos = data.pagamentos || [];
 
-  const vendasHtml = vendas.length === 0
-    ? '<p class="msg small">Nenhuma venda ainda.</p>'
-    : '<div class="card" id="vendas-card">' + vendas.map(vendaRowHtml).join("") + '</div>';
+  const eventosHtml = eventos.length === 0
+    ? '<p class="msg small">Nenhum evento ainda.</p>'
+    : '<div class="card" id="eventos-card">' + eventos.map(eventoRowHtml).join("") + '</div>';
   const paysHtml = pagamentos.length === 0
     ? '<p class="msg small">Nenhum pagamento registrado ainda.</p>'
     : '<div class="card" id="pays-card">' + pagamentos.map(pagamentoRowHtml).join("") + '</div>';
@@ -401,7 +401,7 @@ function renderCliente(data){
       '<button class="primary small alt" id="edit-cliente">✎ Editar</button>' +
       '<button class="primary small alt danger" id="del-cliente">🗑 Remover</button>' +
     '</div>' +
-    (vendas.length > 0 ?
+    (eventos.length > 0 ?
       '<div class="card totals-card">' +
         '<div class="totals-grid">' +
           '<div><p class="lbl">Total vendido</p><p class="val">' + fmtMoney(data.total_price_all) + '</p></div>' +
@@ -419,7 +419,7 @@ function renderCliente(data){
       '<p class="hist-note">Histórico de mensagens (WhatsApp/e-mail) ainda não está disponível — ' +
         'este botão só abre o WhatsApp com a mensagem pronta, não guarda nem lê conversas.</p>' +
     '</div>' +
-    '<h3>Vendas</h3>' + vendasHtml +
+    '<h3>Eventos</h3>' + eventosHtml +
     '<h3>Pagamentos</h3>' + paysHtml;
 
   wireNav(loadClientes);
@@ -432,8 +432,8 @@ function renderCliente(data){
     try{
       const res = await api("cliente_delete", { id: c.id });
       clientes = [];
-      listToast(res.vendas_unlinked > 0
-        ? "Cliente removido — " + res.vendas_unlinked + " venda(s) ficaram sem cliente"
+      listToast(res.eventos_unlinked > 0
+        ? "Cliente removido — " + res.eventos_unlinked + " evento(s) ficaram sem cliente"
         : "Cliente removido");
       loadClientes();
     }catch(e){
@@ -442,11 +442,11 @@ function renderCliente(data){
     }
   });
 
-  root.querySelectorAll(".venda-row[data-id]").forEach(row => {
-    row.addEventListener("click", () => { location.href = "vendas.html?id=" + encodeURIComponent(row.dataset.id); });
+  root.querySelectorAll(".evento-row[data-id]").forEach(row => {
+    row.addEventListener("click", () => { location.href = "eventos.html?id=" + encodeURIComponent(row.dataset.id); });
   });
-  root.querySelectorAll(".pay-row[data-venda]").forEach(row => {
-    row.addEventListener("click", () => { location.href = "vendas.html?id=" + encodeURIComponent(row.dataset.venda); });
+  root.querySelectorAll(".pay-row[data-evento]").forEach(row => {
+    row.addEventListener("click", () => { location.href = "eventos.html?id=" + encodeURIComponent(row.dataset.evento); });
   });
 
   if(waDigits){
