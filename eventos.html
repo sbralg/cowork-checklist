@@ -61,6 +61,7 @@
   .row .txt{font-size:15px;font-weight:600;margin:0;word-wrap:break-word;flex:1;min-width:0}
   .row .price{font-size:14px;font-weight:650;white-space:nowrap}
   .row .meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+  .row .pills-row{display:flex;gap:6px;justify-content:flex-start;margin:0}
   .pill{
     display:inline-block;font-size:11.5px;font-weight:650;padding:3px 9px;border-radius:999px;
     white-space:nowrap;
@@ -185,7 +186,7 @@ function statusPillHtml(status){
 function paymentStatus(v){
   const price = Number(v.total_price) || 0;
   const paid = Number(v.total_paid) || 0;
-  if(price <= 0 || paid <= 0) return { label: "Pendente", cls: "pend" };
+  if(price <= 0 || paid <= 0) return { label: "Não pago", cls: "pend" };
   if(paid >= price) return { label: "Pago", cls: "paid" };
   return { label: "Parcial", cls: "partial" };
 }
@@ -236,16 +237,36 @@ function matchesSearch(v, term){
   return false;
 }
 
+// Countdown-style date for the event list row, e.g. "Em 2 dias — quarta-feira, 26/08/26".
+function fmtEventDate(dateStr){
+  const d = new Date(dateStr + "T00:00:00");
+  if(Number.isNaN(d.getTime())) return "";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((d - today) / 86400000);
+
+  let prefix;
+  if(diffDays > 1) prefix = "Em " + diffDays + " dias";
+  else if(diffDays === 1) prefix = "Em 1 dia";
+  else if(diffDays === 0) prefix = "< 24hrs";
+  else if(diffDays === -1) prefix = "Há 1 dia";
+  else prefix = "Há " + Math.abs(diffDays) + " dias";
+
+  const weekday = d.toLocaleDateString("pt-BR", { weekday: "long" });
+  const dmy = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  return prefix + " — " + weekday + ", " + dmy;
+}
+
 function eventoRowHtml(v){
   const cliName = v.cliente ? v.cliente.name : "sem cliente";
-  const bits = [statusPillHtml(v.status), paymentPillHtml(v)];
-  if(v.event_date) bits.push('<span>' + esc(fmtDate(v.event_date + "T00:00:00")) + '</span>');
+  const dateHtml = v.event_date ? '<span>' + esc(fmtEventDate(v.event_date)) + '</span>' : '';
   return '<div class="row" data-id="' + esc(v.id) + '">' +
     '<div class="top">' +
       '<p class="txt">' + esc(v.name) + '</p>' +
       '<span class="price">' + fmtMoney(v.total_price) + '</span>' +
     '</div>' +
-    '<div class="meta"><span>' + esc(cliName) + '</span>' + bits.join("") + '</div>' +
+    '<div class="meta"><span>' + esc(cliName) + '</span>' + dateHtml + '</div>' +
+    '<div class="pills-row">' + statusPillHtml(v.status) + paymentPillHtml(v) + '</div>' +
   '</div>';
 }
 
