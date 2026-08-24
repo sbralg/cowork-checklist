@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Clientes">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<title>Clientes</title>
+<!--
+  Data-free shell for the Clientes module — the contact record behind a
+  venda: name, organization, phone, e-mail, notes, plus everything Vendas
+  already knows about them (the sales pipeline, the payment ledger),
+  fetched through one `cliente_detail` call. Same pattern as every other
+  page here: hosted on public GitHub Pages, holds NO keys and NO data,
+  asks for the shared passphrase, then talks only to the gated Supabase
+  Edge Function (checklist-api).
+
+  "Enviar WhatsApp" is a wa.me deep link, not a send API: type a message
+  here, tapping it hands the contact + text to the WhatsApp app (or
+  web.whatsapp.com) and the actual send happens there. That is deliberate,
+  not a placeholder for a real one — this household's WhatsApp bridge is a
+  LAN-only service (see the backend repo's CLAUDE.md) that this Edge
+  Function, running on Supabase's infrastructure, cannot reach, so there is
+  no way to send FROM here. wa.me needs no backend at all.
+
+  Message/e-mail HISTORY is deliberately NOT shown here, for the same
+  reachability reason plus a second one: nothing today stores past
+  WhatsApp/e-mail content keyed by contact. `daily_reports` only holds the
+  morning's triage summary, not raw messages. Building that would mean a
+  new sync pipeline (see the backend repo's CLAUDE.md), which is real
+  future work, not a bug in this page.
+-->
+<link rel="stylesheet" href="shared-base.css">
+<link rel="stylesheet" href="shared-menu.css">
+<link rel="stylesheet" href="shared-modal.css">
+<link rel="stylesheet" href="shared-toast.css">
+<link rel="stylesheet" href="shared-inputs.css">
+<style>
+  body{
+    padding:max(16px,env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom));
+  }
+  .wrap{max-width:640px;margin:0 auto}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 8px}
+  .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
+  .subheader{display:flex;align-items:baseline;justify-content:space-between;gap:10px;min-width:0;margin:0 0 16px}
+  h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
+  h3{font-size:14px;font-weight:650;margin:22px 0 8px;color:var(--muted)}
+  .searchrow{display:flex;gap:8px;margin:0 0 14px}
+  .searchrow input[type=search]{
+    flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+    -webkit-appearance:none;
+  }
+  .row{display:flex;flex-direction:column;gap:4px;padding:14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background-color .15s ease}
+  .row:hover{background:rgba(127,127,127,.06)}
+  .row:last-child{border-bottom:none}
+  .row .nm{font-size:15px;font-weight:600;margin:0;word-wrap:break-word}
+  .row .meta{font-size:12.5px;color:var(--muted);margin:0}
+  .addrow-btn{margin:8px 0 0}
+  button.primary.full{width:100%}
+  /* ---- detail ---- */
+  .cli-head{margin:0 0 4px}
+  .cli-head .nm{font-size:19px;font-weight:650;margin:0;word-wrap:break-word;cursor:pointer}
+  .cli-head .nm:hover{opacity:.75}
+  .infofield{
+    display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+    padding:10px 0;border-top:1px solid var(--border);
+  }
+  .infofield .lbl{font-size:12px;color:var(--muted);margin:0;flex:none}
+  .infofield .val{font-size:14px;text-align:right;word-break:break-word}
+  .infofield .val.empty{color:var(--muted);font-style:italic}
+  .detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
+  .totals-card{padding:14px;margin-top:16px}
+  .totals-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px}
+  .totals-grid .t{grid-column:1 / -1;border-top:1px solid var(--border);margin-top:2px;padding-top:10px}
+  .totals-grid .lbl{font-size:12px;color:var(--muted);margin:0}
+  .totals-grid .val{font-size:16px;font-weight:650;margin:2px 0 0}
+  .totals-grid .val.pos{color:#16a34a}
+  .totals-grid .val.neg{color:var(--danger)}
+  @media (prefers-color-scheme: dark){ .totals-grid .val.pos{color:#4ade80} }
+  .pill{
+    display:inline-block;font-size:11.5px;font-weight:650;padding:3px 9px;border-radius:999px;
+    white-space:nowrap;
+  }
+  .pill.st-lead{background:rgba(127,127,127,.14);color:var(--muted)}
+  .pill.st-orcamento{background:rgba(180,83,9,.14);color:var(--warn)}
+  .pill.st-confirmado{background:rgba(37,99,235,.14);color:var(--accent)}
+  .pill.st-entregue{background:rgba(22,163,74,.14);color:#16a34a}
+  .pill.st-cancelado{background:rgba(220,38,38,.14);color:var(--danger)}
+  @media (prefers-color-scheme: dark){ .pill.st-entregue{color:#4ade80} }
+  .venda-row, .pay-row{
+    display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);
+    cursor:pointer;transition:background-color .15s ease;
+  }
+  .venda-row:hover, .pay-row:hover{background:rgba(127,127,127,.06)}
+  .venda-row:last-child, .pay-row:last-child{border-bottom:none}
+  .venda-row .body, .pay-row .body{flex:1;min-width:0}
+  .venda-row .body .txt, .pay-row .body .txt{font-size:14.5px;margin:0;word-wrap:break-word}
+  .venda-row .body .meta, .pay-row .body .meta{font-size:12.5px;color:var(--muted);margin:3px 0 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .venda-row .amt{font-size:14.5px;font-weight:650;white-space:nowrap;flex:none}
+  /* ---- WhatsApp compose ---- */
+  .wa-card{padding:14px}
+  .wa-card textarea{
+    width:100%;min-height:76px;resize:vertical;font:inherit;font-size:14px;
+    padding:10px 12px;border-radius:10px;border:1px solid var(--border-strong);
+    background:var(--bg);color:var(--text);box-sizing:border-box;
+  }
+  .wa-send{
+    display:flex;align-items:center;justify-content:center;gap:6px;width:100%;
+    margin-top:10px;padding:13px 16px;border-radius:12px;border:none;
+    background:#25d366;color:#fff;font:inherit;font-size:15px;font-weight:650;
+    text-decoration:none;cursor:pointer;transition:opacity .15s ease,filter .15s ease;
+  }
+  .wa-send:hover{filter:brightness(1.06)}
+  .wa-send.disabled{opacity:.45;pointer-events:none}
+  .wa-hint{font-size:13px;color:var(--muted);margin:0}
+  .hist-note{font-size:12.5px;color:var(--muted);margin:10px 0 0;font-style:italic}
+</style>
+</head>
+<body>
+<div id="root" class="wrap"><p class="msg">Carregando…</p></div>
+
+<script>
+const root = document.getElementById("root");
+let clientes = [];
+let searchTerm = "";
+
+const PAGE_LOGIN = {
+  title: "Clientes",
+  subtitle: "Digite a senha para acessar.",
+  onSuccess: () => loadClientes(),
+};
+</script>
+<script src="shared-api.js"></script>
+<script src="shared-menu.js"></script>
+<script src="shared-ui.js"></script>
+<script src="shared-format.js"></script>
+<script>
+
+const CURRENT_PAGE = "clientes";
+
+const STATUS_META = {
+  lead:       { label: "Lead" },
+  orcamento:  { label: "Orçamento" },
+  confirmado: { label: "Confirmado" },
+  entregue:   { label: "Entregue" },
+  cancelado:  { label: "Cancelado" },
+};
+function statusPillHtml(status){
+  const m = STATUS_META[status] || { label: status };
+  return '<span class="pill st-' + esc(status) + '">' + esc(m.label) + '</span>';
+}
+
+function navHeader(title, backAction){
+  const topRow = '<header><div class="hleft">' +
+    '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
+    '<h1 style="flex:1">' + (backAction ? 'Clientes' : esc(title)) + '</h1>' +
+    '</div></header>';
+  if(!backAction) return topRow;
+  return topRow + '<div class="subheader">' +
+    '<button class="link" id="back">← Clientes</button>' +
+  '</div>';
+}
+function wireNav(backAction){
+  wireMenuButton();
+  if(backAction) document.getElementById("back").addEventListener("click", backAction);
+}
+
+// ---- wa.me phone normalization ----
+// Digits only. A 10/11-digit number reads as a Brazilian local number (DDD
+// + phone, no country code) and gets 55 prepended, since every phone field
+// in this household's data is Brazilian. Anything already 12+ digits is
+// assumed to carry its own country code and is left alone. Under 10 digits
+// can't be a real number, so it's rejected rather than guessed at — wa.me
+// silently fails on a bad number, and a refused send here is a clearer
+// signal than that.
+function waPhoneDigits(phone){
+  let d = String(phone || "").replace(/\D/g, "");
+  if(d.length === 10 || d.length === 11) d = "55" + d;
+  return d.length >= 12 ? d : "";
+}
+
+// ---- list screen ----
+
+async function loadClientes(){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  if(!getPass()){ showLogin(); return; }
+  try{
+    const data = await api("clientes");
+    clientes = data.clientes || [];
+    const wanted = new URLSearchParams(location.search).get("id");
+    if(wanted){
+      history.replaceState(null, "", location.pathname);
+      openCliente(wanted);
+      return;
+    }
+    renderList();
+  }catch(e){ handleAuthError(e, loadClientes); }
+}
+
+function matchesSearch(c, term){
+  if(!term) return true;
+  const t = term.toLowerCase();
+  return [c.name, c.organization, c.phone, c.email].some(
+    v => String(v || "").toLowerCase().indexOf(t) >= 0);
+}
+
+function clienteRowHtml(c){
+  const meta = [c.organization, c.phone].filter(Boolean).join(" · ");
+  return '<div class="row" data-id="' + esc(c.id) + '">' +
+    '<p class="nm">' + esc(c.name) + '</p>' +
+    (meta ? '<p class="meta">' + esc(meta) + '</p>' : '') +
+  '</div>';
+}
+
+function renderList(){
+  const shown = clientes.filter(c => matchesSearch(c, searchTerm));
+  const rowsHtml = clientes.length === 0
+    ? '<p class="msg">Nenhum cliente ainda. Toque em "+ Novo cliente" para começar.</p>'
+    : (shown.length === 0
+        ? '<p class="msg" id="no-match">Nenhum cliente encontrado.</p>'
+        : '<div class="card" id="list-card">' + shown.map(clienteRowHtml).join("") + '</div>');
+
+  root.innerHTML = navHeader("Clientes", null) +
+    '<div class="searchrow">' +
+      '<input type="search" id="search" placeholder="Buscar por nome, empresa, telefone ou e-mail" ' +
+        'value="' + esc(searchTerm) + '">' +
+    '</div>' +
+    rowsHtml +
+    '<button class="primary full addrow-btn" id="new-cliente">+ Novo cliente</button>';
+
+  wireNav(null);
+
+  const search = document.getElementById("search");
+  search.addEventListener("input", () => {
+    searchTerm = search.value.trim();
+    redrawList();
+  });
+  wireListRows();
+  document.getElementById("new-cliente").addEventListener("click", () => openClienteModal(null));
+}
+
+function redrawList(){
+  const shown = clientes.filter(c => matchesSearch(c, searchTerm));
+  const card = document.getElementById("list-card") || document.getElementById("no-match");
+  const html = shown.length === 0
+    ? '<p class="msg" id="no-match">Nenhum cliente encontrado.</p>'
+    : '<div class="card" id="list-card">' + shown.map(clienteRowHtml).join("") + '</div>';
+  if(card){
+    card.outerHTML = html;
+    wireListRows();
+  }
+}
+
+function wireListRows(){
+  root.querySelectorAll(".row[data-id]").forEach(row => {
+    row.addEventListener("click", () => openCliente(row.dataset.id));
+  });
+}
+
+// ---- create/edit modal ----
+// One modal for both: the full field set (name/organization/phone/email/
+// notes) either way, unlike vendas.html's inline picker which only ever
+// creates by name — this page IS the place to fill in the rest.
+
+function openClienteModal(c){
+  const isEdit = !!c;
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-card">' +
+      '<h3>' + (isEdit ? "Editar cliente" : "Novo cliente") + '</h3>' +
+      '<label for="cli-name">Nome</label>' +
+      '<input type="text" id="cli-name" value="' + esc(isEdit ? c.name : "") + '">' +
+      '<label for="cli-org">Empresa / organização (opcional)</label>' +
+      '<input type="text" id="cli-org" value="' + esc(isEdit ? (c.organization || "") : "") + '">' +
+      '<label for="cli-phone">Telefone (opcional)</label>' +
+      '<input type="text" id="cli-phone" inputmode="tel" placeholder="ex: (11) 99445-2426" ' +
+        'value="' + esc(isEdit ? (c.phone || "") : "") + '">' +
+      '<label for="cli-email">E-mail (opcional)</label>' +
+      '<input type="text" id="cli-email" inputmode="email" value="' + esc(isEdit ? (c.email || "") : "") + '">' +
+      '<label for="cli-notes">Notas (opcional)</label>' +
+      '<input type="text" id="cli-notes" value="' + esc(isEdit ? (c.notes || "") : "") + '">' +
+      '<div class="modal-actions">' +
+        '<button class="cancel" id="cli-cancel">Cancelar</button>' +
+        '<button class="save" id="cli-ok">Salvar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  function onKey(e){ if(e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
+  backdrop.querySelector("#cli-cancel").addEventListener("click", close);
+
+  backdrop.querySelector("#cli-ok").addEventListener("click", async () => {
+    const name = backdrop.querySelector("#cli-name").value.trim();
+    if(!name){ alert("O nome não pode ficar vazio."); return; }
+    const payload = {
+      name,
+      organization: backdrop.querySelector("#cli-org").value.trim() || null,
+      phone: backdrop.querySelector("#cli-phone").value.trim() || null,
+      email: backdrop.querySelector("#cli-email").value.trim() || null,
+      notes: backdrop.querySelector("#cli-notes").value.trim() || null,
+    };
+    try{
+      if(isEdit){
+        await api("cliente_update", Object.assign({ id: c.id }, payload));
+        close();
+        listToast("Cliente atualizado");
+        openCliente(c.id);
+      }else{
+        const res = await api("cliente_create", payload);
+        close();
+        clientes = [];
+        openCliente(res.cliente.id);
+      }
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadClientes);
+      listToast("Não foi possível salvar", true);
+    }
+  });
+
+  backdrop.querySelector("#cli-name").focus();
+}
+
+// ---- detail screen ----
+
+async function openCliente(id){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  try{
+    const data = await api("cliente_detail", { id });
+    if(!data.found){
+      root.innerHTML = navHeader("Clientes", loadClientes) + '<p class="msg">Cliente não encontrado.</p>';
+      wireNav(loadClientes);
+      return;
+    }
+    renderCliente(data);
+  }catch(e){ handleAuthError(e, loadClientes); }
+}
+
+function infoFieldHtml(label, value){
+  return '<div class="infofield">' +
+    '<span class="lbl">' + esc(label) + '</span>' +
+    '<span class="val' + (value ? '' : ' empty') + '">' + esc(value || "—") + '</span>' +
+  '</div>';
+}
+
+function vendaRowHtml(v){
+  const meta = [statusPillHtml(v.status)];
+  if(v.event_date) meta.push('<span>' + esc(fmtDate(v.event_date + "T00:00:00")) + '</span>');
+  return '<div class="venda-row" data-id="' + esc(v.id) + '">' +
+    '<span class="body">' +
+      '<p class="txt">' + esc(v.name) + '</p>' +
+      '<p class="meta">' + meta.join("") + '</p>' +
+    '</span>' +
+    '<span class="amt">' + fmtMoney(v.total_price) + '</span>' +
+  '</div>';
+}
+
+function pagamentoRowHtml(p){
+  return '<div class="pay-row" data-venda="' + esc(p.venda_id) + '">' +
+    '<span class="body">' +
+      '<p class="txt">' + fmtMoney(p.amount) + (p.method ? ' · ' + esc(p.method) : '') + '</p>' +
+      '<p class="meta">' + esc(fmtDateTime(p.received_at)) +
+        (p.venda ? ' · ' + esc(p.venda.name) : '') + '</p>' +
+    '</span>' +
+  '</div>';
+}
+
+function renderCliente(data){
+  const c = data.cliente;
+  const vendas = data.vendas || [];
+  const pagamentos = data.pagamentos || [];
+
+  const vendasHtml = vendas.length === 0
+    ? '<p class="msg small">Nenhuma venda ainda.</p>'
+    : '<div class="card" id="vendas-card">' + vendas.map(vendaRowHtml).join("") + '</div>';
+  const paysHtml = pagamentos.length === 0
+    ? '<p class="msg small">Nenhum pagamento registrado ainda.</p>'
+    : '<div class="card" id="pays-card">' + pagamentos.map(pagamentoRowHtml).join("") + '</div>';
+
+  const balanceCls = data.balance_due_all > 0 ? "neg" : (data.balance_due_all < 0 ? "pos" : "");
+  const waDigits = waPhoneDigits(c.phone);
+
+  root.innerHTML = navHeader("Clientes", loadClientes) +
+    '<div class="cli-head">' +
+      '<p class="nm" id="cliente-name">' + esc(c.name) + '</p>' +
+    '</div>' +
+    infoFieldHtml("Empresa / organização", c.organization) +
+    infoFieldHtml("Telefone", c.phone) +
+    infoFieldHtml("E-mail", c.email) +
+    infoFieldHtml("Notas", c.notes) +
+    '<div class="detail-actions">' +
+      '<button class="primary small alt" id="edit-cliente">✎ Editar</button>' +
+      '<button class="primary small alt danger" id="del-cliente">🗑 Remover</button>' +
+    '</div>' +
+    (vendas.length > 0 ?
+      '<div class="card totals-card">' +
+        '<div class="totals-grid">' +
+          '<div><p class="lbl">Total vendido</p><p class="val">' + fmtMoney(data.total_price_all) + '</p></div>' +
+          '<div><p class="lbl">Total pago</p><p class="val">' + fmtMoney(data.total_paid_all) + '</p></div>' +
+          '<div class="t"><p class="lbl">Saldo devedor</p><p class="val ' + balanceCls + '">' +
+            fmtMoney(data.balance_due_all) + '</p></div>' +
+        '</div>' +
+      '</div>' : '') +
+    '<h3>💬 WhatsApp</h3>' +
+    '<div class="card wa-card">' +
+      (waDigits
+        ? '<textarea id="wa-text" placeholder="Digite a mensagem…"></textarea>' +
+          '<a class="wa-send disabled" id="wa-send" target="_blank" rel="noopener">Enviar pelo WhatsApp</a>'
+        : '<p class="wa-hint">Adicione um telefone ao cliente para enviar mensagens pelo WhatsApp.</p>') +
+      '<p class="hist-note">Histórico de mensagens (WhatsApp/e-mail) ainda não está disponível — ' +
+        'este botão só abre o WhatsApp com a mensagem pronta, não guarda nem lê conversas.</p>' +
+    '</div>' +
+    '<h3>Vendas</h3>' + vendasHtml +
+    '<h3>Pagamentos</h3>' + paysHtml;
+
+  wireNav(loadClientes);
+
+  document.getElementById("edit-cliente").addEventListener("click", () => openClienteModal(c));
+  document.getElementById("cliente-name").addEventListener("click", () => openClienteModal(c));
+
+  document.getElementById("del-cliente").addEventListener("click", async () => {
+    if(!(await confirmModal('Remover "' + c.name + '"?', "Remover"))) return;
+    try{
+      const res = await api("cliente_delete", { id: c.id });
+      clientes = [];
+      listToast(res.vendas_unlinked > 0
+        ? "Cliente removido — " + res.vendas_unlinked + " venda(s) ficaram sem cliente"
+        : "Cliente removido");
+      loadClientes();
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadClientes);
+      listToast("Não foi possível remover", true);
+    }
+  });
+
+  root.querySelectorAll(".venda-row[data-id]").forEach(row => {
+    row.addEventListener("click", () => { location.href = "vendas.html?id=" + encodeURIComponent(row.dataset.id); });
+  });
+  root.querySelectorAll(".pay-row[data-venda]").forEach(row => {
+    row.addEventListener("click", () => { location.href = "vendas.html?id=" + encodeURIComponent(row.dataset.venda); });
+  });
+
+  if(waDigits){
+    const textEl = document.getElementById("wa-text");
+    const sendEl = document.getElementById("wa-send");
+    const updateHref = () => {
+      const msg = textEl.value.trim();
+      if(!msg){
+        sendEl.classList.add("disabled");
+        sendEl.removeAttribute("href");
+        return;
+      }
+      sendEl.classList.remove("disabled");
+      sendEl.href = "https://wa.me/" + waDigits + "?text=" + encodeURIComponent(msg);
+    };
+    textEl.addEventListener("input", updateHref);
+    updateHref();
+  }
+}
+
+loadClientes();
+</script>
+</body>
+</html>

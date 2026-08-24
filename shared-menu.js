@@ -13,6 +13,7 @@ const MENU_ITEMS = [
   { page: "compras", href: "compras.html", emoji: "🛒", label: "Compras" },
   { page: "estoque", href: "estoque.html", emoji: "📦", label: "Estoque" },
   { page: "produtos", href: "produtos.html", emoji: "🏷️", label: "Produtos" },
+  { page: "clientes", href: "clientes.html", emoji: "👤", label: "Clientes" },
   { page: "vendas", href: "vendas.html", emoji: "🧾", label: "Vendas" },
   { page: "financeiro", href: "financeiro.html", emoji: "💰", label: "Financeiro" },
 ];

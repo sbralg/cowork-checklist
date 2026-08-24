@@ -2,7 +2,7 @@
 
 Context file for Claude Code / Claude sessions working on this repo.
 
-## Status (2026-08-20): front-end refactor + Vendas/Financeiro modules shipped
+## Status (2026-08-24): + Clientes module shipped, front-end refactor + Vendas/Financeiro modules shipped 2026-08-20
 
 Full plan and reasoning in `sbralg/cowork-personal-daily-summary`'s
 `ROADMAP.md` — this entry is the short version.
@@ -38,11 +38,26 @@ Full plan and reasoning in `sbralg/cowork-personal-daily-summary`'s
   Financeiro action set against the real project via the `http`-extension
   trick (see the backend repo's `CLAUDE.md` for the full sequence) before
   building either page against it.
+- **`clientes.html` (2026-08-24)** is the ninth page: the contact record
+  behind a venda — full-field create/edit/delete (not just the by-name-
+  only inline picker `vendas.html` already had), the vendas + pagamentos
+  rollup for that cliente read through the new `cliente_detail` action
+  (`checklist-api` now v27, live-verified the same way as v26) and a
+  "Enviar WhatsApp" composer that builds a `wa.me` deep link client-side —
+  no backend, because this household's WhatsApp bridge is LAN-only and
+  unreachable from the Edge Function (see the backend repo's `CLAUDE.md`
+  for why). `vendas.html`'s cliente block gained a "Ver cliente" link into
+  it. **Message/e-mail history per contact is deliberately not built** —
+  the page says so under the composer rather than leaving a silent gap;
+  see the backend repo's Planned/future for what a real one would need.
+  `test/clientes.test.js` covers create/edit/delete, the totals rollup,
+  the wa.me phone normalization (a Brazilian 10/11-digit number gets `55`
+  prepended, an already-prefixed number is left alone), and the deep link.
 
 ## What this is
 
 The public GitHub Pages front end deployed from this repo's `main` branch,
-served at https://sbralg.github.io/cowork-checklist/. Eight pages sharing a
+served at https://sbralg.github.io/cowork-checklist/. Nine pages sharing a
 set of `shared-*.js`/`shared-*.css` files (see "Shared files" below), no
 build step, no framework:
 
@@ -62,7 +77,11 @@ build step, no framework:
 - `produtos.html` — the product catalogue: what a barcode means, its price
   history as a graph, the editor that corrects its metadata, and removal
   from the catalogue.
-- `vendas.html` — the sales/event pipeline: a `clientes` picker, the full
+- `clientes.html` — the contact record behind a venda: full-field create/
+  edit/delete, the vendas + pagamentos rollup for that cliente, and a
+  `wa.me`-based "Enviar WhatsApp" composer.
+- `vendas.html` — the sales/event pipeline: a `clientes` picker (with a
+  "Ver cliente" link into the full record on `clientes.html`), the full
   Lead→Orçamento→Confirmado→Entregue→Cancelado status, line items
   (produto/serviço) with cost and price, and an editable payment ledger.
   Confirming a payment auto-posts a receita to Financeiro in the same
@@ -149,7 +168,7 @@ what that changes and what stays the same).
   subtitle, onSuccess, beforeShow?}` *before* this script tag loads, so
   `showLogin()` can render the right copy without every call site passing
   it in.
-- `shared-menu.js` — `MENU_ITEMS` (now 8 entries) + the hamburger drawer.
+- `shared-menu.js` — `MENU_ITEMS` (now 9 entries) + the hamburger drawer.
   **This is the file that used to bite**: adding a page used to mean
   hand-editing this array in every other page's copy of it; now it's one
   edit.
@@ -178,7 +197,7 @@ per-page differences), each page's own row rendering and search-matching
 (different data shapes), and — unchanged since before this refactor — the
 barcode scanner, which lives only in `compras.html`.
 
-Six headless Chromium tests, each next to the pages it guards. All serve
+Seven headless Chromium tests, each next to the pages it guards. All serve
 the repo root on an ephemeral port and answer `checklist-api` from an
 in-memory fake, so none touches Supabase nor holds a passphrase.
 **There is no CI — run them by hand before pushing.**
@@ -211,6 +230,12 @@ in-memory fake, so none touches Supabase nor holds a passphrase.
 - `test/financeiro.test.js` — standalone lançamento create/edit/delete,
   the tipo and período filters, and a seeded auto-posted entry's
   "automático" tag and 🔗 deep link back to its venda.
+- `test/clientes.test.js` — full-field create/edit/delete (including the
+  "N venda(s) unlinked" delete toast), search across name/organização/
+  telefone/e-mail, the vendas + pagamentos rollup and its summed totals
+  read through `cliente_detail`, the wa.me phone normalization and its
+  href, and the deep link. Its fake keeps clientes/vendas/pagamentos as
+  real relational state, same reasoning as `vendas.test.js`.
 
 ## Conventions
 
@@ -224,9 +249,10 @@ in-memory fake, so none touches Supabase nor holds a passphrase.
   through a PR meant the user had to merge before seeing it and then do
   branch surgery whenever it needed another pass. Push the work, let
   them look at the live page, iterate with another commit.
-  - Run all six test files BEFORE pushing, every time (`node
+  - Run all seven test files BEFORE pushing, every time (`node
     test/compras.test.js`, `test/stock.test.js`, `test/tarefas.test.js`,
-    `test/hoje.test.js`, `test/vendas.test.js`, `test/financeiro.test.js`).
+    `test/hoje.test.js`, `test/vendas.test.js`, `test/financeiro.test.js`,
+    `test/clientes.test.js`).
     They are the only gate left between a broken page and the live site.
     Any change to a `shared-*.js`/`shared-*.css` file can touch every
     page that loads it, so run the FULL suite (not just the one page you

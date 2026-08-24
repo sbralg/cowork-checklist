@@ -135,8 +135,8 @@ const state = {
   await page.waitForSelector('.menu-panel.open', { timeout: 6000 });
   const menuLinks = await page.$$eval('.menu-item', els =>
     els.map(e => ({ tag: e.tagName, text: e.textContent.trim(), href: e.getAttribute('href') })));
-  check('the menu lists all 8 destinations plus logout, got ' + menuLinks.length,
-    menuLinks.length === 9);
+  check('the menu lists all 9 destinations plus logout, got ' + menuLinks.length,
+    menuLinks.length === 10);
   check('the current page (Tarefas) renders as an inert label, not a link',
     menuLinks.some(m => m.tag === 'SPAN' && m.text === '✓ Tarefas'));
   check('Compras is reachable under its renamed href (not the old shopping.html)',
