@@ -60,7 +60,9 @@
   .row .top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
   .row .txt{font-size:15px;font-weight:600;margin:0;word-wrap:break-word;flex:1;min-width:0}
   .row .price{font-size:14px;font-weight:650;white-space:nowrap}
-  .row .meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+  .row .meta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--muted)}
+  .row .meta .cli{flex:1;min-width:0;overflow-wrap:break-word}
+  .row .meta-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;flex:none}
   .pill{
     display:inline-block;font-size:11.5px;font-weight:650;padding:3px 9px;border-radius:999px;
     white-space:nowrap;
@@ -79,14 +81,14 @@
   }
   /* ---- detail ---- */
   .evento-head{margin:0 0 14px}
-  .evento-head .name{font-size:19px;font-weight:650;margin:0 0 6px;word-wrap:break-word;cursor:pointer}
-  .evento-head .name:hover{opacity:.75}
+  .evt-title{font-size:16px;font-weight:650;margin:0;text-align:right;word-wrap:break-word;cursor:pointer}
+  .evt-title:hover{opacity:.75}
   .cli-block{
     display:flex;align-items:center;justify-content:space-between;gap:10px;
     padding:12px 14px;border-radius:12px;background:rgba(127,127,127,.06);margin:10px 0;
   }
   .cli-block .who{min-width:0}
-  .cli-block .who .nm{font-size:15px;font-weight:650;margin:0}
+  .cli-block .who .nm{font-size:15px;font-weight:650;margin:0;color:var(--text)}
   .cli-block .who .sub{font-size:12.5px;color:var(--muted);margin:2px 0 0;word-wrap:break-word}
   .cli-block .cli-actions{display:flex;align-items:center;gap:4px;flex:none}
   .statusline, .datefield{
@@ -201,6 +203,7 @@ function navHeader(title, backAction){
   if(!backAction) return topRow;
   return topRow + '<div class="subheader">' +
     '<button class="link" id="back">← Eventos</button>' +
+    (title ? '<h2 class="evt-title" id="evento-name">' + esc(title) + '</h2>' : '') +
   '</div>';
 }
 function wireNav(backAction){
@@ -243,7 +246,9 @@ function eventoRowHtml(v){
       '<p class="txt">' + esc(v.name) + '</p>' +
       '<span class="price">' + fmtMoney(v.total_price) + '</span>' +
     '</div>' +
-    '<div class="meta"><span>' + esc(cliName) + '</span>' + bits.join("") + '</div>' +
+    '<div class="meta"><span class="cli">' + esc(cliName) + '</span>' +
+      '<span class="meta-right">' + bits.join("") + '</span>' +
+    '</div>' +
   '</div>';
 }
 
@@ -516,7 +521,7 @@ async function openEvento(id){
   try{
     const data = await api("evento_detail", { id });
     if(!data.found){
-      root.innerHTML = navHeader("Eventos", loadEventos) + '<p class="msg">Evento não encontrado.</p>';
+      root.innerHTML = navHeader("", loadEventos) + '<p class="msg">Evento não encontrado.</p>';
       wireNav(loadEventos);
       return;
     }
@@ -586,9 +591,8 @@ function renderEvento(data){
   const profitCls = data.profit > 0 ? "pos" : (data.profit < 0 ? "neg" : "");
   const balanceCls = data.balance_due > 0 ? "neg" : (data.balance_due < 0 ? "pos" : "");
 
-  root.innerHTML = navHeader("Eventos", loadEventos) +
+  root.innerHTML = navHeader(v.name, loadEventos) +
     '<div class="evento-head">' +
-      '<p class="name" id="evento-name">' + esc(v.name) + '</p>' +
       statusPillHtml(v.status) + ' ' + paymentPillHtml(data) +
     cliBlock +
     '<div class="statusline">' +
