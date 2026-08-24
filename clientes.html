@@ -113,9 +113,7 @@
     text-decoration:none;cursor:pointer;transition:opacity .15s ease,filter .15s ease;
   }
   .wa-send:hover{filter:brightness(1.06)}
-  .wa-send.disabled{opacity:.45;pointer-events:none}
   .wa-hint{font-size:13px;color:var(--muted);margin:0}
-  .hist-note{font-size:12.5px;color:var(--muted);margin:10px 0 0;font-style:italic}
 </style>
 </head>
 <body>
@@ -411,10 +409,8 @@ function renderCliente(data){
     '<div class="card wa-card">' +
       (waDigits
         ? '<textarea id="wa-text" placeholder="Digite a mensagem…"></textarea>' +
-          '<a class="wa-send disabled" id="wa-send" target="_blank" rel="noopener">Enviar pelo WhatsApp</a>'
+          '<a class="wa-send" id="wa-send" target="_blank" rel="noopener">Abrir contato no WhatsApp</a>'
         : '<p class="wa-hint">Adicione um telefone ao cliente para enviar mensagens pelo WhatsApp.</p>') +
-      '<p class="hist-note">Histórico de mensagens (WhatsApp/e-mail) ainda não está disponível — ' +
-        'este botão só abre o WhatsApp com a mensagem pronta, não guarda nem lê conversas.</p>' +
     '</div>' +
     '<h3>Eventos</h3>' + eventosHtml +
     '<h3>Pagamentos</h3>' + paysHtml;
@@ -452,11 +448,11 @@ function renderCliente(data){
     const updateHref = () => {
       const msg = textEl.value.trim();
       if(!msg){
-        sendEl.classList.add("disabled");
-        sendEl.removeAttribute("href");
+        sendEl.textContent = "Abrir contato no WhatsApp";
+        sendEl.href = "https://wa.me/" + waDigits;
         return;
       }
-      sendEl.classList.remove("disabled");
+      sendEl.textContent = "Enviar pelo WhatsApp";
       sendEl.href = "https://wa.me/" + waDigits + "?text=" + encodeURIComponent(msg);
     };
     textEl.addEventListener("input", updateHref);
