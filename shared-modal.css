@@ -2,7 +2,7 @@
    top of (confirmModal, promptModal, and every purpose-built one).
 
    `.modal-card` now always carries max-height:90vh + overflow:auto —
-   previously only estoque.html/produtos.html had it (their dialogs, e.g.
+   previously only estoque.html/insumos.html had it (their dialogs, e.g.
    the ingredient picker, can genuinely overflow a short viewport); it's a
    harmless addition on pages whose dialogs were always short. Likewise
    `.modal-actions .save.danger` is now universal, closing a real gap

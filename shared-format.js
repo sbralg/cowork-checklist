@@ -46,9 +46,9 @@ function fmtDate(iso){
 // "20/08, 14:30". This is the one deliberate, disclosed behavior change
 // from this refactor: index.html/hoje.html used to build this by
 // concatenating two separate calls with a plain space ("20/08 14:30"), and
-// produtos.html used a single combined toLocaleString call, which Intl
+// insumos.html used a single combined toLocaleString call, which Intl
 // renders with a comma. This file keeps the single-call version — simpler
-// code, and produtos.html was the more recently written of the two — so
+// code, and insumos.html was the more recently written of the two — so
 // tarefas.html's "desde"/"concluída em" lines and hoje.html's "gerado em"/
 // report timestamps now show a comma where they used to show a space.
 function fmtDateTime(iso){

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Produtos">
+<meta name="apple-mobile-web-app-title" content="Insumos">
 <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<title>Produtos</title>
+<title>Insumos</title>
 <!--
-  Data-free shell for the product catalogue. Same pattern as the other
+  Data-free shell for the insumo catalogue. Same pattern as the other
   pages: hosted on public GitHub Pages, holds NO keys and NO data, asks for
   the shared passphrase, then talks only to the gated Supabase Edge Function
   (checklist-api).
@@ -17,7 +17,7 @@
   This page is the REFERENCE side of the catalogue — what a barcode means,
   what it costs over time, and where its metadata gets corrected. The
   PANTRY side (how many are in the cupboard, and changing that) is
-  estoque.html. Both read the same `products` action and both link to each
+  estoque.html. Both read the same `insumos` action and both link to each
   other; the split is that this one is read-mostly and alphabetical, while
   the other is state that changes daily and sorts by what is running out.
 -->
@@ -46,18 +46,18 @@
   .body .txt{font-size:15px;line-height:1.35;margin:0;word-wrap:break-word}
   .body .meta{font-size:12px;color:var(--muted);margin:3px 0 0}
   /* How many packages are in the cupboard. Zero is a real, ordinary answer
-     — the product is in the catalogue and out of stock — so it is muted
+     — the insumo is in the catalogue and out of stock — so it is muted
      rather than alarming. */
   .stock-badge{
     flex:none;font-size:12px;font-weight:650;padding:5px 9px;border-radius:999px;
     background:rgba(127,127,127,.12);color:var(--muted);white-space:nowrap;
   }
   .stock-badge.has{background:rgba(37,99,235,.14);color:var(--accent)}
-  /* What a product IS, as opposed to which SKU it is — the link a recipe
+  /* What an insumo IS, as opposed to which SKU it is — the link a recipe
      reads. Shown on every catalogue row, including when it is missing:
      "sem ingrediente" is muted rather than alarming, exactly like the
      missing-barcode marker on the shopping list, because an uncategorised
-     product is normal today. Seeing which rows are blank is what makes a
+     insumo is normal today. Seeing which rows are blank is what makes a
      categorising pass down the list possible at all. */
   .ing-tag{
     display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;
@@ -71,13 +71,13 @@
     border:1px solid var(--border-strong);background:var(--card);color:var(--text);
     -webkit-appearance:none;
   }
-  /* ---- product detail ---- */
-  .prod-head{display:flex;gap:14px;align-items:flex-start;margin:0 0 14px}
-  .prod-head .thumb{width:72px;height:72px}
-  .prod-title{min-width:0;flex:1}
-  .prod-title .name{font-size:17px;font-weight:650;margin:0;word-wrap:break-word}
-  .prod-title .sub{font-size:13px;color:var(--muted);margin:4px 0 0}
-  .prod-title .code{font-size:12px;color:var(--muted);margin:6px 0 0;font-variant-numeric:tabular-nums}
+  /* ---- insumo detail ---- */
+  .ins-head{display:flex;gap:14px;align-items:flex-start;margin:0 0 14px}
+  .ins-head .thumb{width:72px;height:72px}
+  .ins-title{min-width:0;flex:1}
+  .ins-title .name{font-size:17px;font-weight:650;margin:0;word-wrap:break-word}
+  .ins-title .sub{font-size:13px;color:var(--muted);margin:4px 0 0}
+  .ins-title .code{font-size:12px;color:var(--muted);margin:6px 0 0;font-variant-numeric:tabular-nums}
   .detail-actions{display:flex;gap:8px;flex-wrap:wrap}
   /* Why a row is a manual placeholder instead of real OFF data: OFF
      genuinely doesn't have the barcode, or the lookup itself never got an
@@ -113,7 +113,7 @@
   .stock-line .sub{font-size:12px;color:var(--muted);margin:2px 0 0}
   /* The ingredient line sits with the pantry count rather than inside the
      metadata editor: it is not a fact about the package, it is what this
-     product counts AS. Same divider treatment so the two read as one block
+     insumo counts AS. Same divider treatment so the two read as one block
      of "what this is". */
   .ing-line{
     display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
@@ -175,15 +175,15 @@
 
 <script>
 const root = document.getElementById("root");
-const CURRENT_PAGE = "produtos";
+const CURRENT_PAGE = "insumos";
 // The whole catalogue, loaded once per page view and filtered in the
-// browser. Kept at module scope so returning from a product's detail sheet
+// browser. Kept at module scope so returning from an insumo's detail sheet
 // doesn't refetch it.
 let catalog = [];
 let searchTerm = "";
 
 const PAGE_LOGIN = {
-  title: "Produtos",
+  title: "Insumos",
   subtitle: "Digite a senha para acessar.",
   onSuccess: () => loadCatalog(),
 };
@@ -197,7 +197,7 @@ const PAGE_LOGIN = {
 <script>
 
 // Brand · size, the one-line identity of a catalogue row.
-function productMeta(p){
+function insumoMeta(p){
   const bits = [];
   if(p.brand) bits.push(tidyShouted(p.brand));
   const size = fmtNetQty(p.net_qty, p.net_unit);
@@ -215,7 +215,7 @@ function ingredientTagHtml(p){
 function navHeader(title, backAction){
   const topRow = '<header><div class="hleft">' +
     '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
-    '<h1 style="flex:1">' + (backAction ? 'Produtos' : esc(title)) + '</h1>' +
+    '<h1 style="flex:1">' + (backAction ? 'Insumos' : esc(title)) + '</h1>' +
     '</div></header>';
   if(!backAction) return topRow;
   return topRow + '<div class="subheader">' +
@@ -234,17 +234,17 @@ async function loadCatalog(){
   root.innerHTML = '<p class="msg">Carregando…</p>';
   if(!getPass()){ showLogin(); return; }
   try{
-    const data = await api("products");
-    catalog = data.products || [];
-    // A product deep-linked from Estoque opens straight on its detail
+    const data = await api("insumos");
+    catalog = data.insumos || [];
+    // An insumo deep-linked from Estoque opens straight on its detail
     // sheet; the catalogue is still loaded behind it so "← Catálogo"
     // has something to go back to.
     const wanted = new URLSearchParams(location.search).get("gtin");
     if(wanted){
       // Consumed once: a later reload of the catalogue is a deliberate
-      // "back", not a request to reopen the same product forever.
+      // "back", not a request to reopen the same insumo forever.
       history.replaceState(null, "", location.pathname);
-      openProduct(wanted);
+      openInsumo(wanted);
       return;
     }
     renderCatalog();
@@ -267,8 +267,8 @@ function matchesSearch(p, term){
   return digits !== "" && String(p.gtin || "").indexOf(digits) >= 0;
 }
 
-function productRowHtml(p){
-  const meta = productMeta(p);
+function insumoRowHtml(p){
+  const meta = insumoMeta(p);
   const price = p.last_price != null ? fmtMoney(p.last_price) : "";
   const sub = [meta, price].filter(Boolean).join(" · ");
   // A row with no real OFF data yet — worth noticing without opening it,
@@ -293,19 +293,19 @@ function productRowHtml(p){
 function renderCatalog(){
   const shown = catalog.filter(p => matchesSearch(p, searchTerm));
   const rowsHtml = catalog.length === 0
-    ? '<p class="msg">Nenhum produto no catálogo ainda. Eles entram sozinhos ao ' +
+    ? '<p class="msg">Nenhum insumo no catálogo ainda. Eles entram sozinhos ao ' +
       'ler um código de barras na lista de compras.</p>'
     : (shown.length === 0
-        ? '<p class="msg" id="no-match">Nenhum produto encontrado.</p>'
-        : '<div class="card" id="cat-card">' + shown.map(productRowHtml).join("") + '</div>');
+        ? '<p class="msg" id="no-match">Nenhum insumo encontrado.</p>'
+        : '<div class="card" id="cat-card">' + shown.map(insumoRowHtml).join("") + '</div>');
 
-  root.innerHTML = navHeader("Produtos", null) +
+  root.innerHTML = navHeader("Insumos", null) +
     '<div class="searchrow">' +
       '<input type="search" id="search" placeholder="Buscar por nome, marca ou código" ' +
         'value="' + esc(searchTerm) + '">' +
     '</div>' +
     rowsHtml +
-    '<p class="msg small">' + catalog.length + ' produto' +
+    '<p class="msg small">' + catalog.length + ' insumo' +
       (catalog.length === 1 ? '' : 's') + ' no catálogo</p>';
 
   wireNav(null);
@@ -318,8 +318,8 @@ function renderCatalog(){
     const card = document.getElementById("cat-card") || document.getElementById("no-match");
     const next = catalog.filter(p => matchesSearch(p, searchTerm));
     const html = next.length === 0
-      ? '<p class="msg" id="no-match">Nenhum produto encontrado.</p>'
-      : '<div class="card" id="cat-card">' + next.map(productRowHtml).join("") + '</div>';
+      ? '<p class="msg" id="no-match">Nenhum insumo encontrado.</p>'
+      : '<div class="card" id="cat-card">' + next.map(insumoRowHtml).join("") + '</div>';
     if(card){
       card.outerHTML = html;
       wireCatalogRows();
@@ -330,7 +330,7 @@ function renderCatalog(){
 
 function wireCatalogRows(){
   root.querySelectorAll(".row[data-gtin]").forEach(row => {
-    row.addEventListener("click", () => openProduct(row.dataset.gtin));
+    row.addEventListener("click", () => openInsumo(row.dataset.gtin));
   });
 }
 
@@ -447,7 +447,7 @@ function wireChart(prices){
   });
 }
 
-// ---- product detail ----
+// ---- insumo detail ----
 
 // Two different flags for two different situations, per off_lookup_status:
 // "not_found" means all four OFF sibling databases answered and none had
@@ -466,10 +466,10 @@ function offFlagHtml(p){
     '<div class="body">' +
       '<p>' + (notFound
         ? 'Não encontrado em nenhuma base do Open Food Facts. Você pode ' +
-          'cadastrar o produto por lá (app ou site) e depois puxar os dados ' +
+          'cadastrar o insumo por lá (app ou site) e depois puxar os dados ' +
           'aqui.'
         : 'Não foi possível consultar o Open Food Facts agora (a base pode ' +
-          'estar fora do ar) — ainda não se sabe se o produto existe lá.'
+          'estar fora do ar) — ainda não se sabe se o insumo existe lá.'
       ) + '</p>' +
       '<div class="actions">' +
         (notFound
@@ -506,23 +506,23 @@ function movementRowHtml(m){
   '</div>';
 }
 
-async function openProduct(gtin){
+async function openInsumo(gtin){
   root.innerHTML = '<p class="msg">Carregando…</p>';
   try{
-    const data = await api("product_detail", { gtin });
+    const data = await api("insumo_detail", { gtin });
     if(!data.found){
-      root.innerHTML = navHeader("Produtos", loadCatalog) +
-        '<p class="msg">Produto não encontrado.</p>';
+      root.innerHTML = navHeader("Insumos", loadCatalog) +
+        '<p class="msg">Insumo não encontrado.</p>';
       wireNav(loadCatalog);
       return;
     }
-    renderProduct(data);
+    renderInsumo(data);
   }catch(e){ handleAuthError(e, loadCatalog); }
 }
 
-function renderProduct(data){
-  const p = data.product;
-  const meta = productMeta(p);
+function renderInsumo(data){
+  const p = data.insumo;
+  const meta = insumoMeta(p);
   const prices = data.prices || [];
   const movements = data.movements || [];
   // What the pantry holds in real units: 3 packs × 380 g. Only shown when
@@ -552,19 +552,19 @@ function renderProduct(data){
     ? '<p class="msg small">Nenhuma movimentação de estoque ainda.</p>'
     : '<div class="card" id="mov-card">' + movements.map(movementRowHtml).join("") + '</div>';
 
-  root.innerHTML = navHeader("Produtos", loadCatalog) +
+  root.innerHTML = navHeader("Insumos", loadCatalog) +
     '<div class="card pad">' +
-      '<div class="prod-head">' +
+      '<div class="ins-head">' +
         thumbHtml(p) +
-        '<div class="prod-title">' +
+        '<div class="ins-title">' +
           '<p class="name">' + esc(p.name) + '</p>' +
           (meta ? '<p class="sub">' + esc(meta) + '</p>' : '') +
           '<p class="code">' + esc(p.gtin) + '</p>' +
         '</div>' +
       '</div>' +
       '<div class="detail-actions">' +
-        '<button class="primary small alt" id="edit-product">✎ Editar dados</button>' +
-        '<button class="primary small alt danger" id="del-product">🗑 Remover</button>' +
+        '<button class="primary small alt" id="edit-insumo">✎ Editar dados</button>' +
+        '<button class="primary small alt danger" id="del-insumo">🗑 Remover</button>' +
       '</div>' +
       offFlagHtml(p) +
       '<div class="ing-line">' +
@@ -593,21 +593,21 @@ function renderProduct(data){
   wireNav(loadCatalog);
   wireChart(prices);
 
-  document.getElementById("edit-product").addEventListener("click", async () => {
-    const edited = await productEditModal(p);
+  document.getElementById("edit-insumo").addEventListener("click", async () => {
+    const edited = await insumoEditModal(p);
     if(!edited) return;
     try{
-      await api("product_upsert", {
+      await api("insumo_upsert", {
         gtin: p.gtin,
         name: edited.name,
         brand: edited.brand,
         net_qty: edited.size ? edited.size.net_qty : null,
         net_unit: edited.size ? edited.size.net_unit : null,
       });
-      listToast("Produto atualizado");
+      listToast("Insumo atualizado");
       // The catalogue behind this sheet is now stale in the same fields.
       catalog = [];
-      openProduct(p.gtin);
+      openInsumo(p.gtin);
     }catch(e){
       if(e.unauthorized) return handleAuthError(e, loadCatalog);
       listToast("Não foi possível salvar", true);
@@ -618,32 +618,32 @@ function renderProduct(data){
     const chosen = await ingredientModal(p, { showName: false, onAuthError: e => handleAuthError(e, loadCatalog) });
     if(!chosen) return;
     try{
-      const res = await api("product_set_ingredient", { gtin: p.gtin, ...chosen.payload });
+      const res = await api("insumo_set_ingredient", { gtin: p.gtin, ...chosen.payload });
       listToast(chosen.payload.ingredient_id === null && !chosen.payload.ingredient_name
         ? "Ingrediente removido"
-        : "Ingrediente: " + (res.product && res.product.ingredient
-            ? res.product.ingredient.name : ""));
+        : "Ingrediente: " + (res.insumo && res.insumo.ingredient
+            ? res.insumo.ingredient.name : ""));
       // The catalogue behind this sheet now shows the wrong tag on this row,
       // and the picker's own list has a new entry and/or a stale count.
       catalog = [];
       ingredientCache = null;
-      openProduct(p.gtin);
+      openInsumo(p.gtin);
     }catch(e){
       if(e.unauthorized) return handleAuthError(e, loadCatalog);
       listToast("Não foi possível salvar o ingrediente", true);
     }
   });
 
-  // Removing a product is the one destructive act on this page, and it takes
+  // Removing an insumo is the one destructive act on this page, and it takes
   // its price history and its pantry ledger with it (both foreign keys
   // cascade). So the API refuses the first attempt whenever there is
   // anything to lose and reports exactly what — the dialog below is built
   // from ITS numbers, not from this sheet, which may have been open a while.
-  document.getElementById("del-product").addEventListener("click", async () => {
+  document.getElementById("del-insumo").addEventListener("click", async () => {
     if(!(await confirmModal(
       'Remover "' + (p.name || p.gtin) + '" do catálogo?', "Remover"))) return;
     try{
-      let res = await api("product_delete", { gtin: p.gtin });
+      let res = await api("insumo_delete", { gtin: p.gtin });
       if(res.ok === false && res.reason === "has_history"){
         const lost = [];
         if(Number(res.qty) !== 0){
@@ -659,12 +659,12 @@ function renderProduct(data){
             " sem código de barras, mas não some" + (res.items === 1 ? "" : "m") + "."
           : "";
         if(!(await confirmModal(
-          "Este produto tem histórico: " + lost.join(", ") + ". Removê-lo apaga " +
+          "Este insumo tem histórico: " + lost.join(", ") + ". Removê-lo apaga " +
           "isso junto, e não dá para desfazer." + itemsNote,
           "Remover mesmo assim"))) return;
-        res = await api("product_delete", { gtin: p.gtin, force: true });
+        res = await api("insumo_delete", { gtin: p.gtin, force: true });
       }
-      listToast("Produto removido do catálogo");
+      listToast("Insumo removido do catálogo");
       catalog = [];
       loadCatalog();
     }catch(e){
@@ -679,7 +679,7 @@ function renderProduct(data){
       retryBtn.disabled = true;
       retryBtn.textContent = "Consultando…";
       try{
-        const res = await api("product_retry_off", { gtin: p.gtin });
+        const res = await api("insumo_retry_off", { gtin: p.gtin });
         // Whichever way it went, the flag (or its absence) may have
         // changed, so the catalogue behind this sheet is stale in that
         // field — same reasoning as after an edit.
@@ -689,7 +689,7 @@ function renderProduct(data){
           : (res.off_status === "not_found"
               ? "Ainda não encontrado no Open Food Facts"
               : "Não foi possível consultar agora"));
-        openProduct(p.gtin);
+        openInsumo(p.gtin);
       }catch(e){
         if(e.unauthorized) return handleAuthError(e, loadCatalog);
         retryBtn.disabled = false;
@@ -710,7 +710,7 @@ function renderProduct(data){
       row.remove();
       try{
         await api("stock_movement_delete", { id: row.dataset.mov });
-        openProduct(p.gtin);
+        openInsumo(p.gtin);
       }catch(e){
         parent.insertBefore(row, next);
         if(e.unauthorized) return handleAuthError(e, loadCatalog);
@@ -727,15 +727,15 @@ function renderProduct(data){
 // Resolves with {name, brand, size} or null. `size` is null when the amount
 // is blank, which means "no size known" — this dialog CAN clear it, unlike
 // the scan dialog, because correcting metadata is the whole point here.
-function productEditModal(p){
+function insumoEditModal(p){
   const pack = netQtyToFields(p.net_qty, p.net_unit);
   return new Promise(resolve => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
     backdrop.innerHTML =
       '<div class="modal-card">' +
-        '<h3>Editar produto</h3>' +
-        '<label for="pe-name">Nome do produto</label>' +
+        '<h3>Editar insumo</h3>' +
+        '<label for="pe-name">Nome do insumo</label>' +
         '<input type="text" id="pe-name" value="' + esc(p.name || "") + '">' +
         '<label for="pe-brand">Marca (opcional)</label>' +
         '<input type="text" id="pe-brand" placeholder="ex: Nestlé" value="' +

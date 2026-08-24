@@ -12,7 +12,7 @@ const MENU_ITEMS = [
   { page: "tarefas", href: "tarefas.html", emoji: "✓", label: "Tarefas" },
   { page: "compras", href: "compras.html", emoji: "🛒", label: "Compras" },
   { page: "estoque", href: "estoque.html", emoji: "📦", label: "Estoque" },
-  { page: "produtos", href: "produtos.html", emoji: "🏷️", label: "Produtos" },
+  { page: "insumos", href: "insumos.html", emoji: "🏷️", label: "Insumos" },
   { page: "clientes", href: "clientes.html", emoji: "👤", label: "Clientes" },
   { page: "eventos", href: "eventos.html", emoji: "🧾", label: "Eventos" },
   { page: "financeiro", href: "financeiro.html", emoji: "💰", label: "Financeiro" },

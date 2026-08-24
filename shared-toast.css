@@ -1,6 +1,6 @@
 /* shared-toast.css — the transient status pill (listToast()/hideListToast()
    in shared-ui.js). Byte-identical across the 3 pages that had it before
-   this refactor (compras/estoque/produtos); now available everywhere. */
+   this refactor (compras/estoque/insumos); now available everywhere. */
 .toast{
   position:fixed;left:16px;right:16px;
   bottom:max(16px,env(safe-area-inset-bottom));

@@ -1,17 +1,17 @@
-// shared-catalog.js — helpers specific to the product/ingredient catalogue,
-// loaded only by estoque.html and produtos.html (not hoje/tarefas/compras,
+// shared-catalog.js — helpers specific to the insumo/ingredient catalogue,
+// loaded only by estoque.html and insumos.html (not hoje/tarefas/compras,
 // and deliberately NOT by eventos.html either — a cliente is a different
 // entity with different fields, and its picker is its own small page-local
 // implementation rather than a forced generalization of this one).
 //
 // Depends on shared-ui.js (esc) and shared-format.js (PT_SMALL_WORDS) being
 // loaded first — tidyShouted() itself lives in shared-format.js since
-// compras.html needs it too (a product's brand is rendered the same tidied
+// compras.html needs it too (an insumo's brand is rendered the same tidied
 // way on every page that shows one), not just the two catalogue pages.
 
-// Product thumbnail: Open Food Facts' front-of-pack image, or a box emoji
-// placeholder for a hand-registered product. `cls` is an optional extra
-// class (produtos.html's detail sheet wants a bigger thumb than its list
+// Insumo thumbnail: Open Food Facts' front-of-pack image, or a box emoji
+// placeholder for a hand-registered insumo. `cls` is an optional extra
+// class (insumos.html's detail sheet wants a bigger thumb than its list
 // rows do; estoque.html never needs the second argument).
 function thumbHtml(p, cls){
   const c = "thumb" + (cls ? " " + cls : "");
@@ -26,13 +26,13 @@ function thumbHtml(p, cls){
 // "what is it", which is the question a recipe asks. It is assigned by
 // hand, deliberately — Open Food Facts' own categories group by dairy
 // shelf rather than by what a recipe would substitute, and 8 of 19
-// products have no category at all. A wrong link is worse than a blank
+// insumos have no category at all. A wrong link is worse than a blank
 // one, so the household decides. The reasoning is in the API's own comment.
 function ingredientName(p){
   return (p && p.ingredient && p.ingredient.name) ? p.ingredient.name : "";
 }
 
-// Words worth matching a product name against, for the picker's suggestion.
+// Words worth matching an insumo name against, for the picker's suggestion.
 // Two characters or fewer is noise ("de", "e"), and digits are sizes.
 function nameWords(s){
   return String(s || "").toLowerCase()
@@ -41,14 +41,14 @@ function nameWords(s){
     .filter(w => w.length > 2 && PT_SMALL_WORDS.indexOf(w) < 0);
 }
 
-// An existing ingredient whose every word appears in this product's name is
+// An existing ingredient whose every word appears in this insumo's name is
 // very likely the right answer — a second brand of creme de leite finds the
 // first one's ingredient without typing. Only a suggestion: it reorders the
 // list, it never picks for you.
-function looksLikely(ingName, productName){
+function looksLikely(ingName, insumoName){
   const words = nameWords(ingName);
   if(words.length === 0) return false;
-  const target = " " + nameWords(productName).join(" ") + " ";
+  const target = " " + nameWords(insumoName).join(" ") + " ";
   return words.every(w => target.indexOf(" " + w + " ") >= 0);
 }
 
@@ -57,15 +57,15 @@ function looksLikely(ingName, productName){
 // the same question ("which ingredient is this?") and splitting them into
 // two fields would make the common case (it already exists) the slower one.
 //
-// Resolves with {payload} ready to send to product_set_ingredient, or null.
+// Resolves with {payload} ready to send to insumo_set_ingredient, or null.
 // The list is fetched on first open rather than at page load: most visits
 // to either page never touch it.
 //
-// `opts.showName` (default true) prints the product's own name as a `.who`
+// `opts.showName` (default true) prints the insumo's own name as a `.who`
 // line under the title — needed on estoque.html, where the picker opens
 // from a chip inline in the row list and the name isn't otherwise visible
-// in the dialog; skipped on produtos.html, where the picker opens from the
-// product's own detail sheet with the name already on screen behind it.
+// in the dialog; skipped on insumos.html, where the picker opens from the
+// insumo's own detail sheet with the name already on screen behind it.
 // `opts.onAuthError(e)` is called instead of throwing on a 401, so each
 // page can route it through its own handleAuthError/retry loader.
 let ingredientCache = null;
@@ -93,7 +93,7 @@ function ingredientModal(p, opts){
         (showName ? '<p class="who">' + esc(p.name) + '</p>' : '') +
         '<label for="ing-q">Buscar ou criar</label>' +
         '<input type="text" id="ing-q" placeholder="ex: leite condensado" autocomplete="off">' +
-        '<p class="hint">O que este produto É, para as receitas. Marcas ' +
+        '<p class="hint">O que este insumo É, para as receitas. Marcas ' +
           'diferentes da mesma coisa compartilham o ingrediente — é assim que ' +
           '"tenho leite condensado?" passa a ter resposta.</p>' +
         '<div class="ing-list" id="ing-list"></div>' +
@@ -137,10 +137,10 @@ function ingredientModal(p, opts){
           '<span class="nm">' + (i.id === currentId ? '✓ ' : '') + esc(i.name) + '</span>' +
           (!t && i.id !== currentId && looksLikely(i.name, p.name)
             ? '<span class="hintbadge">provável</span>' : '') +
-          // How many products already point at it — the difference between
+          // How many insumos already point at it — the difference between
           // "this is the one we use" and a near-duplicate typed by mistake.
-          '<span class="cnt">' + (i.product_count || 0) +
-            ((i.product_count === 1) ? ' produto' : ' produtos') + '</span>' +
+          '<span class="cnt">' + (i.insumo_count || 0) +
+            ((i.insumo_count === 1) ? ' insumo' : ' insumos') + '</span>' +
         '</button>').join("");
       if(!html){
         html = '<p class="msg small">Nenhum ingrediente ainda. Digite acima para criar o primeiro.</p>';

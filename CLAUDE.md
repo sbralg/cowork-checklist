@@ -2,7 +2,7 @@
 
 Context file for Claude Code / Claude sessions working on this repo.
 
-## Status (2026-08-24): + Clientes module shipped, front-end refactor + Eventos/Financeiro modules shipped 2026-08-20
+## Status (2026-08-24): Produtos renamed to Insumos + Clientes module shipped, front-end refactor + Eventos/Financeiro modules shipped 2026-08-20
 
 Full plan and reasoning in `sbralg/cowork-personal-daily-summary`'s
 `ROADMAP.md` — this entry is the short version.
@@ -35,7 +35,7 @@ Full plan and reasoning in `sbralg/cowork-personal-daily-summary`'s
     `handleAuthError()` re-login flow they didn't have before; and the
     date+time rendering used by `tarefas.html` ("desde…") and `hoje.html`
     ("gerado em…"/"concluída em…") changed from a space-separated format
-    to the comma-separated one `produtos.html` already used
+    to the comma-separated one `insumos.html` already used
     (`fmtDateTime()` in `shared-format.js`), since two pages could not both
     keep their old `fmtDate` behavior once merged under one name.
   - `tarefas.html`/`hoje.html` had zero automated coverage before this —
@@ -70,6 +70,49 @@ Full plan and reasoning in `sbralg/cowork-personal-daily-summary`'s
   the wa.me phone normalization (a Brazilian 10/11-digit number gets `55`
   prepended, an already-prefixed number is left alone), and the deep link.
 
+- **Module renamed: Produtos → Insumos (2026-08-24), the first step of a
+  bigger reshape: (Shopping List >) Insumos → Receita → Produto.** The
+  barcode catalogue that used to be called "produtos" is being repurposed
+  as raw materials/supplies bought and tracked in the pantry — "Produto"
+  will become a NEW concept (a manufactured-via-recipe or supplier-bought
+  item that gets sold, costed automatically either by its recipe or by its
+  supplier cost), so the old name had to stop meaning two different things.
+  This session only did the rename; Receita and the new Produto/Fornecedor
+  modules are not built yet — see the backend repo's Planned/future.
+  - `produtos.html`→`insumos.html` (plain `git mv`, no redirect stub, same
+    convention as every other page rename here), the `MENU_ITEMS` entry, the
+    dashboard tile, and every cross-link/label on `estoque.html`/
+    `compras.html`/`shared-catalog.js`/`shared-catalog.css` updated to
+    match — including internal identifiers (`productMeta`→`insumoMeta`,
+    `openProduct`→`openInsumo`, `renderProduct`→`renderInsumo`,
+    `productEditModal`→`insumoEditModal`, `.prod-head`/`.prod-title`→
+    `.ins-head`/`.ins-title`, `#edit-product`/`#del-product`→
+    `#edit-insumo`/`#del-insumo`), not just the Portuguese UI labels.
+  - The underlying `checklist-api` actions/tables were renamed too
+    (`product_*`→`insumo_*` action names, `products`→`insumos` table,
+    `product_prices`→`insumo_prices` table) — see the backend repo's
+    `CLAUDE.md` for the full DB migration, applied live the same session.
+    **The live Edge Function had not been redeployed as of this rename**
+    (the user redeploys it themselves, on purpose — see that repo's
+    gotcha #20), so until that happens `insumos.html`'s and `estoque.html`'s
+    API calls will 500.
+  - `ingredients`/`ingredientModal()` and the `.ing-*` naming are
+    deliberately UNCHANGED — "ingredient" is a different concept (what a
+    barcode IS, for a future recipe) from "insumo" (the raw-material
+    catalogue itself), and this rename didn't touch it.
+  - `eventos.html`'s `evento_itens.tipo` value `"produto"` (🎂 Produto, a
+    sale line-item type) is DELIBERATELY untouched by this rename — it
+    already means the NEW "Produto" concept this reshape is heading toward
+    (a sold item), not the old barcode catalogue, so renaming it would have
+    been backwards.
+  - `test/stock.test.js` and `test/compras.test.js` updated to match
+    (`PRODUCTS`→`INSUMOS`, `KNOWN_PRODUCTS`→`KNOWN_INSUMOS`, the renamed
+    action names and response fields, `.prod-head`/`.prod-title`→
+    `.ins-head`/`.ins-title`, `#edit-product`/`#del-product`→
+    `#edit-insumo`/`#del-insumo`). **Not run from this session** (no
+    `node`/Playwright in this sandbox) — run both once after the Edge
+    Function is redeployed.
+
 ## What this is
 
 The public GitHub Pages front end deployed from this repo's `main` branch,
@@ -88,9 +131,9 @@ build step, no framework:
   scanning against the product catalogue). Renamed from `shopping.html`.
 - `hoje.html` — "Hoje": the morning summary rendered for the browser,
   read from `public.daily_reports`.
-- `estoque.html` — the pantry: how many packages of each product are in
+- `estoque.html` — the pantry: how many packages of each insumo are in
   the cupboard, and changing that (− / + steppers, exact recount).
-- `produtos.html` — the product catalogue: what a barcode means, its price
+- `insumos.html` — the insumo catalogue: what a barcode means, its price
   history as a graph, the editor that corrects its metadata, and removal
   from the catalogue.
 - `clientes.html` — the contact record behind an evento: full-field create/
@@ -111,19 +154,19 @@ bookmark to the old `shopping.html` now 404s, and one to the old
 `index.html` now silently shows the dashboard instead of the task list —
 both a one-time surprise, chosen over maintaining a redirect forever.
 
-**The ingredient is what a product IS, as opposed to which SKU it is** —
+**The ingredient is what an insumo IS, as opposed to which SKU it is** —
 three brands of leite condensado are three barcodes and ONE ingredient, and
 that link is what will let a recipe ask "tenho leite condensado?" across
-brands. It is set BY HAND, from the detail sheet on `produtos.html` or the
+brands. It is set BY HAND, from the detail sheet on `insumos.html` or the
 chip on each `estoque.html` row, and that is a finding rather than laziness:
 Open Food Facts' categories were measured against this catalogue and group
 by supermarket shelf (creme de leite, leite em pó and leite condensado all
-land under "milk and yogurt"), 8 of 19 products have no category at all, and
+land under "milk and yogurt"), 8 of 19 insumos have no category at all, and
 the two cremes de leite that genuinely ARE one ingredient get different
 answers. A wrong link is worse than a blank one, because a recipe would
-silently draw down the wrong product. The picker instead suggests from the
+silently draw down the wrong insumo. The picker instead suggests from the
 household's own catalogue — an existing ingredient whose words appear in the
-product's name is floated up with a `provável` badge. Full reasoning in the
+insumo's name is floated up with a `provável` badge. Full reasoning in the
 other repo's `CLAUDE.md`.
 
 **The rule that shapes `estoque.html`, and must not be quietly undone:
@@ -197,7 +240,7 @@ what that changes and what stays the same).
   quantity field (`wirePriceInput()`/`wireQtyInput()` and their helpers),
   `.fields-row` layout, and the package-size unit helpers
   (`PACK_UNITS`/`unitOptions()`/`netQtyToFields()`/`fieldsToNetQty()`).
-- `shared-catalog.js`/`shared-catalog.css` — produtos/estoque-only:
+- `shared-catalog.js`/`shared-catalog.css` — insumos/estoque-only:
   `thumbHtml()`, the ingredient-name matching helpers, and
   `ingredientModal()`. **Not loaded by eventos.html** — a cliente is a
   different entity with different fields, so its picker is its own small
@@ -222,11 +265,11 @@ in-memory fake, so none touches Supabase nor holds a passphrase.
   the barcode validation, the scan confirm dialog (including its layout)
   and the add/edit/merge paths. Run it after changing `compras.html`.
 - `test/stock.test.js` — the pantry steppers, the zero floor and its
-  retroactive-purchase dialog, the recount, the per-product queue that
+  retroactive-purchase dialog, the recount, the per-insumo queue that
   keeps a double tap from outrunning the floor, search, the price graph,
-  the product editor, the ingredient picker on both pages, the two-step
-  product removal and the deep links between the two pages. Run it
-  after changing `estoque.html` or `produtos.html`. Its fake keeps a
+  the insumo editor, the ingredient picker on both pages, the two-step
+  insumo removal and the deep links between the two pages. Run it
+  after changing `estoque.html` or `insumos.html`. Its fake keeps a
   **real ledger** and enforces the zero floor the same way the Edge
   Function does — that rule is the whole reason those pages look the way
   they do, so faking it away would leave the interesting half untested.

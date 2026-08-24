@@ -193,7 +193,7 @@ let currentList = null; // set when viewing a single list's items
 async function lastPriceFor(gtin){
   if(!gtin) return null;
   try{
-    const hist = await api("product_price_history", { gtin, limit: 1 });
+    const hist = await api("insumo_price_history", { gtin, limit: 1 });
     const latest = (hist.prices || [])[0];
     return latest && latest.price != null ? Number(latest.price) : null;
   }catch(_){
@@ -248,7 +248,7 @@ function scanningSupported(){
 // Standard GS1 mod-10 check digit — the same algorithm normalizeGtin() runs
 // in checklist-api. The server stays the authority; this copy exists so a
 // misread is thrown away before it costs a closed camera and a bogus
-// "produto novo" prompt. Keep the two in step.
+// "insumo novo" prompt. Keep the two in step.
 function gtinCheckDigitOk(code){
   const d = code.split("").map(Number);
   const check = d.pop();
@@ -740,7 +740,7 @@ async function openScanner(){
 //   focusPrice    true to focus the price field instead of the name field
 function productFieldsModal(opts){
   const p = opts.idPrefix;
-  // A quick-add row (edit dialog, no barcode yet) has no product behind it,
+  // A quick-add row (edit dialog, no barcode yet) has no insumo behind it,
   // so brand and size stay out of the way until a code is attached — typed,
   // scanned, or already there when the dialog opens. The scan dialog always
   // has a code by the time it's shown, so this is always "on" there.
@@ -760,7 +760,7 @@ function productFieldsModal(opts){
         // entry, and the person holding the box is the only one who can
         // catch a wrong name or brand OFF (or an earlier mistake) got stuck
         // with.
-        '<label for="' + p + '-name">Nome do produto</label>' +
+        '<label for="' + p + '-name">Nome do insumo</label>' +
         '<input type="text" id="' + p + '-name" placeholder="ex: Arroz 5 kg" value="' +
           esc(opts.name || "") + '">' +
         '<div id="' + p + '-brand-field"' + (hasCode ? '' : ' hidden') + '>' +
@@ -882,11 +882,11 @@ function productFieldsModal(opts){
       // than leaving the fields as whatever was typed before and letting
       // the catalogue silently win only once the save round-trips.
       try{
-        const found = await api("product_lookup", { gtin: code });
+        const found = await api("insumo_lookup", { gtin: code });
         if(found.found){
-          nameEl.value = found.product.name || "";
-          brandEl.value = tidyShouted(found.product.brand || "");
-          const foundPack = netQtyToFields(found.product.net_qty, found.product.net_unit);
+          nameEl.value = found.insumo.name || "";
+          brandEl.value = tidyShouted(found.insumo.brand || "");
+          const foundPack = netQtyToFields(found.insumo.net_qty, found.insumo.net_unit);
           netQtyEl.value = foundPack.qty;
           netUnitEl.value = foundPack.unit;
         }
@@ -976,11 +976,11 @@ function productFieldsModal(opts){
 // The scan-confirm dialog: shown after every scan, before anything is
 // written. See productFieldsModal for the fields themselves.
 function scanConfirmModal(opts){
-  const known = !!opts.product;
-  const p = opts.product || {};
+  const known = !!opts.insumo;
+  const p = opts.insumo || {};
   return productFieldsModal({
     idPrefix: "scan",
-    title: known ? "Adicionar à lista" : "Produto novo",
+    title: known ? "Adicionar à lista" : "Insumo novo",
     saveLabel: "Adicionar",
     name: p.name || "",
     brand: tidyShouted(p.brand || ""),
@@ -1195,11 +1195,11 @@ function fmtQty(q){
   return Number.isInteger(n) ? String(n) : n.toLocaleString("pt-BR");
 }
 
-// Brand and package size of the scanned product, under the item name — the
+// Brand and package size of the scanned insumo, under the item name — the
 // check that the barcode resolved to the thing actually in your hand.
-// Empty for a hand-typed row, which has no product behind it.
-function productMeta(it){
-  const p = (it && it.products) || {};
+// Empty for a hand-typed row, which has no insumo behind it.
+function insumoMeta(it){
+  const p = (it && it.insumo) || {};
   // The item's own values win: they're either a hand-typed item's only
   // source of these, or a deliberate correction to what the barcode said.
   const brand = (it && it.brand) || p.brand;
@@ -1221,7 +1221,7 @@ function productMeta(it){
 // optional. Resolves with the fields, or null if dismissed.
 function itemEditModal(it, opts){
   opts = opts || {};
-  const p = (it && it.products) || {};
+  const p = (it && it.insumo) || {};
   const hasOwnSize = it && it.net_qty != null;
   return productFieldsModal({
     idPrefix: "edit",
@@ -1243,7 +1243,7 @@ function itemEditModal(it, opts){
 }
 
 function itemRowHtml(it){
-  const meta = productMeta(it);
+  const meta = insumoMeta(it);
   return '<div class="row" data-id="' + esc(it.id) + '">' +
     '<label>' +
       '<input type="checkbox" data-purchase' + (it.purchased ? ' checked' : '') + '>' +
@@ -1709,10 +1709,10 @@ function renderItems(list, items){
     // product this is before anything lands in the list. A local hit is
     // instant; a code that has to go out to Open Food Facts can take a
     // couple of seconds, which is long enough to need saying so.
-    listToast("Buscando produto…");
+    listToast("Buscando insumo…");
     let found;
     try{
-      found = await api("product_lookup", { gtin: code });
+      found = await api("insumo_lookup", { gtin: code });
     }catch(err){
       hideListToast();
       if(err.unauthorized){ handleAuthError(err, loadLists); return; }
@@ -1725,8 +1725,8 @@ function renderItems(list, items){
     const lastPrice = found.found ? await lastPriceFor(code) : null;
     hideListToast();
 
-    const product = found.found ? found.product : null;
-    const confirmed = await scanConfirmModal({ gtin: code, product, lastPrice });
+    const insumo = found.found ? found.insumo : null;
+    const confirmed = await scanConfirmModal({ gtin: code, insumo, lastPrice });
     if(confirmed === null) return;
 
     listToast("Salvando…");
@@ -1747,38 +1747,38 @@ function renderItems(list, items){
     }
     if(!data.item){ listToast("Não foi possível adicionar", true); return; }
 
-    // The size describes the BOX, so it belongs on the product, not on this
+    // The size describes the BOX, so it belongs on the insumo, not on this
     // row: stored against the barcode it's typed once ever, and it's what
     // lets "3 pacotes" become 4,5 kg for the recipe side. A brand-new barcode
-    // has no product to correct yet, so a typed brand registers one too —
+    // has no insumo to correct yet, so a typed brand registers one too —
     // same reasoning, same write. Fired after the item lands, and
     // best-effort — a failed write must never read as a failed scan.
-    if(confirmed.size || (!product && confirmed.brand)){
+    if(confirmed.size || (!insumo && confirmed.brand)){
       const upsert = {
         gtin: code,
-        name: (data.product && data.product.name) || confirmed.name
+        name: (data.insumo && data.insumo.name) || confirmed.name
       };
       if(confirmed.size){
         upsert.net_qty = confirmed.size.net_qty;
         upsert.net_unit = confirmed.size.net_unit;
       }
-      if(!product && confirmed.brand) upsert.brand = confirmed.brand;
-      api("product_upsert", upsert)
+      if(!insumo && confirmed.brand) upsert.brand = confirmed.brand;
+      api("insumo_upsert", upsert)
         .catch(() => { /* the row is already in the list; retry by editing */ });
       // The response above predates that write, so fill the fields in locally
       // rather than refetching just to show them.
-      data.item.products = Object.assign({}, data.item.products,
+      data.item.insumo = Object.assign({}, data.item.insumo,
         confirmed.size ? { net_qty: confirmed.size.net_qty, net_unit: confirmed.size.net_unit } : {},
-        (!product && confirmed.brand) ? { brand: confirmed.brand } : {});
+        (!insumo && confirmed.brand) ? { brand: confirmed.brand } : {});
     }
 
-    // A KNOWN product already has a catalogue entry — shared by everyone who
+    // A KNOWN insumo already has a catalogue entry — shared by everyone who
     // scans the code — so a corrected name or brand here is an override of
     // THIS row, the same edit the pencil icon makes, not a silent rewrite of
     // what the next person sees. Only sent when it actually differs from
     // what the dialog was prefilled with, so re-scanning an already-right
-    // product costs no write.
-    if(product){
+    // insumo costs no write.
+    if(insumo){
       const patch = { id: data.item.id };
       // A brand-new row already carries the corrected name — it was sent as
       // `name` above, and the insert used it verbatim. Only a MERGE leaves it
@@ -1787,8 +1787,8 @@ function renderItems(list, items){
       // about (added on another device since the list loaded) — a local
       // match never gets this far, having been handled before the dialog.
       // Brand needs the write either way: shopping_item_scan never sets it.
-      if(data.merged && confirmed.name !== (product.name || "")) patch.name = confirmed.name;
-      if(confirmed.brand !== tidyShouted(product.brand || "")) patch.brand = confirmed.brand;
+      if(data.merged && confirmed.name !== (insumo.name || "")) patch.name = confirmed.name;
+      if(confirmed.brand !== tidyShouted(insumo.brand || "")) patch.brand = confirmed.brand;
       if("name" in patch || "brand" in patch){
         api("shopping_item_update", patch)
           .catch(() => { /* the row is already in the list; retry by editing */ });

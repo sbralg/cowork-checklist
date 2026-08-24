@@ -73,7 +73,7 @@ function serve() {
 const state = {
   items: [
     { id: 'I1', name: 'Café', price: 12.5, quantity: 1, purchased: false, gtin: null,
-      created_at: '2026-08-01T10:00:00Z', products: null },
+      created_at: '2026-08-01T10:00:00Z', insumo: null },
   ],
   seq: 1,
   upserts: [],
@@ -83,7 +83,7 @@ const state = {
 // A second known barcode, distinct from the merge-heavy 7891000100103, kept
 // free of other scenarios so a fresh-insert correction can be asserted in
 // isolation (exact call count and shape, not just the visible result).
-const KNOWN_PRODUCTS = {
+const KNOWN_INSUMOS = {
   '7891000100103': { name: 'Leite Condensado Integral moça', brand: 'CASA DE BENTO',
     net_qty: 1000, net_unit: 'ml' },
   '7896004700236': { name: 'Bolacha Maria', brand: 'Adria', net_qty: null, net_unit: null },
@@ -92,13 +92,13 @@ const KNOWN_PRODUCTS = {
   // needs that gtin to still be unused by any row when it runs.
   '7897001234564': { name: 'Suco de Uva Aurora', brand: 'AURORA', net_qty: null, net_unit: null },
   // A fourth, never-put-on-a-row barcode, so a plain rescan-live-fill test
-  // can use a code that resolves to a real product WITHOUT colliding with
+  // can use a code that resolves to a real insumo WITHOUT colliding with
   // any row already in the list (every other fixture above ends up on one).
   '7891234567895': { name: 'Manteiga com Sal', brand: 'AVIAÇÃO', net_qty: 200, net_unit: 'g' },
 };
 
 function handleScan(body) {
-  const known = KNOWN_PRODUCTS[body.gtin];
+  const known = KNOWN_INSUMOS[body.gtin];
   const name = body.name || (known && known.name);
   if (!name) return { needs_name: true, found: false, gtin: body.gtin };
   const existing = state.items.find(i => i.gtin === body.gtin && !i.purchased);
@@ -112,7 +112,7 @@ function handleScan(body) {
     price: body.price ?? null, quantity: body.quantity ?? 1,
     purchased: false, gtin: body.gtin, created_at: '2026-08-09T10:00:00Z',
     // Brand deliberately SHOUTED, to prove it is tidied at render.
-    products: known
+    insumo: known
       ? { brand: known.brand.toUpperCase(), net_qty: known.net_qty, net_unit: known.net_unit }
       : null,
   };
@@ -220,30 +220,30 @@ function handleScan(body) {
         purchased_count: 0, total_all: 12.5, total_cart: 0, created_at: '2026-08-01T10:00:00Z' }] };
     } else if (body.action === 'shopping_items') {
       resp = { items: state.items.map(i => ({ ...i })) };
-    } else if (body.action === 'product_lookup') {
-      const known = KNOWN_PRODUCTS[body.gtin];
+    } else if (body.action === 'insumo_lookup') {
+      const known = KNOWN_INSUMOS[body.gtin];
       resp = known
-        ? { found: true, gtin: body.gtin, product: { gtin: body.gtin, ...known }, origin: 'local' }
+        ? { found: true, gtin: body.gtin, insumo: { gtin: body.gtin, ...known }, origin: 'local' }
         : { found: false, gtin: body.gtin };
-    } else if (body.action === 'product_price_history') {
+    } else if (body.action === 'insumo_price_history') {
       resp = { gtin: body.gtin, prices: body.gtin === '7891000100103'
         ? [{ price: 5.5, quantity: 1, store: null, captured_at: '2026-08-01T10:00:00Z' }]
         : [] };
     } else if (body.action === 'shopping_item_scan') {
       resp = handleScan(body);
-    } else if (body.action === 'product_upsert') {
+    } else if (body.action === 'insumo_upsert') {
       // The size (and, for a brand-new barcode, the brand) the user typed in
       // the scan dialog land here, against the barcode rather than the row.
       // Recorded so the test can assert both that it is sent when edited and
       // that it is NOT sent otherwise.
       state.upserts.push({ ...body });
-      // Mirrors the real products table: product_lookup reads from the same
+      // Mirrors the real insumos table: insumo_lookup reads from the same
       // place this writes to, so a barcode registered here has to become
-      // resolvable by product_lookup too — otherwise a later rescan of it
+      // resolvable by insumo_lookup too — otherwise a later rescan of it
       // would see "unknown" here when the real API would not.
-      KNOWN_PRODUCTS[body.gtin] = { name: body.name, brand: body.brand ?? '',
+      KNOWN_INSUMOS[body.gtin] = { name: body.name, brand: body.brand ?? '',
         net_qty: body.net_qty ?? null, net_unit: body.net_unit ?? null };
-      resp = { product: { gtin: body.gtin, name: body.name, brand: body.brand ?? null,
+      resp = { insumo: { gtin: body.gtin, name: body.name, brand: body.brand ?? null,
         net_qty: body.net_qty ?? null, net_unit: body.net_unit ?? null } };
     } else if (body.action === 'shopping_item_add') {
       // Mirrors the API: net_text is parsed into a normalized pair, and
@@ -262,7 +262,7 @@ function handleScan(body) {
       }
       const item = { id: 'M' + (++state.seq), name: body.name, price: null,
         quantity: body.quantity || 1, purchased: false, gtin: null,
-        brand: (body.brand || '').trim() || null, products: null,
+        brand: (body.brand || '').trim() || null, insumo: null,
         created_at: '2026-08-09T12:00:00Z', ...net };
       state.items.push(item);
       resp = { item };
@@ -284,7 +284,7 @@ function handleScan(body) {
       resp = { ok: true, item: it ? { ...it } : null };
     } else if (body.action === 'shopping_item_update' && !('name' in body) &&
                ('brand' in body)) {
-      // A known product's brand corrected from the scan dialog: an
+      // A known insumo's brand corrected from the scan dialog: an
       // item-level override sent on its own, without the rest of the
       // full edit-modal payload (name/net_text/gtin).
       const it = state.items.find(i => i.id === body.id);
@@ -314,7 +314,7 @@ function handleScan(body) {
         if (g === '7891000100103') {
           it.name = 'Leite Condensado Integral moça';
           it.brand = null; it.net_qty = null; it.net_unit = null;
-          it.products = { brand: 'Nestlé', net_qty: 395, net_unit: 'g' };
+          it.insumo = { brand: 'Nestlé', net_qty: 395, net_unit: 'g' };
         }
       }
       resp = { ok: true, item: { ...it } };
@@ -370,9 +370,9 @@ function handleScan(body) {
   await page.waitForFunction(() => !document.querySelector('.scan-overlay'), null, { timeout: 6000 });
   check('valid code closes the camera', !(await overlayOpen()));
   check('valid code vibrates once', await vibrations() === 1);
-  // --- the scan dialog confirms the product and collects qty + price ---
+  // --- the scan dialog confirms the insumo and collects qty + price ---
   await page.waitForSelector('#scan-price', { timeout: 6000 });
-  // Name and brand are editable, not read-only — a known product can still
+  // Name and brand are editable, not read-only — a known insumo can still
   // have a bad OFF entry or an earlier mistake worth fixing right here.
   check('dialog prefills the resolved name, got: ' + await page.inputValue('#scan-name'),
     (await page.inputValue('#scan-name')) === 'Leite Condensado Integral moça');
@@ -459,8 +459,8 @@ function handleScan(body) {
   check('quantity from the dialog is saved',
     (await page.inputValue('.row[data-id="S2"] .qty-input')) === '2');
   // The size was prefilled and left alone, so the catalogue row must not be
-  // rewritten — otherwise every scan of a known product costs a needless write.
-  check('untouched size does not rewrite the product, got: ' +
+  // rewritten — otherwise every scan of a known insumo costs a needless write.
+  check('untouched size does not rewrite the insumo, got: ' +
       JSON.stringify(state.upserts),
     state.upserts.length === 0);
   check('price from the dialog is saved, got: ' +
@@ -529,7 +529,7 @@ function handleScan(body) {
   await page.evaluate(() => localStorage.setItem('scan_camera_id', 'main'));
 
   // --- a code already on the list is "one more of that": the unit lands on
-  // the existing row with NO dialog at all. A product that has already been
+  // the existing row with NO dialog at all. An insumo that has already been
   // confirmed once has nothing left to confirm, and asking again on every
   // repeat scan is what made picking up a second box feel like adding a
   // stranger. ---
@@ -710,7 +710,7 @@ function handleScan(body) {
     () => document.querySelector('.row[data-id="M4"] .txt').textContent.trim() === 'Pão de forma',
     null, { timeout: 6000 });
   check('name updated', (await page.textContent('.row[data-id="M4"] .txt')).trim() === 'Pão de forma');
-  check('still no meta line — there is no product behind a hand-typed row',
+  check('still no meta line — there is no insumo behind a hand-typed row',
     (await page.$$('.row[data-id="M4"] .meta')).length === 0);
 
   // --- the camera icon replaces the old warning triangle, but only for a
@@ -750,7 +750,7 @@ function handleScan(body) {
     !(await page.isVisible('.row[data-id="M4"] [data-action="scan-item"]')));
 
   // --- rescanning from INSIDE the edit dialog (opened via the pencil, not
-  // the row's own camera) shows the newly resolved product live too — the
+  // the row's own camera) shows the newly resolved insumo live too — the
   // "wrong one got scanned" case — without saving over the row yet. Uses a
   // code no other row has, so this is testing the live-fill on its own,
   // separate from the collision handling covered further down. ---
@@ -928,7 +928,7 @@ function handleScan(body) {
   check('the barcode survives the edit, camera stays hidden',
     !(await page.isVisible('.row[data-id="M4"] [data-action="scan-item"]')));
 
-  // --- correcting a KNOWN product on its very FIRST scan (a fresh insert,
+  // --- correcting a KNOWN insumo on its very FIRST scan (a fresh insert,
   // not a merge) — the name goes through as part of the insert itself, so
   // only the brand should need a follow-up patch. Run last, and its own
   // barcode, so the row-count checks and ids earlier in the test are
@@ -938,7 +938,7 @@ function handleScan(body) {
   await page.evaluate(() => window.__setCodes(['7896004700236']));
   await page.click('#scan-item-btn');
   await page.waitForSelector('#scan-price', { timeout: 6000 });
-  check('second known product prefills its own name and brand, got: ' +
+  check('second known insumo prefills its own name and brand, got: ' +
       await page.inputValue('#scan-name') + ' / ' + await page.inputValue('#scan-brand'),
     (await page.inputValue('#scan-name')) === 'Bolacha Maria' &&
     (await page.inputValue('#scan-brand')) === 'Adria');
@@ -964,7 +964,7 @@ function handleScan(body) {
       JSON.stringify(state.itemUpdates),
     state.itemUpdates.length === 1 && state.itemUpdates[0].id === newRowId &&
     state.itemUpdates[0].brand === 'Piraquê' && !('name' in state.itemUpdates[0]));
-  check('no catalogue write for a correction on a product that already exists',
+  check('no catalogue write for a correction on an insumo that already exists',
     state.upserts.every(u => u.gtin !== '7896004700236'));
 
   // --- two rows can't share a barcode: a code that resolves to ANOTHER row

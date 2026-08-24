@@ -16,7 +16,7 @@
 
   This page is the STATE side of the catalogue — how many packages are in
   the cupboard and changing that. The reference side (metadata, price
-  history) is produtos.html, which each row links to.
+  history) is insumos.html, which each row links to.
 
   Stock counts PACKAGES, not grams: two cans of Ninho is 2, not 760 g,
   because that is the gesture. The real amount (2 × 380 g) is shown
@@ -59,10 +59,10 @@
   .body{min-width:0;flex:1;cursor:pointer}
   .body .txt{font-size:15px;line-height:1.35;margin:0;word-wrap:break-word}
   .body .meta{font-size:12px;color:var(--muted);margin:3px 0 0}
-  /* The ingredient chip. Tappable, and it does NOT open the product sheet —
-     categorising a product is quick enough to belong right here, on the
+  /* The ingredient chip. Tappable, and it does NOT open the insumo sheet —
+     categorising an insumo is quick enough to belong right here, on the
      screen where you are already looking at the shelf. Muted when unset,
-     because an uncategorised product is normal, not an error. */
+     because an uncategorised insumo is normal, not an error. */
   .ing-chip{
     font:inherit;font-size:12px;padding:3px 9px;border-radius:999px;margin:5px 0 0;
     background:rgba(37,99,235,.12);color:var(--accent);border:none;cursor:pointer;
@@ -108,7 +108,7 @@
   /* .fields-row is the shared amount-field row layout (shared-inputs.css);
      .num-input.solo is this page's own override for a single standalone
      field inside it (the recount / shortfall dialogs have no .prefix chip
-     to pair with, so it wants the all-corners radius, same as produtos.html's
+     to pair with, so it wants the all-corners radius, same as insumos.html's
      package-size field). */
   .fields-row .num-input.solo{border-radius:8px}
   @keyframes rowFlash{from{background:rgba(37,99,235,.22)} to{background:transparent}}
@@ -164,10 +164,10 @@ async function loadStock(){
   root.innerHTML = '<p class="msg">Carregando…</p>';
   if(!getPass()){ showLogin(); return; }
   try{
-    const data = await api("products");
-    stock = data.products || [];
+    const data = await api("insumos");
+    stock = data.insumos || [];
     renderStock();
-    // A product arrived here from its detail sheet ("Ajustar no estoque"):
+    // An insumo arrived here from its detail sheet ("Ajustar no estoque"):
     // point at the row rather than making the user find it again.
     const wanted = new URLSearchParams(location.search).get("gtin");
     if(wanted){
@@ -180,7 +180,7 @@ async function loadStock(){
 function focusRow(gtin){
   const row = root.querySelector('.row[data-gtin="' + CSS.escape(gtin) + '"]');
   if(!row) return;
-  // A product with no stock sits in the collapsed half, where scrolling to
+  // An insumo with no stock sits in the collapsed half, where scrolling to
   // it would land on nothing. Open that section first.
   const btn = document.getElementById("toggle-empty");
   if(btn && !showEmpty && row.closest("#out-card")) btn.click();
@@ -221,7 +221,7 @@ function stockMeta(p){
   return bits.join(" · ");
 }
 
-// ingredientName() lives in shared-catalog.js now — what a product IS, as
+// ingredientName() lives in shared-catalog.js now — what an insumo IS, as
 // opposed to which SKU it is, the link a recipe reads.
 function ingredientChipHtml(p){
   const name = ingredientName(p);
@@ -261,7 +261,7 @@ function renderStock(){
   const inHtml = inStock.length === 0
     ? '<p class="msg small" id="in-empty">' +
       (stock.length === 0
-        ? 'Nenhum produto no catálogo ainda. Eles entram sozinhos ao ler um ' +
+        ? 'Nenhum insumo no catálogo ainda. Eles entram sozinhos ao ler um ' +
           'código de barras na lista de compras.'
         : 'Nada em estoque' + (searchTerm ? ' com esse filtro' : '') + '.') +
       '</p>'
@@ -330,12 +330,12 @@ function wireStockRow(row){
   if(!p) return;
 
   row.querySelector("[data-open]").addEventListener("click", () => {
-    location.href = "produtos.html?gtin=" + encodeURIComponent(gtin);
+    location.href = "insumos.html?gtin=" + encodeURIComponent(gtin);
   });
 
-  // The chip lives inside the tap target that opens the product sheet, so it
+  // The chip lives inside the tap target that opens the insumo sheet, so it
   // has to stop the click from bubbling — otherwise setting an ingredient
-  // would navigate away to Produtos at the same time.
+  // would navigate away to Insumos at the same time.
   row.querySelector("[data-ing]").addEventListener("click", async (e) => {
     e.stopPropagation();
     await setIngredient(p, row);
@@ -447,8 +447,8 @@ async function setIngredient(p, row){
   const chosen = await ingredientModal(p, { onAuthError: e => handleAuthError(e, loadStock) });
   if(!chosen) return;
   try{
-    const res = await api("product_set_ingredient", { gtin: p.gtin, ...chosen.payload });
-    p.ingredient = (res.product && res.product.ingredient) || null;
+    const res = await api("insumo_set_ingredient", { gtin: p.gtin, ...chosen.payload });
+    p.ingredient = (res.insumo && res.insumo.ingredient) || null;
     const chip = row.querySelector("[data-ing]");
     const name = ingredientName(p);
     chip.textContent = name || "sem ingrediente";
