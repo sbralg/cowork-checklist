@@ -566,11 +566,12 @@ function renderEvento(data){
 
   const cliBlock = '<div class="cli-block">' +
     '<div class="who">' +
-      '<p class="nm">' + (cli ? esc(cli.name) : 'Sem cliente') + '</p>' +
+      (cli
+        ? '<a class="nm link" href="clientes.html?id=' + encodeURIComponent(cli.id) + '">' + esc(cli.name) + '</a>'
+        : '<p class="nm">Sem cliente</p>') +
       (cli ? '<p class="sub">' + esc([cli.organization, cli.phone, cli.email].filter(Boolean).join(" · ")) + '</p>' : '') +
     '</div>' +
     '<div class="cli-actions">' +
-      (cli ? '<a class="link" href="clientes.html?id=' + encodeURIComponent(cli.id) + '">Ver cliente</a>' : '') +
       '<button class="link" id="change-cliente">Trocar</button>' +
     '</div>' +
   '</div>';
