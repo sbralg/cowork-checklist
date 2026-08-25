@@ -65,7 +65,23 @@
     max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
   .ing-tag.none{background:rgba(127,127,127,.12);color:var(--muted)}
+  /* kind (ingrediente/embalagem) — the load-bearing flag the recipe
+     module's line pickers filter on, so it needs its own badge distinct
+     from the ing-tag (which is about WHAT the insumo is, not its kind). */
+  .kind-badge{
+    display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;
+    margin:5px 6px 0 0;
+  }
+  .kind-badge.ing{background:rgba(180,83,9,.12);color:var(--warn)}
+  .kind-badge.emb{background:rgba(127,127,127,.12);color:var(--muted)}
   .searchrow{display:flex;gap:8px;margin:0 0 14px}
+  .chiprow{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+  .chip{
+    font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:999px;cursor:pointer;
+    background:rgba(127,127,127,.1);color:var(--muted);border:1px solid transparent;
+    transition:background-color .15s ease,color .15s ease;
+  }
+  .chip.active{background:var(--accent);color:var(--accent-text)}
   .searchrow input[type=search]{
     flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
     border:1px solid var(--border-strong);background:var(--card);color:var(--text);
@@ -181,6 +197,8 @@ const CURRENT_PAGE = "insumos";
 // doesn't refetch it.
 let catalog = [];
 let searchTerm = "";
+let kindFilter = "";
+let categoryCache = null;
 
 const PAGE_LOGIN = {
   title: "Insumos",
@@ -210,6 +228,15 @@ function ingredientTagHtml(p){
   return name
     ? '<span class="ing-tag">' + esc(name) + '</span>'
     : '<span class="ing-tag none">sem ingrediente</span>';
+}
+
+// kind (ingrediente/embalagem) badge — the same load-bearing flag the
+// recipe module's line pickers filter on, shown here so a categorising
+// pass down the list reads consistently with receitas.html/produtos.html.
+function kindBadgeHtml(p){
+  return p.kind === "embalagem"
+    ? '<span class="kind-badge emb">📦 embalagem</span>'
+    : '<span class="kind-badge ing">🧂 ingrediente</span>';
 }
 
 function navHeader(title, backAction){
@@ -253,6 +280,11 @@ async function loadCatalog(){
 
 // Name, brand and barcode all match, because all three are things someone
 // might have in front of them — the box, the label, or the code itself.
+function matchesFilters(p, term, kind){
+  if(kind && p.kind !== kind) return false;
+  return matchesSearch(p, term);
+}
+
 function matchesSearch(p, term){
   if(!term) return true;
   const t = term.toLowerCase();
@@ -282,7 +314,7 @@ function insumoRowHtml(p){
     '<span class="body">' +
       '<p class="txt">' + flag + esc(p.name) + '</p>' +
       (sub ? '<p class="meta">' + esc(sub) + '</p>' : '') +
-      ingredientTagHtml(p) +
+      kindBadgeHtml(p) + ingredientTagHtml(p) +
     '</span>' +
     '<span class="stock-badge' + (Number(p.qty) > 0 ? ' has' : '') + '">' +
       fmtStockQty(p.qty) + ' un' +
@@ -291,7 +323,7 @@ function insumoRowHtml(p){
 }
 
 function renderCatalog(){
-  const shown = catalog.filter(p => matchesSearch(p, searchTerm));
+  const shown = catalog.filter(p => matchesFilters(p, searchTerm, kindFilter));
   const rowsHtml = catalog.length === 0
     ? '<p class="msg">Nenhum insumo no catálogo ainda. Eles entram sozinhos ao ' +
       'ler um código de barras na lista de compras.</p>'
@@ -304,19 +336,20 @@ function renderCatalog(){
       '<input type="search" id="search" placeholder="Buscar por nome, marca ou código" ' +
         'value="' + esc(searchTerm) + '">' +
     '</div>' +
+    '<div class="chiprow">' +
+      '<span class="chip' + (kindFilter === "" ? " active" : "") + '" data-kind="">Todos</span>' +
+      '<span class="chip' + (kindFilter === "ingrediente" ? " active" : "") + '" data-kind="ingrediente">🧂 Ingredientes</span>' +
+      '<span class="chip' + (kindFilter === "embalagem" ? " active" : "") + '" data-kind="embalagem">📦 Embalagens</span>' +
+    '</div>' +
     rowsHtml +
     '<p class="msg small">' + catalog.length + ' insumo' +
       (catalog.length === 1 ? '' : 's') + ' no catálogo</p>';
 
   wireNav(null);
 
-  const search = document.getElementById("search");
-  search.addEventListener("input", () => {
-    searchTerm = search.value.trim();
-    // Only the list is redrawn, so the field keeps focus and the caret
-    // while typing.
+  function redraw(){
     const card = document.getElementById("cat-card") || document.getElementById("no-match");
-    const next = catalog.filter(p => matchesSearch(p, searchTerm));
+    const next = catalog.filter(p => matchesFilters(p, searchTerm, kindFilter));
     const html = next.length === 0
       ? '<p class="msg" id="no-match">Nenhum insumo encontrado.</p>'
       : '<div class="card" id="cat-card">' + next.map(insumoRowHtml).join("") + '</div>';
@@ -324,6 +357,20 @@ function renderCatalog(){
       card.outerHTML = html;
       wireCatalogRows();
     }
+  }
+
+  const search = document.getElementById("search");
+  search.addEventListener("input", () => {
+    // Only the list is redrawn, so the field keeps focus and the caret
+    // while typing.
+    searchTerm = search.value.trim();
+    redraw();
+  });
+  root.querySelectorAll(".chip[data-kind]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      kindFilter = chip.dataset.kind;
+      renderCatalog();
+    });
   });
   wireCatalogRows();
 }
@@ -594,7 +641,15 @@ function renderInsumo(data){
   wireChart(prices);
 
   document.getElementById("edit-insumo").addEventListener("click", async () => {
-    const edited = await insumoEditModal(p);
+    let categories;
+    try{
+      if(!categoryCache) categoryCache = (await api("insumo_categories")).categories || [];
+      categories = categoryCache;
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadCatalog);
+      categories = [];
+    }
+    const edited = await insumoEditModal(p, categories);
     if(!edited) return;
     try{
       await api("insumo_upsert", {
@@ -603,6 +658,8 @@ function renderInsumo(data){
         brand: edited.brand,
         net_qty: edited.size ? edited.size.net_qty : null,
         net_unit: edited.size ? edited.size.net_unit : null,
+        kind: edited.kind,
+        category_id: edited.category_id,
       });
       listToast("Insumo atualizado");
       // The catalogue behind this sheet is now stale in the same fields.
@@ -727,11 +784,14 @@ function renderInsumo(data){
 // Resolves with {name, brand, size} or null. `size` is null when the amount
 // is blank, which means "no size known" — this dialog CAN clear it, unlike
 // the scan dialog, because correcting metadata is the whole point here.
-function insumoEditModal(p){
+function insumoEditModal(p, categories){
+  categories = categories || [];
   const pack = netQtyToFields(p.net_qty, p.net_unit);
   return new Promise(resolve => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
+    const kind = p.kind || "ingrediente";
+    const catOptions = categories.filter(c => c.kind === kind);
     backdrop.innerHTML =
       '<div class="modal-card">' +
         '<h3>Editar insumo</h3>' +
@@ -740,6 +800,18 @@ function insumoEditModal(p){
         '<label for="pe-brand">Marca (opcional)</label>' +
         '<input type="text" id="pe-brand" placeholder="ex: Nestlé" value="' +
           esc(tidyShouted(p.brand || "")) + '">' +
+        '<label for="pe-kind">Tipo</label>' +
+        '<select id="pe-kind" style="width:100%;margin-bottom:14px">' +
+          '<option value="ingrediente"' + (kind === "ingrediente" ? " selected" : "") + '>🧂 Ingrediente</option>' +
+          '<option value="embalagem"' + (kind === "embalagem" ? " selected" : "") + '>📦 Embalagem</option>' +
+        '</select>' +
+        '<label for="pe-cat">Categoria (opcional)</label>' +
+        '<select id="pe-cat" style="width:100%;margin-bottom:14px">' +
+          '<option value="">—</option>' +
+          catOptions.map(c => '<option value="' + esc(c.id) + '"' +
+            (p.category_id === c.id ? " selected" : "") + '>' + esc(c.name) + '</option>').join("") +
+          '<option value="__new__">+ Nova categoria…</option>' +
+        '</select>' +
         '<label for="pe-net-qty">Peso / volume do pacote</label>' +
         '<div class="fields-row">' +
           '<div class="col grow">' +
@@ -763,9 +835,40 @@ function insumoEditModal(p){
 
     const nameEl = backdrop.querySelector("#pe-name");
     const brandEl = backdrop.querySelector("#pe-brand");
+    const kindEl = backdrop.querySelector("#pe-kind");
+    const catEl = backdrop.querySelector("#pe-cat");
     const qtyEl = backdrop.querySelector("#pe-net-qty");
     const unitEl = backdrop.querySelector("#pe-net-unit");
     wireQtyInput(qtyEl);
+
+    // Changing kind re-filters which categories are offered — a category
+    // is itself typed ingrediente/embalagem, matching the insumo it's
+    // meant to organize.
+    kindEl.addEventListener("change", () => {
+      const opts = categories.filter(c => c.kind === kindEl.value);
+      catEl.innerHTML = '<option value="">—</option>' +
+        opts.map(c => '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>').join("") +
+        '<option value="__new__">+ Nova categoria…</option>';
+    });
+    catEl.addEventListener("change", async () => {
+      if(catEl.value !== "__new__") return;
+      const name = await promptModal("Nova categoria", "Nome", "");
+      catEl.value = "";
+      if(!name || !name.trim()) return;
+      try{
+        const res = await api("insumo_category_create", { name: name.trim(), kind: kindEl.value });
+        categoryCache = null;
+        categories.push(res.category);
+        const opt = document.createElement("option");
+        opt.value = res.category.id;
+        opt.textContent = res.category.name;
+        catEl.insertBefore(opt, catEl.lastElementChild);
+        catEl.value = res.category.id;
+      }catch(e){
+        if(e.unauthorized) return handleAuthError(e, loadCatalog);
+        listToast("Não foi possível criar a categoria", true);
+      }
+    });
 
     const close = (result) => {
       backdrop.remove();
@@ -790,7 +893,11 @@ function insumoEditModal(p){
           return;
         }
       }
-      close({ name, brand: brandEl.value.trim(), size });
+      close({
+        name, brand: brandEl.value.trim(), size,
+        kind: kindEl.value,
+        category_id: catEl.value && catEl.value !== "__new__" ? catEl.value : null,
+      });
     };
     function onKey(e){
       if(e.key === "Escape") close(null);

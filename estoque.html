@@ -140,6 +140,7 @@ const PAGE_LOGIN = {
 let stock = [];
 let searchTerm = "";
 let showEmpty = false;
+let fornecedorCache = null;
 
 // "There are none left" is a real answer when recounting a shelf, so this
 // variant accepts zero where shared-inputs.js's parseQtyInput would reject
@@ -477,6 +478,7 @@ async function resolveShortfall(p, row, wanted, info){
       delta: decision.qty,
       reason: "unaccounted_purchase",
       unit_cost: decision.price,
+      fornecedor_id: decision.fornecedor_id,
     });
     const res = await api("stock_move", {
       gtin: p.gtin, delta: -wanted, reason: "consumption",
@@ -588,6 +590,9 @@ function shortfallModal(p, info, wanted){
             ? 'Preço da última compra registrada. Corrija se pagou outro valor.'
             : 'Sem preço anterior — em branco significa desconhecido.') +
         '</p>' +
+        '<button type="button" class="link" id="sf-pick-forn" style="display:block;margin:0 0 14px">' +
+          '🚚 De qual fornecedor? (opcional)' +
+        '</button>' +
         '<div class="modal-actions">' +
           '<button class="cancel" id="sf-cancel">Deixar como está</button>' +
           '<button class="save" id="sf-ok">Registrar e usar</button>' +
@@ -598,6 +603,7 @@ function shortfallModal(p, info, wanted){
     const priceEl = backdrop.querySelector("#sf-price");
     wireQtyInput(qtyEl);
     wirePriceInput(priceEl);
+    let fornecedorId = null;
 
     const close = (result) => {
       backdrop.remove();
@@ -614,7 +620,7 @@ function shortfallModal(p, info, wanted){
         qtyEl.focus();
         return;
       }
-      close({ qty: n, price: centsToPrice(priceDigits(priceEl.value)) });
+      close({ qty: n, price: centsToPrice(priceDigits(priceEl.value)), fornecedor_id: fornecedorId });
     };
     function onKey(e){
       if(e.key === "Escape") close(null);
@@ -624,8 +630,67 @@ function shortfallModal(p, info, wanted){
     backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
     backdrop.querySelector("#sf-cancel").addEventListener("click", () => close(null));
     backdrop.querySelector("#sf-ok").addEventListener("click", ok);
+    backdrop.querySelector("#sf-pick-forn").addEventListener("click", async () => {
+      const picked = await fornecedorPickerModal();
+      if(!picked) return;
+      fornecedorId = picked.id;
+      backdrop.querySelector("#sf-pick-forn").textContent = "🚚 " + picked.name;
+    });
     priceEl.focus();
     priceEl.select();
+  });
+}
+
+// Search-only (no create — fornecedores are managed in fornecedores.html),
+// same shape as clientePickerModal in eventos.html. Ordinary grocery runs
+// skip this entirely; it only matters for a purchase worth attributing to
+// a specific supplier.
+function fornecedorPickerModal(){
+  return new Promise(async resolve => {
+    let all;
+    try{
+      if(!fornecedorCache) fornecedorCache = (await api("fornecedores")).fornecedores || [];
+      all = fornecedorCache;
+    }catch(e){
+      if(e.unauthorized){ handleAuthError(e, loadStock); return resolve(null); }
+      listToast("Não foi possível carregar os fornecedores", true);
+      return resolve(null);
+    }
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>Fornecedor</h3>' +
+        '<input type="text" id="fp-q" placeholder="Buscar fornecedor" autocomplete="off">' +
+        '<div class="ing-list" id="fp-list"></div>' +
+        '<div class="modal-actions"><button class="cancel" id="fp-cancel">Cancelar</button></div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+    const qEl = backdrop.querySelector("#fp-q");
+    const listEl = backdrop.querySelector("#fp-list");
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    function draw(){
+      const t = qEl.value.trim().toLowerCase();
+      const shown = all.filter(f => !t || String(f.name).toLowerCase().indexOf(t) >= 0);
+      let html = shown.map(f => '<button class="ing-opt" data-pick="' + esc(f.id) + '">' +
+        '<span class="nm">' + esc(f.name) + '</span></button>').join("");
+      if(!html) html = '<p class="msg small">Nenhum fornecedor cadastrado ainda.</p>';
+      listEl.innerHTML = html;
+      listEl.querySelectorAll("[data-pick]").forEach(btn => {
+        btn.addEventListener("click", () => close(all.find(f => f.id === btn.dataset.pick) || null));
+      });
+    }
+    function onKey(e){ if(e.key === "Escape") close(null); }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#fp-cancel").addEventListener("click", () => close(null));
+    qEl.addEventListener("input", draw);
+    draw();
+    qEl.focus();
   });
 }
 

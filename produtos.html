@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Produtos">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<title>Produtos</title>
+<!--
+  Data-free shell for the Produtos module — a sellable item: manufactured
+  via a Receita, or a fornecedor-sourced Ingredient resold as-is (kind
+  "comprado" — deliberately NOT a separate supplier_cost field; a comprado
+  produto costs itself through the SAME ingredient_last_cost() path a
+  recipe line uses, since a fornecedor-bought item is just an ordinary
+  insumo/ingredient — see checklist-api's module comment above
+  produtoCostFor). Every Produto carries its own packaging lines and three
+  margin tiers (atacado/distribuidor/varejo), ported from the household's
+  real pricing spreadsheet.
+
+  Same pattern as every other page here: hosted on public GitHub Pages,
+  holds NO keys and NO data, asks for the shared passphrase, then talks
+  only to the gated Supabase Edge Function (checklist-api).
+-->
+<link rel="stylesheet" href="shared-base.css">
+<link rel="stylesheet" href="shared-menu.css">
+<link rel="stylesheet" href="shared-modal.css">
+<link rel="stylesheet" href="shared-toast.css">
+<link rel="stylesheet" href="shared-inputs.css">
+<style>
+  body{ padding:max(16px,env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom)); }
+  .wrap{max-width:640px;margin:0 auto}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 8px}
+  .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
+  .subheader{display:flex;align-items:baseline;justify-content:space-between;gap:10px;min-width:0;margin:0 0 8px}
+  h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
+  h3{font-size:14px;font-weight:650;margin:22px 0 8px;color:var(--muted)}
+  .searchrow{display:flex;gap:8px;margin:0 0 14px}
+  .searchrow input[type=search]{
+    flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+    -webkit-appearance:none;
+  }
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background-color .15s ease}
+  .row:hover{background:rgba(127,127,127,.06)}
+  .row:last-child{border-bottom:none}
+  .row .nm{font-size:15px;font-weight:600;margin:0;word-wrap:break-word}
+  .row .meta{font-size:12.5px;color:var(--muted);margin:2px 0 0}
+  .row .price{font-size:14px;font-weight:650;white-space:nowrap;flex:none}
+  .pill{display:inline-block;font-size:11px;font-weight:650;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .pill.kd-manufaturado{background:rgba(37,99,235,.14);color:var(--accent)}
+  .pill.kd-comprado{background:rgba(22,163,74,.14);color:#16a34a}
+  @media (prefers-color-scheme: dark){ .pill.kd-comprado{color:#4ade80} }
+  .addrow-btn{margin:8px 0 0}
+  button.primary.full{width:100%}
+  /* ---- detail ---- */
+  .prod-title{font-size:16px;font-weight:650;margin:0;text-align:right;word-wrap:break-word;cursor:pointer}
+  .prod-title:hover{opacity:.75}
+  .detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
+  .kind-src{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:10px 0;border-top:1px solid var(--border);
+  }
+  .kind-src .lbl{font-size:12px;color:var(--muted);margin:0}
+  .item-row{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border)}
+  .item-row:last-child{border-bottom:none}
+  .item-row .badge{font-size:18px;flex:none;width:24px;text-align:center}
+  .item-row .body{flex:1;min-width:0}
+  .item-row .body .txt{font-size:14.5px;margin:0;word-wrap:break-word}
+  .item-row .body .meta{font-size:12.5px;color:var(--muted);margin:3px 0 0}
+  .row-actions{display:flex;gap:2px;flex:none}
+  .totals-card{padding:14px}
+  .totals-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px}
+  .totals-grid .t{grid-column:1 / -1;border-top:1px solid var(--border);margin-top:2px;padding-top:10px}
+  .totals-grid .lbl{font-size:12px;color:var(--muted);margin:0}
+  .totals-grid .val{font-size:16px;font-weight:650;margin:2px 0 0}
+  .warn-card{padding:12px 14px;background:rgba(180,83,9,.1);border-radius:12px;margin-top:10px}
+  .warn-card p{font-size:13px;color:var(--warn);margin:0}
+  .reverse-card{padding:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .reverse-card label{font-size:13px;color:var(--muted);flex:1;min-width:140px}
+  .reverse-card .field{max-width:120px}
+  .reverse-out{font-size:13px;color:var(--text);margin:10px 0 0;width:100%}
+  .reverse-out p{margin:2px 0}
+  /* ---- item picker (shared shape with receitas.html's, not literally
+     shared code — filters differ: ingredient-only here, no receita tab) ---- */
+  .pick-list{max-height:38vh;overflow-y:auto;margin:0 0 14px;-webkit-overflow-scrolling:touch}
+  .pick-opt{
+    display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+    background:none;border:none;border-bottom:1px solid var(--border);
+    color:var(--text);font:inherit;font-size:15px;padding:11px 4px;cursor:pointer;
+    transition:background-color .15s ease;
+  }
+  .pick-opt:last-child{border-bottom:none}
+  .pick-opt:hover{background:rgba(127,127,127,.08)}
+  .pick-opt .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+</head>
+<body>
+<div id="root" class="wrap"><p class="msg">Carregando…</p></div>
+
+<script>
+const root = document.getElementById("root");
+let produtos = [];
+let searchTerm = "";
+let ingredientCache = null;
+let receitaListCache = null;
+
+const PAGE_LOGIN = {
+  title: "Produtos",
+  subtitle: "Digite a senha para acessar.",
+  onSuccess: () => loadProdutos(),
+};
+</script>
+<script src="shared-api.js"></script>
+<script src="shared-menu.js"></script>
+<script src="shared-ui.js"></script>
+<script src="shared-format.js"></script>
+<script src="shared-inputs.js"></script>
+<script>
+
+const CURRENT_PAGE = "produtos";
+const KIND_META = {
+  manufaturado: { label: "Manufaturado", badge: "🎂" },
+  comprado:     { label: "Comprado",     badge: "🚚" },
+};
+
+function navHeader(title, backAction){
+  const topRow = '<header><div class="hleft">' +
+    '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
+    '<h1 style="flex:1">' + (backAction ? 'Produtos' : esc(title)) + '</h1>' +
+    '</div></header>';
+  if(!backAction) return topRow;
+  return topRow + '<div class="subheader">' +
+    '<button class="link" id="back">← Produtos</button>' +
+    (title ? '<h2 class="prod-title" id="prod-name">' + esc(title) + '</h2>' : '') +
+  '</div>';
+}
+function wireNav(backAction){
+  wireMenuButton();
+  if(backAction) document.getElementById("back").addEventListener("click", backAction);
+}
+
+function pct(v){ return (Number(v) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 }); }
+
+// ---- list screen ----
+
+async function loadProdutos(){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  if(!getPass()){ showLogin(); return; }
+  try{
+    const data = await api("produtos");
+    produtos = data.produtos || [];
+    const wanted = new URLSearchParams(location.search).get("id");
+    if(wanted){
+      history.replaceState(null, "", location.pathname);
+      openProduto(wanted);
+      return;
+    }
+    renderList();
+  }catch(e){ handleAuthError(e, loadProdutos); }
+}
+
+function matchesSearch(p, term){
+  if(!term) return true;
+  return String(p.name).toLowerCase().indexOf(term.toLowerCase()) >= 0;
+}
+
+function produtoRowHtml(p){
+  const km = KIND_META[p.kind] || { label: p.kind };
+  const src = p.kind === "manufaturado" ? (p.receita && p.receita.name) : (p.ingredient && p.ingredient.name);
+  return '<div class="row" data-id="' + esc(p.id) + '">' +
+    '<div>' +
+      '<p class="nm">' + esc(p.name) + '</p>' +
+      '<p class="meta"><span class="pill kd-' + esc(p.kind) + '">' + esc(km.label) + '</span>' +
+        (src ? ' · ' + esc(src) : '') + '</p>' +
+    '</div>' +
+  '</div>';
+}
+
+function renderList(){
+  const shown = produtos.filter(p => matchesSearch(p, searchTerm));
+  const rowsHtml = produtos.length === 0
+    ? '<p class="msg">Nenhum produto ainda. Toque em "+ Novo produto" para começar.</p>'
+    : (shown.length === 0
+        ? '<p class="msg" id="no-match">Nenhum produto encontrado.</p>'
+        : '<div class="card" id="list-card">' + shown.map(produtoRowHtml).join("") + '</div>');
+
+  root.innerHTML = navHeader("Produtos", null) +
+    '<div class="searchrow"><input type="search" id="search" placeholder="Buscar produto" ' +
+      'value="' + esc(searchTerm) + '"></div>' +
+    rowsHtml +
+    '<button class="primary full addrow-btn" id="new-produto">+ Novo produto</button>';
+
+  wireNav(null);
+  const search = document.getElementById("search");
+  search.addEventListener("input", () => { searchTerm = search.value.trim(); redrawList(); });
+  wireListRows();
+  document.getElementById("new-produto").addEventListener("click", () => openProdutoModal(null));
+}
+
+function redrawList(){
+  const shown = produtos.filter(p => matchesSearch(p, searchTerm));
+  const card = document.getElementById("list-card") || document.getElementById("no-match");
+  const html = shown.length === 0
+    ? '<p class="msg" id="no-match">Nenhum produto encontrado.</p>'
+    : '<div class="card" id="list-card">' + shown.map(produtoRowHtml).join("") + '</div>';
+  if(card){ card.outerHTML = html; wireListRows(); }
+}
+
+function wireListRows(){
+  root.querySelectorAll(".row[data-id]").forEach(row => {
+    row.addEventListener("click", () => openProduto(row.dataset.id));
+  });
+}
+
+// ---- ingredient/receita source pickers (kind-filtered, single pick, no quantity) ----
+
+async function pickIngredientModal(kindFilter, title){
+  try{
+    if(!ingredientCache) ingredientCache = (await api("ingredients")).ingredients || [];
+  }catch(e){
+    if(e.unauthorized){ handleAuthError(e, loadProdutos); return null; }
+    listToast("Não foi possível carregar", true);
+    return null;
+  }
+  const source = ingredientCache.filter(i => !kindFilter || i.kind === kindFilter || !i.kind);
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>' + esc(title) + '</h3>' +
+        '<input type="text" id="pi-q" placeholder="Buscar" autocomplete="off">' +
+        '<div class="pick-list" id="pi-list"></div>' +
+        '<div class="modal-actions"><button class="cancel" id="pi-cancel">Cancelar</button></div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+    const qEl = backdrop.querySelector("#pi-q");
+    const listEl = backdrop.querySelector("#pi-list");
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    function draw(){
+      const t = qEl.value.trim().toLowerCase();
+      const shown = source.filter(x => !t || String(x.name).toLowerCase().indexOf(t) >= 0);
+      let html = shown.map(x => '<button class="pick-opt" data-id="' + esc(x.id) + '">' +
+        '<span class="nm">' + esc(x.name) + '</span>' +
+        (x.base_unit ? '<span class="cnt">por ' + esc(x.base_unit) + '</span>' : '') +
+      '</button>').join("");
+      if(!html) html = '<p class="msg small">Nenhum ingrediente encontrado.</p>';
+      listEl.innerHTML = html;
+      listEl.querySelectorAll("[data-id]").forEach(btn => {
+        btn.addEventListener("click", () => close(source.find(x => x.id === btn.dataset.id)));
+      });
+    }
+    function onKey(e){ if(e.key === "Escape") close(null); }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#pi-cancel").addEventListener("click", () => close(null));
+    qEl.addEventListener("input", draw);
+    draw();
+    qEl.focus();
+  });
+}
+
+async function pickReceitaModal(){
+  try{
+    if(!receitaListCache) receitaListCache = (await api("receitas")).receitas || [];
+  }catch(e){
+    if(e.unauthorized){ handleAuthError(e, loadProdutos); return null; }
+    listToast("Não foi possível carregar", true);
+    return null;
+  }
+  return new Promise(resolve => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>Receita</h3>' +
+        '<input type="text" id="pr-q" placeholder="Buscar" autocomplete="off">' +
+        '<div class="pick-list" id="pr-list"></div>' +
+        '<div class="modal-actions"><button class="cancel" id="pr-cancel">Cancelar</button></div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+    const qEl = backdrop.querySelector("#pr-q");
+    const listEl = backdrop.querySelector("#pr-list");
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    function draw(){
+      const t = qEl.value.trim().toLowerCase();
+      const shown = receitaListCache.filter(x => !t || String(x.name).toLowerCase().indexOf(t) >= 0);
+      let html = shown.map(x => '<button class="pick-opt" data-id="' + esc(x.id) + '">' +
+        '<span class="nm">' + esc(x.name) + '</span>' +
+        '<span class="cnt">' + fmtStockQty(x.yield_qty) + ' ' + esc(x.yield_unit) + '</span>' +
+      '</button>').join("");
+      if(!html) html = '<p class="msg small">Nenhuma receita ainda.</p>';
+      listEl.innerHTML = html;
+      listEl.querySelectorAll("[data-id]").forEach(btn => {
+        btn.addEventListener("click", () => close(receitaListCache.find(x => x.id === btn.dataset.id)));
+      });
+    }
+    function onKey(e){ if(e.key === "Escape") close(null); }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#pr-cancel").addEventListener("click", () => close(null));
+    qEl.addEventListener("input", draw);
+    draw();
+    qEl.focus();
+  });
+}
+
+// ---- create/edit modal ----
+
+function openProdutoModal(p){
+  const isEdit = !!p;
+  let kind = isEdit ? p.kind : "manufaturado";
+  let source = isEdit
+    ? (p.kind === "manufaturado" ? p.receita : p.ingredient)
+    : null;
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  document.body.appendChild(backdrop);
+
+  function draw(){
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>' + (isEdit ? "Editar produto" : "Novo produto") + '</h3>' +
+        '<label for="pr-name-i">Nome</label>' +
+        '<input type="text" id="pr-name-i" value="' + esc(isEdit ? p.name : "") + '">' +
+        '<label>Tipo</label>' +
+        '<select id="pr-kind" style="width:100%;margin-bottom:14px">' +
+          '<option value="manufaturado"' + (kind === "manufaturado" ? " selected" : "") + '>🎂 Manufaturado (via Receita)</option>' +
+          '<option value="comprado"' + (kind === "comprado" ? " selected" : "") + '>🚚 Comprado (via Fornecedor)</option>' +
+        '</select>' +
+        '<label>' + (kind === "manufaturado" ? "Receita" : "Ingrediente") + '</label>' +
+        '<button type="button" class="link" id="pr-source" style="display:block;text-align:left;padding:10px 0">' +
+          (source ? esc(source.name) : "Escolher…") +
+        '</button>' +
+        '<div class="fields-row">' +
+          '<div class="col grow">' +
+            '<label for="pr-items">Itens por pacote</label>' +
+            '<span class="field"><input class="num-input" type="text" inputmode="decimal" id="pr-items" ' +
+              'value="' + esc(isEdit ? fmtStockQty(p.items_per_package) : "1") + '"></span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="fields-row">' +
+          '<div class="col grow">' +
+            '<label for="pr-pack-min">Embalar (min, opcional)</label>' +
+            '<span class="field"><input class="num-input" type="text" inputmode="decimal" id="pr-pack-min" ' +
+              'value="' + esc(isEdit && p.packing_minutes ? fmtStockQty(p.packing_minutes) : "") + '"></span>' +
+          '</div>' +
+          '<div class="col grow">' +
+            '<label for="pr-pack-rate">Mão de obra (R$/h, opcional)</label>' +
+            '<span class="field"><span class="prefix">R$</span>' +
+              '<input class="num-input" type="text" inputmode="numeric" id="pr-pack-rate" ' +
+              'value="' + esc(isEdit ? fmtPriceInput(p.packing_labor_rate_per_hour) : "") + '"></span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="fields-row">' +
+          '<div class="col grow"><label for="pr-m-atacado">Margem atacado (%)</label>' +
+            '<span class="field"><input class="num-input" type="text" inputmode="decimal" id="pr-m-atacado" ' +
+              'value="' + esc(isEdit ? pct(p.margin_atacado) : "65") + '"></span></div>' +
+          '<div class="col grow"><label for="pr-m-dist">Margem distribuidor (%)</label>' +
+            '<span class="field"><input class="num-input" type="text" inputmode="decimal" id="pr-m-dist" ' +
+              'value="' + esc(isEdit ? pct(p.margin_distribuidor) : "30") + '"></span></div>' +
+          '<div class="col grow"><label for="pr-m-varejo">Margem varejo (%)</label>' +
+            '<span class="field"><input class="num-input" type="text" inputmode="decimal" id="pr-m-varejo" ' +
+              'value="' + esc(isEdit ? pct(p.margin_varejo) : "40") + '"></span></div>' +
+        '</div>' +
+        '<label for="pr-notes">Notas (opcional)</label>' +
+        '<input type="text" id="pr-notes" value="' + esc(isEdit ? (p.notes || "") : "") + '">' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="pr-cancel">Cancelar</button>' +
+          '<button class="save" id="pr-ok">Salvar</button>' +
+        '</div>' +
+      '</div>';
+
+    const itemsEl = backdrop.querySelector("#pr-items");
+    const packMinEl = backdrop.querySelector("#pr-pack-min");
+    const packRateEl = backdrop.querySelector("#pr-pack-rate");
+    const mAtacadoEl = backdrop.querySelector("#pr-m-atacado");
+    const mDistEl = backdrop.querySelector("#pr-m-dist");
+    const mVarejoEl = backdrop.querySelector("#pr-m-varejo");
+    [itemsEl, packMinEl, mAtacadoEl, mDistEl, mVarejoEl].forEach(wireQtyInput);
+    wirePriceInput(packRateEl);
+
+    backdrop.querySelector("#pr-kind").addEventListener("change", (e) => {
+      kind = e.target.value;
+      source = null;
+      draw();
+    });
+    backdrop.querySelector("#pr-source").addEventListener("click", async () => {
+      const picked = kind === "manufaturado"
+        ? await pickReceitaModal()
+        : await pickIngredientModal(null, "Ingrediente");
+      if(picked){ source = picked; draw(); }
+    });
+
+    const close = () => { backdrop.remove(); document.removeEventListener("keydown", onKey); };
+    function onKey(e){ if(e.key === "Escape") close(); }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
+    backdrop.querySelector("#pr-cancel").addEventListener("click", close);
+
+    backdrop.querySelector("#pr-ok").addEventListener("click", async () => {
+      const name = backdrop.querySelector("#pr-name-i").value.trim();
+      if(!name){ alert("O nome não pode ficar vazio."); return; }
+      if(!source){ alert(kind === "manufaturado" ? "Escolha uma receita." : "Escolha um ingrediente."); return; }
+      const items = parseQtyInput(itemsEl.value);
+      if(items === null){ alert("Itens por pacote inválido."); return; }
+      const payload = {
+        name, kind,
+        receita_id: kind === "manufaturado" ? source.id : null,
+        ingredient_id: kind === "comprado" ? source.id : null,
+        items_per_package: items,
+        packing_minutes: parseQtyInput(packMinEl.value),
+        packing_labor_rate_per_hour: centsToPrice(priceDigits(packRateEl.value)),
+        margin_atacado: (parseQtyInput(mAtacadoEl.value) || 0) / 100,
+        margin_distribuidor: (parseQtyInput(mDistEl.value) || 0) / 100,
+        margin_varejo: (parseQtyInput(mVarejoEl.value) || 0) / 100,
+        notes: backdrop.querySelector("#pr-notes").value.trim() || null,
+      };
+      try{
+        if(isEdit){
+          await api("produto_update", Object.assign({ id: p.id }, payload));
+          close();
+          listToast("Produto atualizado");
+          openProduto(p.id);
+        }else{
+          const res = await api("produto_create", payload);
+          close();
+          produtos = [];
+          openProduto(res.produto.id);
+        }
+      }catch(e){
+        if(e.unauthorized) return handleAuthError(e, loadProdutos);
+        listToast("Não foi possível salvar", true);
+      }
+    });
+
+    backdrop.querySelector("#pr-name-i").focus();
+  }
+  draw();
+}
+
+// ---- embalagem picker (kind='embalagem' ingredients only, with quantity) ----
+
+async function embalagemPickerModal(){
+  try{
+    if(!ingredientCache) ingredientCache = (await api("ingredients")).ingredients || [];
+  }catch(e){
+    if(e.unauthorized){ handleAuthError(e, loadProdutos); return null; }
+    listToast("Não foi possível carregar", true);
+    return null;
+  }
+  const source = ingredientCache.filter(i => i.kind === "embalagem");
+  return new Promise(resolve => {
+    let picked = null;
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML = '<div class="modal-card" id="emb-card"></div>';
+    document.body.appendChild(backdrop);
+    const card = backdrop.querySelector("#emb-card");
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+
+    function drawPick(){
+      card.innerHTML =
+        '<h3>Embalagem</h3>' +
+        '<input type="text" id="emb-q" placeholder="Buscar" autocomplete="off">' +
+        '<div class="pick-list" id="emb-list"></div>' +
+        '<div class="modal-actions"><button class="cancel" id="emb-cancel">Cancelar</button></div>';
+      const qEl = card.querySelector("#emb-q");
+      const listEl = card.querySelector("#emb-list");
+      function draw(){
+        const t = qEl.value.trim().toLowerCase();
+        const shown = source.filter(x => !t || String(x.name).toLowerCase().indexOf(t) >= 0);
+        let html = shown.map(x => '<button class="pick-opt" data-id="' + esc(x.id) + '">' +
+          '<span class="nm">' + esc(x.name) + '</span>' +
+          (x.base_unit ? '<span class="cnt">por ' + esc(x.base_unit) + '</span>' : '') +
+        '</button>').join("");
+        if(!html){
+          html = '<p class="msg small">Nenhum ingrediente de embalagem ainda. Marque um insumo como ' +
+            '"embalagem" em Insumos primeiro.</p>';
+        }
+        listEl.innerHTML = html;
+        listEl.querySelectorAll("[data-id]").forEach(btn => {
+          btn.addEventListener("click", () => {
+            picked = source.find(x => x.id === btn.dataset.id);
+            drawQty();
+          });
+        });
+      }
+      card.querySelector("#emb-cancel").addEventListener("click", () => close(null));
+      qEl.addEventListener("input", draw);
+      draw();
+      qEl.focus();
+    }
+    function drawQty(){
+      card.innerHTML =
+        '<h3>Quantidade por pacote</h3>' +
+        '<p class="who">' + esc(picked.name) + '</p>' +
+        '<label for="emb-qty">Quantidade' + (picked.base_unit ? " (" + esc(picked.base_unit) + ")" : "") + '</label>' +
+        '<span class="field"><input class="num-input" type="text" inputmode="decimal" id="emb-qty" value=""></span>' +
+        '<div class="modal-actions">' +
+          '<button class="cancel" id="emb-back">Voltar</button>' +
+          '<button class="save" id="emb-ok">Adicionar</button>' +
+        '</div>';
+      const qtyEl = card.querySelector("#emb-qty");
+      wireQtyInput(qtyEl);
+      card.querySelector("#emb-back").addEventListener("click", drawPick);
+      const ok = () => {
+        const quantity = parseQtyInput(qtyEl.value);
+        if(quantity === null){ alert("Quantidade inválida."); return; }
+        close({ ingredient_id: picked.id, quantity });
+      };
+      card.querySelector("#emb-ok").addEventListener("click", ok);
+      qtyEl.addEventListener("keydown", e => { if(e.key === "Enter"){ e.preventDefault(); ok(); } });
+      qtyEl.focus();
+    }
+    function onKey(e){ if(e.key === "Escape") close(null); }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    drawPick();
+  });
+}
+
+// ---- detail screen ----
+
+async function openProduto(id){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  try{
+    const data = await api("produto_detail", { id });
+    if(!data.found){
+      root.innerHTML = navHeader("", loadProdutos) + '<p class="msg">Produto não encontrado.</p>';
+      wireNav(loadProdutos);
+      return;
+    }
+    renderProduto(data);
+  }catch(e){ handleAuthError(e, loadProdutos); }
+}
+
+function embRowHtml(e){
+  const ing = e.ingredient;
+  return '<div class="item-row" data-emb="' + esc(e.id) + '">' +
+    '<span class="badge">📦</span>' +
+    '<span class="body">' +
+      '<p class="txt">' + esc(ing ? ing.name : "?") + '</p>' +
+      '<p class="meta">' + fmtStockQty(e.quantity) + ' ' + esc((ing && ing.base_unit) || "") + ' por pacote</p>' +
+    '</span>' +
+    '<span class="row-actions">' +
+      '<button class="icon-btn" data-edit-emb title="Editar quantidade">✎</button>' +
+      '<button class="icon-btn danger" data-del-emb title="Remover">🗑</button>' +
+    '</span>' +
+  '</div>';
+}
+
+function renderProduto(data){
+  const p = data.produto;
+  const embalagens = data.embalagens || [];
+  const cost = data.cost;
+  const incomplete = data.incomplete || [];
+  const km = KIND_META[p.kind] || { label: p.kind };
+  const src = p.kind === "manufaturado" ? p.receita : p.ingredient;
+
+  const embHtml = embalagens.length === 0
+    ? '<p class="msg small">Nenhuma embalagem ainda.</p>'
+    : '<div class="card" id="emb-card-list">' + embalagens.map(embRowHtml).join("") + '</div>';
+
+  const costHtml = cost && cost.custo_total_por_unidade != null
+    ? '<div class="card totals-card">' +
+        '<div class="totals-grid">' +
+          '<div><p class="lbl">Custo (ingredientes)</p><p class="val">' + fmtMoney(cost.custo_ingredientes_pacote) + '</p></div>' +
+          '<div><p class="lbl">Custo (embalagem)</p><p class="val">' + fmtMoney(cost.custo_total_embalagem) + '</p></div>' +
+          '<div class="t"><p class="lbl">Custo total por pacote</p><p class="val">' + fmtMoney(cost.custo_total_por_unidade) + '</p></div>' +
+          '<div><p class="lbl">Preço atacado</p><p class="val">' + fmtMoney(cost.preco_atacado) + '</p></div>' +
+          '<div><p class="lbl">Lucro atacado</p><p class="val">' + fmtMoney(cost.lucro_atacado) + '</p></div>' +
+          '<div><p class="lbl">Preço distribuidor</p><p class="val">' + fmtMoney(cost.preco_distribuidor) + '</p></div>' +
+          '<div><p class="lbl">Lucro distribuidor</p><p class="val">' + fmtMoney(cost.lucro_distribuidor) + '</p></div>' +
+          '<div class="t"><p class="lbl">Preço sugerido varejo</p><p class="val">' + fmtMoney(cost.preco_varejo_sugerido) + '</p></div>' +
+        '</div>' +
+      '</div>'
+    : '';
+  const warnHtml = incomplete.length > 0
+    ? '<div class="warn-card"><p>⚠️ Custo incompleto — sem histórico de compra: ' + esc(incomplete.join(", ")) + '</p></div>'
+    : '';
+
+  root.innerHTML = navHeader(p.name, loadProdutos) +
+    '<div class="kind-src">' +
+      '<span class="lbl">Tipo</span>' +
+      '<span class="pill kd-' + esc(p.kind) + '">' + esc(km.label) + '</span>' +
+    '</div>' +
+    '<div class="kind-src">' +
+      '<span class="lbl">' + (p.kind === "manufaturado" ? "Receita" : "Ingrediente") + '</span>' +
+      '<span>' + esc(src ? src.name : "—") + '</span>' +
+    '</div>' +
+    '<div class="kind-src">' +
+      '<span class="lbl">Itens por pacote</span>' +
+      '<span>' + fmtStockQty(p.items_per_package) + '</span>' +
+    '</div>' +
+    '<div class="detail-actions">' +
+      '<button class="primary small alt" id="edit-produto">✎ Editar</button>' +
+      '<button class="primary small alt danger" id="del-produto">🗑 Remover</button>' +
+    '</div>' +
+    costHtml + warnHtml +
+    '<h3>Embalagem</h3>' + embHtml +
+    '<button class="primary small alt addrow-btn" id="add-emb">+ Embalagem</button>' +
+    (cost
+      ? '<h3>Análise final de preço</h3>' +
+        '<div class="card reverse-card">' +
+          '<label for="rev-varejo">Se você quer vender a varejo por</label>' +
+          '<span class="field"><span class="prefix">R$</span>' +
+            '<input class="num-input" type="text" inputmode="numeric" id="rev-varejo"></span>' +
+          '<div class="reverse-out" id="rev-out"></div>' +
+        '</div>'
+      : '');
+
+  wireNav(loadProdutos);
+
+  document.getElementById("prod-name").addEventListener("click", () => openProdutoModal(p));
+  document.getElementById("edit-produto").addEventListener("click", () => openProdutoModal(p));
+
+  document.getElementById("del-produto").addEventListener("click", async () => {
+    if(!(await confirmModal('Remover o produto "' + p.name + '"?', "Remover"))) return;
+    try{
+      await api("produto_delete", { id: p.id });
+      produtos = [];
+      listToast("Produto removido");
+      loadProdutos();
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadProdutos);
+      listToast("Não foi possível remover", true);
+    }
+  });
+
+  document.getElementById("add-emb").addEventListener("click", async () => {
+    const added = await embalagemPickerModal();
+    if(!added) return;
+    try{
+      await api("produto_embalagem_add", Object.assign({ produto_id: p.id }, added));
+      produtos = [];
+      openProduto(p.id);
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadProdutos);
+      listToast("Não foi possível adicionar", true);
+    }
+  });
+  root.querySelectorAll("[data-edit-emb]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.closest(".item-row").dataset.emb;
+      const e0 = embalagens.find(x => x.id === id);
+      const val = await promptModal("Editar quantidade", "Quantidade por pacote", fmtStockQty(e0.quantity));
+      if(val === null) return;
+      const quantity = parseQtyInput(val);
+      if(quantity === null){ listToast("Quantidade inválida", true); return; }
+      try{
+        await api("produto_embalagem_update", { id, quantity });
+        produtos = [];
+        openProduto(p.id);
+      }catch(err){
+        if(err.unauthorized) return handleAuthError(err, loadProdutos);
+        listToast("Não foi possível salvar", true);
+      }
+    });
+  });
+  root.querySelectorAll("[data-del-emb]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if(!(await confirmModal("Remover esta embalagem?"))) return;
+      const id = btn.closest(".item-row").dataset.emb;
+      try{
+        await api("produto_embalagem_delete", { id });
+        produtos = [];
+        openProduto(p.id);
+      }catch(err){
+        if(err.unauthorized) return handleAuthError(err, loadProdutos);
+        listToast("Não foi possível remover", true);
+      }
+    });
+  });
+
+  if(cost){
+    const revEl = document.getElementById("rev-varejo");
+    wirePriceInput(revEl);
+    const outEl = document.getElementById("rev-out");
+    revEl.addEventListener("input", () => {
+      const target = centsToPrice(priceDigits(revEl.value));
+      if(!target){ outEl.innerHTML = ""; return; }
+      // Pure client-side arithmetic on the margins already loaded — no
+      // round trip, matches the spreadsheet's reverse formula exactly.
+      const precoAtacado = target * (1 - Number(p.margin_varejo));
+      const custoNecessario = precoAtacado * (1 - Number(p.margin_atacado));
+      outEl.innerHTML =
+        '<p>Então o preço atacado deve ser: <b>' + fmtMoney(precoAtacado) + '</b></p>' +
+        '<p>Então o custo do produto deve ser: <b>' + fmtMoney(custoNecessario) + '</b></p>';
+    });
+  }
+}
+
+loadProdutos();
+</script>
+</body>
+</html>

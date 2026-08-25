@@ -2,10 +2,89 @@
 
 Context file for Claude Code / Claude sessions working on this repo.
 
-## Status (2026-08-24): Produtos renamed to Insumos + Clientes module shipped, front-end refactor + Eventos/Financeiro modules shipped 2026-08-20
+## Status (2026-08-24): Receitas + Produtos + Fornecedores modules shipped — the (Shopping List >) Insumos → Receita → Produto reshape is now complete end to end
 
 Full plan and reasoning in `sbralg/cowork-personal-daily-summary`'s
-`ROADMAP.md` — this entry is the short version.
+`ROADMAP.md` and `CLAUDE.md` (the "Receita + Produto + Fornecedor" Status
+entry has the full ported pricing formula) — this entry is the short,
+front-end-focused version.
+
+- **Three new pages: `receitas.html`, `produtos.html`, `fornecedores.html`**
+  (the modules the 2026-08-24 Insumos rename was staged for), plus
+  extensions to three existing pages. The whole pricing model was ported
+  from the household's real spreadsheet (`Precificação Produtos Magá.xlsm`)
+  rather than invented — see the backend repo's CLAUDE.md for the traced
+  formula and the design decisions the user made across two review rounds.
+  - **`receitas.html`**: list + a builder view. Adding an ingredient line
+    opens a picker offering "🧂 Ingrediente" (filtered to insumos-catalogue
+    ingredients, never packaging) or "📖 Receita" (a recipe can consume
+    another recipe — e.g. a syrup inside a cake — with server-side cycle
+    rejection), then a quantity step. The cost breakdown (batch cost →
+    with safety margin → per prep-labor → cost per yield unit) is shown
+    read-only, computed server-side every read — never cached. An
+    ingredient that's never actually been stocked shows up BY NAME in an
+    incomplete-cost warning rather than silently pricing as free.
+    **"Rendimento Desejado" (batch scaling) is a real, live feature, not a
+    stub** — an ephemeral input (never saved) that shows every line's
+    quantity scaled to a bigger batch, recursing through nested sub-
+    recipes, computed instantly client-side. Turning that into an actual
+    shopping-list addition is deliberately deferred (see backend repo's
+    Planned/future).
+  - **`produtos.html`**: kind switch (manufaturado → a Receita picker;
+    comprado → an Ingredient picker — a fornecedor-sourced item resold
+    as-is costs itself the SAME way a recipe line does, no separate
+    supplier-cost field) with embalagem lines filtered to `kind='embalagem'`
+    ingredients, three margin tiers (atacado/distribuidor/varejo), the full
+    computed pricing breakdown, and a reverse "if I want to sell at retail
+    R$X" calculator that's pure client-side arithmetic on the margins
+    already loaded — no round trip for that part.
+  - **`fornecedores.html`**: name/phone/email/notes (phone doubles as the
+    WhatsApp number, exact same `waPhoneDigits()`/`wa.me` pattern as
+    `clientes.html`), and a purchase-history list read through
+    `fornecedor_detail` — every inbound `stock_movements` row tagged with
+    this fornecedor, joined to the insumo for its name. No separate
+    history table; the tagging happens optionally when booking a stock
+    movement (see `estoque.html` below).
+  - **`eventos.html`**: `itemModal` gained an optional "🔗 Vincular
+    Produto" picker. Picking one prefills description/cost/price from the
+    produto's current `preço_atacado` — still fully manually editable
+    before saving, per the user's explicit instruction that a sale typed
+    in a hurry with no time to search a catalogue must keep working
+    exactly as it did before.
+  - **`insumos.html`**: a kind filter (chip row: Todos/🧂 Ingredientes/
+    📦 Embalagens) + badge on every row, and kind + category editing added
+    to the metadata editor (a lazily-created-category `<select>` — "+ Nova
+    categoria…" creates one inline via `insumo_category_create`).
+    Categories are purely organizational (browsing), separate from the
+    load-bearing `kind` flag the recipe pickers filter on.
+  - **`estoque.html`**: the shortfall-recovery dialog (booking an
+    `unaccounted_purchase` when a consumption would cross zero — the one
+    place that already asks for a price) gained an optional Fornecedor
+    picker. **Deliberately NOT added to the fast one-tap `+` gesture** —
+    that stepper stays dialog-free on purpose; see the 2026-08-09/08-12
+    entries below on why its speed is load-bearing UX, not an oversight.
+  - **`shared-menu.js`**: three new entries, plus two emoji swaps per
+    direct user feedback — 🏷️ (price tag) moved from Insumos to Produtos
+    since that's literally what it is; Insumos got 🥖; Eventos got 🥂
+    (was 🧾, which the user didn't like).
+  - **A real bug caught during review, before any test ran**:
+    `receitas.html`'s batch-scaling redraw replaced `#itens-card`'s
+    `outerHTML` with bare unwrapped rows on first use, which silently
+    broke every *following* keystroke (the id was gone, so the redraw
+    function found nothing to update). Fixed to patch `innerHTML` instead.
+  - **`test/receitas.test.js`, `test/produtos.test.js`,
+    `test/fornecedores.test.js` were written** following the established
+    fake-backing-store-with-real-relational-math convention — the fakes
+    reimplement the actual cost formulas line-for-line (nested-recipe
+    recursion and the incomplete-cost cases included), not canned fixtures
+    — **but could not be run in this sandbox (no Node 20+/Playwright)**.
+    Run these three, plus `insumos.test.js`/`stock.test.js`/
+    `eventos.test.js` as a regression check, before trusting this shipped
+    cleanly.
+  - **Not live-verified against the deployed function** — see the backend
+    repo's CLAUDE.md for a same-session Edge Function deploy incident
+    (self-inflicted, resolved by the user) that used the verification
+    window this would otherwise have had.
 
 - **Module renamed: Vendas → Eventos (2026-08-24).** `vendas.html`→
   `eventos.html` (plain `git mv`, no redirect stub — same convention as
@@ -116,7 +195,7 @@ Full plan and reasoning in `sbralg/cowork-personal-daily-summary`'s
 ## What this is
 
 The public GitHub Pages front end deployed from this repo's `main` branch,
-served at https://sbralg.github.io/cowork-checklist/. Nine pages sharing a
+served at https://sbralg.github.io/cowork-checklist/. Twelve pages sharing a
 set of `shared-*.js`/`shared-*.css` files (see "Shared files" below), no
 build step, no framework:
 
@@ -148,6 +227,19 @@ build step, no framework:
 - `financeiro.html` — the cost/revenue ledger: every receita and despesa,
   most arriving automatically from Eventos, some logged directly (rent,
   ingredients, marketing) for spending that never passed through an evento.
+- `receitas.html` — a Receita formula: yield, safety margin, prep labor,
+  ingredient/sub-recipe lines (a recipe can consume another recipe) with
+  quantities, the computed cost breakdown, and an ephemeral batch-scaling
+  input ("Rendimento Desejado" — never saved, just shows scaled quantities).
+- `produtos.html` — a sellable Produto: manufaturado (via a Receita picker)
+  or comprado (via an Ingredient picker — a fornecedor-sourced item resold
+  as-is, costed the same way a recipe line is), embalagem lines, three
+  margin tiers, the full cost→atacado→distribuidor→varejo pricing
+  breakdown, and the reverse "sell at this retail price" calculator.
+- `fornecedores.html` — who the household buys from: name/phone/email/
+  notes, a `wa.me` WhatsApp composer, and the purchase history read
+  through `fornecedor_detail` (every inbound stock movement tagged with
+  this fornecedor, joined to the insumo — no separate history table).
 
 **Renamed with no redirect stubs, on purpose (2026-08-20).** A stale
 bookmark to the old `shopping.html` now 404s, and one to the old

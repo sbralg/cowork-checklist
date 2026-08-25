@@ -159,6 +159,7 @@ let searchTerm = "";
 let statusFilter = "";
 let clienteCache = null;
 let doneExpanded = false;
+let produtoCache = null;
 
 const PAGE_LOGIN = {
   title: "Eventos",
@@ -481,6 +482,80 @@ async function clientePickerModal(){
   });
 }
 
+// Search-only picker (no create — produtos are managed in produtos.html),
+// resolving with the produto row PLUS its current cost/price breakdown in
+// one round trip (produto_detail), so itemModal can prefill without a
+// second call. Deliberately a convenience only: the caller decides whether
+// to actually use the prefilled values, and nothing here is required.
+async function produtoPickerModal(){
+  return new Promise(async resolve => {
+    let all;
+    try{
+      if(!produtoCache) produtoCache = (await api("produtos")).produtos || [];
+      all = produtoCache;
+    }catch(e){
+      if(e.unauthorized){ handleAuthError(e, loadEventos); return resolve(null); }
+      listToast("Não foi possível carregar os produtos", true);
+      return resolve(null);
+    }
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML =
+      '<div class="modal-card">' +
+        '<h3>Produto</h3>' +
+        '<input type="text" id="prod-q" placeholder="Buscar produto" autocomplete="off">' +
+        '<div class="cli-list" id="prod-list"></div>' +
+        '<div class="modal-actions"><button class="cancel" id="prod-cancel">Cancelar</button></div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+
+    const qEl = backdrop.querySelector("#prod-q");
+    const listEl = backdrop.querySelector("#prod-list");
+    const close = (result) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+
+    function draw(){
+      const t = qEl.value.trim().toLowerCase();
+      const shown = all.filter(p => !t || String(p.name).toLowerCase().indexOf(t) >= 0);
+      let html = shown.map(p => '<button class="cli-opt" data-pick="' + esc(p.id) + '">' +
+        '<span class="nm">' + esc(p.name) + '</span></button>').join("");
+      if(!html) html = '<p class="msg small">Nenhum produto ainda.</p>';
+      listEl.innerHTML = html;
+      listEl.querySelectorAll("[data-pick]").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          try{
+            const detail = await api("produto_detail", { id: btn.dataset.pick });
+            close(detail.found ? { produto: detail.produto, cost: detail.cost } : null);
+          }catch(err){
+            if(err.unauthorized){ handleAuthError(err, loadEventos); return close(null); }
+            listToast("Não foi possível carregar o produto", true);
+            close(null);
+          }
+        });
+      });
+    }
+
+    function onKey(e){
+      if(e.key === "Escape") close(null);
+      if(e.key === "Enter"){
+        e.preventDefault();
+        const first = listEl.querySelector(".cli-opt");
+        if(first) first.click();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
+    backdrop.querySelector("#prod-cancel").addEventListener("click", () => close(null));
+    qEl.addEventListener("input", draw);
+    draw();
+    qEl.focus();
+  });
+}
+
 function statusPickerModal(current){
   return new Promise(resolve => {
     const backdrop = document.createElement("div");
@@ -603,7 +678,8 @@ async function openEvento(id){
 function itemRowHtml(it){
   const badge = it.tipo === "servico" ? "🛠" : "🎂";
   const meta = fmtStockQty(it.quantity) + ' × ' + fmtMoney(it.unit_price) +
-    (Number(it.unit_cost) > 0 ? ' · custo ' + fmtMoney(it.unit_cost) : '');
+    (Number(it.unit_cost) > 0 ? ' · custo ' + fmtMoney(it.unit_cost) : '') +
+    (it.produto_id ? ' · 🔗 produto' : '');
   const amt = Number(it.quantity) * Number(it.unit_price);
   return '<div class="item-row" data-item="' + esc(it.id) + '">' +
     '<span class="badge">' + badge + '</span>' +
@@ -869,6 +945,11 @@ function renderEvento(data){
 
 function itemModal(it){
   const isEdit = !!it;
+  // A picked Produto is a convenience prefill only — description/unit_cost/
+  // unit_price below stay the persisted, always-manually-editable fields
+  // exactly as before. A sale typed in a hurry with no time to search a
+  // catalogue still works completely unchanged, produto_id simply stays null.
+  let produtoId = isEdit ? (it.produto_id || null) : null;
   return new Promise(resolve => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -880,6 +961,9 @@ function itemModal(it){
           '<option value="produto"' + (isEdit && it.tipo !== "servico" ? " selected" : "") + '>🎂 Produto</option>' +
           '<option value="servico"' + (isEdit && it.tipo === "servico" ? " selected" : "") + '>🛠 Serviço</option>' +
         '</select>' +
+        '<button type="button" class="link" id="it-pick-produto" style="display:block;margin:0 0 14px">' +
+          '🔗 Vincular Produto (opcional)' +
+        '</button>' +
         '<label for="it-desc">Descrição</label>' +
         '<input type="text" id="it-desc" value="' + esc(isEdit ? it.description : "") + '">' +
         '<div class="fields-row">' +
@@ -931,6 +1015,7 @@ function itemModal(it){
         quantity,
         unit_cost: centsToPrice(priceDigits(costEl.value)) || 0,
         unit_price: centsToPrice(priceDigits(priceEl.value)) || 0,
+        produto_id: produtoId,
       });
     };
     function onKey(e){
@@ -941,6 +1026,19 @@ function itemModal(it){
     backdrop.addEventListener("click", e => { if(e.target === backdrop) close(null); });
     backdrop.querySelector("#it-cancel").addEventListener("click", () => close(null));
     backdrop.querySelector("#it-ok").addEventListener("click", ok);
+    backdrop.querySelector("#it-pick-produto").addEventListener("click", async () => {
+      const picked = await produtoPickerModal();
+      if(!picked) return;
+      produtoId = picked.produto.id;
+      backdrop.querySelector("#it-desc").value = picked.produto.name;
+      if(picked.cost && picked.cost.custo_total_por_unidade != null){
+        costEl.value = fmtPriceInput(picked.cost.custo_total_por_unidade);
+      }
+      if(picked.cost && picked.cost.preco_atacado != null){
+        priceEl.value = fmtPriceInput(picked.cost.preco_atacado);
+      }
+      backdrop.querySelector("#it-pick-produto").textContent = "🔗 " + picked.produto.name;
+    });
     backdrop.querySelector("#it-desc").focus();
   });
 }

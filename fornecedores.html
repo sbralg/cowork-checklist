@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fornecedores">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<title>Fornecedores</title>
+<!--
+  Data-free shell for the Fornecedores module — who the household buys
+  from. Same pattern as every other page here: hosted on public GitHub
+  Pages, holds NO keys and NO data, asks for the shared passphrase, then
+  talks only to the gated Supabase Edge Function (checklist-api).
+
+  Deliberately minimal fields (name/phone/email/notes) — there is no direct
+  FK from produtos to fornecedores. A fornecedor-sourced item (a croissant
+  bought to resell, or bought to use INSIDE a recipe) is an ordinary
+  insumo/ingredient; what THIS page's detail view shows as "purchase
+  history" is simply every inbound stock_movements row tagged with this
+  fornecedor_id, joined to the insumo for its name — no separate table.
+
+  "Enviar WhatsApp" is a wa.me deep link, not a send API — same reasoning
+  and same limitation as clientes.html: this household's WhatsApp bridge is
+  LAN-only and unreachable from this Edge Function.
+-->
+<link rel="stylesheet" href="shared-base.css">
+<link rel="stylesheet" href="shared-menu.css">
+<link rel="stylesheet" href="shared-modal.css">
+<link rel="stylesheet" href="shared-toast.css">
+<link rel="stylesheet" href="shared-inputs.css">
+<style>
+  body{
+    padding:max(16px,env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom));
+  }
+  .wrap{max-width:640px;margin:0 auto}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 8px}
+  .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
+  .subheader{display:flex;align-items:baseline;justify-content:space-between;gap:10px;min-width:0;margin:0 0 16px}
+  h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
+  h3{font-size:14px;font-weight:650;margin:22px 0 8px;color:var(--muted)}
+  .searchrow{display:flex;gap:8px;margin:0 0 14px}
+  .searchrow input[type=search]{
+    flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+    -webkit-appearance:none;
+  }
+  .row{display:flex;flex-direction:column;gap:4px;padding:14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background-color .15s ease}
+  .row:hover{background:rgba(127,127,127,.06)}
+  .row:last-child{border-bottom:none}
+  .row .nm{font-size:15px;font-weight:600;margin:0;word-wrap:break-word}
+  .row .meta{font-size:12.5px;color:var(--muted);margin:0}
+  .addrow-btn{margin:8px 0 0}
+  button.primary.full{width:100%}
+  /* ---- detail ---- */
+  .forn-title{font-size:16px;font-weight:650;margin:0;text-align:right;word-wrap:break-word;cursor:pointer}
+  .forn-title:hover{opacity:.75}
+  .infofield{
+    display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+    padding:10px 0;border-top:1px solid var(--border);
+  }
+  .infofield .lbl{font-size:12px;color:var(--muted);margin:0;flex:none}
+  .infofield .val{font-size:14px;text-align:right;word-break:break-word}
+  .infofield .val.empty{color:var(--muted);font-style:italic}
+  .detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
+  .buy-row{
+    display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
+    padding:12px 14px;border-bottom:1px solid var(--border);
+  }
+  .buy-row:last-child{border-bottom:none}
+  .buy-row .body{flex:1;min-width:0}
+  .buy-row .body .txt{font-size:14.5px;margin:0;word-wrap:break-word}
+  .buy-row .body .meta{font-size:12.5px;color:var(--muted);margin:3px 0 0}
+  .buy-row .amt{font-size:14.5px;font-weight:650;white-space:nowrap;flex:none}
+  /* ---- WhatsApp compose ---- */
+  .wa-card{padding:14px}
+  .wa-card textarea{
+    width:100%;min-height:76px;resize:vertical;font:inherit;font-size:14px;
+    padding:10px 12px;border-radius:10px;border:1px solid var(--border-strong);
+    background:var(--bg);color:var(--text);box-sizing:border-box;
+  }
+  .wa-send{
+    display:flex;align-items:center;justify-content:center;gap:6px;width:100%;
+    margin-top:10px;padding:13px 16px;border-radius:12px;border:none;
+    background:#25d366;color:#fff;font:inherit;font-size:15px;font-weight:650;
+    text-decoration:none;cursor:pointer;transition:opacity .15s ease,filter .15s ease;
+  }
+  .wa-send:hover{filter:brightness(1.06)}
+  .wa-hint{font-size:13px;color:var(--muted);margin:0}
+</style>
+</head>
+<body>
+<div id="root" class="wrap"><p class="msg">Carregando…</p></div>
+
+<script>
+const root = document.getElementById("root");
+let fornecedores = [];
+let searchTerm = "";
+
+const PAGE_LOGIN = {
+  title: "Fornecedores",
+  subtitle: "Digite a senha para acessar.",
+  onSuccess: () => loadFornecedores(),
+};
+</script>
+<script src="shared-api.js"></script>
+<script src="shared-menu.js"></script>
+<script src="shared-ui.js"></script>
+<script src="shared-format.js"></script>
+<script>
+
+const CURRENT_PAGE = "fornecedores";
+
+function navHeader(title, backAction){
+  const topRow = '<header><div class="hleft">' +
+    '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
+    '<h1 style="flex:1">' + (backAction ? 'Fornecedores' : esc(title)) + '</h1>' +
+    '</div></header>';
+  if(!backAction) return topRow;
+  return topRow + '<div class="subheader">' +
+    '<button class="link" id="back">← Fornecedores</button>' +
+    (title ? '<h2 class="forn-title" id="forn-name">' + esc(title) + '</h2>' : '') +
+  '</div>';
+}
+function wireNav(backAction){
+  wireMenuButton();
+  if(backAction) document.getElementById("back").addEventListener("click", backAction);
+}
+
+// Same reasoning as clientes.html's waPhoneDigits — a 10/11-digit number
+// reads as Brazilian local (DDD + phone) and gets 55 prepended; 12+ digits
+// already carries a country code; anything shorter is refused rather than
+// guessed at.
+function waPhoneDigits(phone){
+  let d = String(phone || "").replace(/\D/g, "");
+  if(d.length === 10 || d.length === 11) d = "55" + d;
+  return d.length >= 12 ? d : "";
+}
+
+// ---- list screen ----
+
+async function loadFornecedores(){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  if(!getPass()){ showLogin(); return; }
+  try{
+    const data = await api("fornecedores");
+    fornecedores = data.fornecedores || [];
+    const wanted = new URLSearchParams(location.search).get("id");
+    if(wanted){
+      history.replaceState(null, "", location.pathname);
+      openFornecedor(wanted);
+      return;
+    }
+    renderList();
+  }catch(e){ handleAuthError(e, loadFornecedores); }
+}
+
+function matchesSearch(f, term){
+  if(!term) return true;
+  const t = term.toLowerCase();
+  return [f.name, f.phone, f.email].some(v => String(v || "").toLowerCase().indexOf(t) >= 0);
+}
+
+function fornecedorRowHtml(f){
+  const meta = [f.phone, f.email].filter(Boolean).join(" · ");
+  return '<div class="row" data-id="' + esc(f.id) + '">' +
+    '<p class="nm">' + esc(f.name) + '</p>' +
+    (meta ? '<p class="meta">' + esc(meta) + '</p>' : '') +
+  '</div>';
+}
+
+function renderList(){
+  const shown = fornecedores.filter(f => matchesSearch(f, searchTerm));
+  const rowsHtml = fornecedores.length === 0
+    ? '<p class="msg">Nenhum fornecedor ainda. Toque em "+ Novo fornecedor" para começar.</p>'
+    : (shown.length === 0
+        ? '<p class="msg" id="no-match">Nenhum fornecedor encontrado.</p>'
+        : '<div class="card" id="list-card">' + shown.map(fornecedorRowHtml).join("") + '</div>');
+
+  root.innerHTML = navHeader("Fornecedores", null) +
+    '<div class="searchrow">' +
+      '<input type="search" id="search" placeholder="Buscar por nome, telefone ou e-mail" ' +
+        'value="' + esc(searchTerm) + '">' +
+    '</div>' +
+    rowsHtml +
+    '<button class="primary full addrow-btn" id="new-fornecedor">+ Novo fornecedor</button>';
+
+  wireNav(null);
+
+  const search = document.getElementById("search");
+  search.addEventListener("input", () => {
+    searchTerm = search.value.trim();
+    redrawList();
+  });
+  wireListRows();
+  document.getElementById("new-fornecedor").addEventListener("click", () => openFornecedorModal(null));
+}
+
+function redrawList(){
+  const shown = fornecedores.filter(f => matchesSearch(f, searchTerm));
+  const card = document.getElementById("list-card") || document.getElementById("no-match");
+  const html = shown.length === 0
+    ? '<p class="msg" id="no-match">Nenhum fornecedor encontrado.</p>'
+    : '<div class="card" id="list-card">' + shown.map(fornecedorRowHtml).join("") + '</div>';
+  if(card){
+    card.outerHTML = html;
+    wireListRows();
+  }
+}
+
+function wireListRows(){
+  root.querySelectorAll(".row[data-id]").forEach(row => {
+    row.addEventListener("click", () => openFornecedor(row.dataset.id));
+  });
+}
+
+// ---- create/edit modal ----
+
+function openFornecedorModal(f){
+  const isEdit = !!f;
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-card">' +
+      '<h3>' + (isEdit ? "Editar fornecedor" : "Novo fornecedor") + '</h3>' +
+      '<label for="forn-name-i">Nome</label>' +
+      '<input type="text" id="forn-name-i" value="' + esc(isEdit ? f.name : "") + '">' +
+      '<label for="forn-phone">Telefone / WhatsApp (opcional)</label>' +
+      '<input type="text" id="forn-phone" inputmode="tel" placeholder="ex: (11) 99445-2426" ' +
+        'value="' + esc(isEdit ? (f.phone || "") : "") + '">' +
+      '<label for="forn-email">E-mail (opcional)</label>' +
+      '<input type="text" id="forn-email" inputmode="email" value="' + esc(isEdit ? (f.email || "") : "") + '">' +
+      '<label for="forn-notes">Notas (opcional)</label>' +
+      '<input type="text" id="forn-notes" value="' + esc(isEdit ? (f.notes || "") : "") + '">' +
+      '<div class="modal-actions">' +
+        '<button class="cancel" id="forn-cancel">Cancelar</button>' +
+        '<button class="save" id="forn-ok">Salvar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  function onKey(e){ if(e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
+  backdrop.querySelector("#forn-cancel").addEventListener("click", close);
+
+  backdrop.querySelector("#forn-ok").addEventListener("click", async () => {
+    const name = backdrop.querySelector("#forn-name-i").value.trim();
+    if(!name){ alert("O nome não pode ficar vazio."); return; }
+    const payload = {
+      name,
+      phone: backdrop.querySelector("#forn-phone").value.trim() || null,
+      email: backdrop.querySelector("#forn-email").value.trim() || null,
+      notes: backdrop.querySelector("#forn-notes").value.trim() || null,
+    };
+    try{
+      if(isEdit){
+        await api("fornecedor_update", Object.assign({ id: f.id }, payload));
+        close();
+        listToast("Fornecedor atualizado");
+        openFornecedor(f.id);
+      }else{
+        const res = await api("fornecedor_create", payload);
+        close();
+        fornecedores = [];
+        openFornecedor(res.fornecedor.id);
+      }
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadFornecedores);
+      listToast("Não foi possível salvar", true);
+    }
+  });
+
+  backdrop.querySelector("#forn-name-i").focus();
+}
+
+// ---- detail screen ----
+
+async function openFornecedor(id){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  try{
+    const data = await api("fornecedor_detail", { id });
+    if(!data.found){
+      root.innerHTML = navHeader("", loadFornecedores) + '<p class="msg">Fornecedor não encontrado.</p>';
+      wireNav(loadFornecedores);
+      return;
+    }
+    renderFornecedor(data);
+  }catch(e){ handleAuthError(e, loadFornecedores); }
+}
+
+function infoFieldHtml(label, value){
+  return '<div class="infofield">' +
+    '<span class="lbl">' + esc(label) + '</span>' +
+    '<span class="val' + (value ? '' : ' empty') + '">' + esc(value || "—") + '</span>' +
+  '</div>';
+}
+
+// "50× Croissant, R$2,50/un, 20/08" — delta is the quantity purchased
+// (always positive here, since fornecedor_detail only ever returns inbound
+// movements), unit_cost is what that batch cost per package.
+function buyRowHtml(m){
+  const item = m.insumo || {};
+  const meta = [fmtDateTime(m.occurred_at)];
+  if(item.brand) meta.push(item.brand);
+  if(m.note) meta.push(m.note);
+  return '<div class="buy-row">' +
+    '<span class="body">' +
+      '<p class="txt">' + fmtStockQty(m.delta) + '× ' + esc(item.name || "?") + '</p>' +
+      '<p class="meta">' + esc(meta.join(" · ")) + '</p>' +
+    '</span>' +
+    '<span class="amt">' + (m.unit_cost == null ? "—" : fmtMoney(m.unit_cost) + "/un") + '</span>' +
+  '</div>';
+}
+
+function renderFornecedor(data){
+  const f = data.fornecedor;
+  const purchases = data.purchases || [];
+  const purchasesHtml = purchases.length === 0
+    ? '<p class="msg small">Nenhuma compra registrada ainda.</p>'
+    : '<div class="card">' + purchases.map(buyRowHtml).join("") + '</div>';
+
+  const waDigits = waPhoneDigits(f.phone);
+
+  root.innerHTML = navHeader(f.name, loadFornecedores) +
+    infoFieldHtml("Telefone", f.phone) +
+    infoFieldHtml("E-mail", f.email) +
+    infoFieldHtml("Notas", f.notes) +
+    '<div class="detail-actions">' +
+      '<button class="primary small alt" id="edit-forn">✎ Editar</button>' +
+      '<button class="primary small alt danger" id="del-forn">🗑 Remover</button>' +
+    '</div>' +
+    '<h3>💬 WhatsApp</h3>' +
+    '<div class="card wa-card">' +
+      (waDigits
+        ? '<textarea id="wa-text" placeholder="Digite a mensagem…"></textarea>' +
+          '<a class="wa-send" id="wa-send" target="_blank" rel="noopener">Abrir contato no WhatsApp</a>'
+        : '<p class="wa-hint">Adicione um telefone ao fornecedor para enviar mensagens pelo WhatsApp.</p>') +
+    '</div>' +
+    '<h3>Compras</h3>' + purchasesHtml;
+
+  wireNav(loadFornecedores);
+
+  document.getElementById("edit-forn").addEventListener("click", () => openFornecedorModal(f));
+  document.getElementById("forn-name").addEventListener("click", () => openFornecedorModal(f));
+
+  document.getElementById("del-forn").addEventListener("click", async () => {
+    let force = false;
+    try{
+      let res = await api("fornecedor_delete", { id: f.id });
+      if(res.ok === false && res.reason === "has_history"){
+        if(!(await confirmModal(
+          'Este fornecedor tem ' + res.movements + ' compra(s) registrada(s). Removê-lo mantém as ' +
+          'compras no histórico do insumo, apenas sem o vínculo com o fornecedor. Não dá para desfazer.',
+          "Remover mesmo assim"))) return;
+        force = true;
+        res = await api("fornecedor_delete", { id: f.id, force: true });
+      }
+      fornecedores = [];
+      listToast(force ? "Fornecedor removido" : "Fornecedor removido");
+      loadFornecedores();
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadFornecedores);
+      listToast("Não foi possível remover", true);
+    }
+  });
+
+  if(waDigits){
+    const textEl = document.getElementById("wa-text");
+    const sendEl = document.getElementById("wa-send");
+    const updateHref = () => {
+      const msg = textEl.value.trim();
+      if(!msg){
+        sendEl.textContent = "Abrir contato no WhatsApp";
+        sendEl.href = "https://wa.me/" + waDigits;
+        return;
+      }
+      sendEl.textContent = "Enviar pelo WhatsApp";
+      sendEl.href = "https://wa.me/" + waDigits + "?text=" + encodeURIComponent(msg);
+    };
+    textEl.addEventListener("input", updateHref);
+    updateHref();
+  }
+}
+
+loadFornecedores();
+</script>
+</body>
+</html>
