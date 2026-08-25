@@ -179,7 +179,7 @@ function computeProdutoCost(id) {
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 
   const check = (label, cond) => { if (!cond) failures.push('FAIL: ' + label); };
-  const norm = (s) => s.replace(/ /g, ' ');
+  const norm = (s) => s.replace(/\u00A0/g, ' ');
 
   await ctx.addInitScript(() => { try { localStorage.setItem('checklist_pass', 'x'); } catch (_) {} });
 

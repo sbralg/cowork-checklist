@@ -179,10 +179,19 @@ function computeReceitaCost(receitaId, visiting) {
   });
 
   const page = await ctx.newPage();
-  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  // Chromium logs its own "Failed to load resource" console error for ANY
+  // non-2xx fetch response — including the receita_delete 400 this suite
+  // deliberately triggers below to cover the refusal-first delete. That's
+  // expected network noise, not an app bug, so it's excluded here the same
+  // way a real JS error (thrown from app code) would not be.
+  page.on('console', m => {
+    if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) {
+      errors.push('console: ' + m.text());
+    }
+  });
 
   const check = (label, cond) => { if (!cond) failures.push('FAIL: ' + label); };
-  const norm = (s) => s.replace(/ /g, ' ');
+  const norm = (s) => s.replace(/\u00A0/g, ' ');
 
   await ctx.addInitScript(() => { try { localStorage.setItem('checklist_pass', 'x'); } catch (_) {} });
 

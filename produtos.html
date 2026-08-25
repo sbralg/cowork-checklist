@@ -319,6 +319,7 @@ async function pickReceitaModal(){
 
 function openProdutoModal(p){
   const isEdit = !!p;
+  let name = isEdit ? p.name : "";
   let kind = isEdit ? p.kind : "manufaturado";
   let source = isEdit
     ? (p.kind === "manufaturado" ? p.receita : p.ingredient)
@@ -333,7 +334,7 @@ function openProdutoModal(p){
       '<div class="modal-card">' +
         '<h3>' + (isEdit ? "Editar produto" : "Novo produto") + '</h3>' +
         '<label for="pr-name-i">Nome</label>' +
-        '<input type="text" id="pr-name-i" value="' + esc(isEdit ? p.name : "") + '">' +
+        '<input type="text" id="pr-name-i" value="' + esc(name) + '">' +
         '<label>Tipo</label>' +
         '<select id="pr-kind" style="width:100%;margin-bottom:14px">' +
           '<option value="manufaturado"' + (kind === "manufaturado" ? " selected" : "") + '>🎂 Manufaturado (via Receita)</option>' +
@@ -381,6 +382,8 @@ function openProdutoModal(p){
           '<button class="save" id="pr-ok">Salvar</button>' +
         '</div>' +
       '</div>';
+
+    backdrop.querySelector("#pr-name-i").addEventListener("input", (e) => { name = e.target.value; });
 
     const itemsEl = backdrop.querySelector("#pr-items");
     const packMinEl = backdrop.querySelector("#pr-pack-min");
