@@ -1,8 +1,11 @@
 // Headless UI test for fornecedores.html — who the household buys from:
-// create/edit/delete, the wa.me WhatsApp compose link, and the purchase
-// history read through `fornecedor_detail` (every inbound stock_movements
-// row tagged with this fornecedor_id, joined to the insumo for its name —
-// no separate purchase-history table, see checklist-api's module comment).
+// create/edit/delete, the wa.me WhatsApp compose link, the "Produtos"
+// list (comprado items sourced from here, produtos.fornecedor_id — pure
+// reference metadata, see checklist-api's module comment above
+// produtoCostFor), the "+ Novo Produto" hand-off to produtos.html, and the
+// separate pantry purchase history read through `fornecedor_detail`
+// (every inbound stock_movements row tagged with this fornecedor_id,
+// joined to the insumo for its name — no separate table).
 //
 //   node test/fornecedores.test.js      # exits non-zero on any failure
 //   KEEP_SHOTS=1 node test/...          # also prints where screenshots went
@@ -45,7 +48,7 @@ function serve() {
   });
 }
 
-const state = { fornecedores: [], movements: [], insumos: {}, seq: 0 };
+const state = { fornecedores: [], movements: [], insumos: {}, produtos: [], seq: 0 };
 const uid = (p) => p + (++state.seq);
 function fornecedorOf(id) { return state.fornecedores.find(f => f.id === id); }
 
@@ -82,24 +85,28 @@ function fornecedorOf(id) { return state.fornecedores.find(f => f.id === id); }
         resp = { ok: true, fornecedor: f };
       }
     } else if (body.action === 'fornecedor_delete') {
-      const linked = state.movements.filter(m => m.fornecedor_id === body.id);
-      if (!body.force && linked.length > 0) {
-        resp = { ok: false, reason: 'has_history', id: body.id,
-          name: fornecedorOf(body.id).name, movements: linked.length };
+      const linkedMovements = state.movements.filter(m => m.fornecedor_id === body.id);
+      const linkedProdutos = state.produtos.filter(p => p.fornecedor_id === body.id);
+      if (!body.force && (linkedMovements.length > 0 || linkedProdutos.length > 0)) {
+        resp = { ok: false, reason: 'has_history', id: body.id, name: fornecedorOf(body.id).name,
+          movements: linkedMovements.length, produtos: linkedProdutos.length };
       } else {
-        linked.forEach(m => { m.fornecedor_id = null; });
+        linkedMovements.forEach(m => { m.fornecedor_id = null; });
+        linkedProdutos.forEach(p => { p.fornecedor_id = null; });
         state.fornecedores = state.fornecedores.filter(f => f.id !== body.id);
-        resp = { ok: true, id: body.id, movements_unlinked: linked.length };
+        resp = { ok: true, id: body.id,
+          movements_unlinked: linkedMovements.length, produtos_unlinked: linkedProdutos.length };
       }
     } else if (body.action === 'fornecedor_detail') {
       const f = fornecedorOf(body.id);
       if (!f) { resp = { found: false, id: body.id }; }
       else {
+        const produtos = state.produtos.filter(p => p.fornecedor_id === f.id);
         const purchases = state.movements
           .filter(m => m.fornecedor_id === f.id)
           .map(m => ({ ...m, insumo: state.insumos[m.gtin] }))
           .sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
-        resp = { found: true, fornecedor: f, purchases };
+        resp = { found: true, fornecedor: f, produtos, purchases };
       }
     } else {
       resp = { error: 'bad action' };
@@ -146,7 +153,33 @@ function fornecedorOf(id) { return state.fornecedores.find(f => f.id === id); }
   check('wa.me href carries the encoded message',
     decodeURIComponent(waHref.split('text=')[1]) === 'Oi, tem croissant amanhã?');
 
-  // --- purchase history via fornecedor_detail ---
+  // --- "+ Novo Produto" hands off to produtos.html with this fornecedor
+  // preset, following the app's existing ?id= deep-link convention ---
+  check('no produtos yet', (await page.textContent('#root')).includes('Nenhum produto cadastrado ainda'));
+  await Promise.all([
+    page.waitForURL(/produtos\.html\?new=1&fornecedor_id=/, { timeout: 6000 }),
+    page.click('#new-produto'),
+  ]);
+  check('navigated to produtos.html with the fornecedor preset',
+    page.url().includes('fornecedor_id=' + fornId));
+
+  // --- the Produtos list shows comprado items sourced here (metadata
+  // only — not tied to purchase history) and links into produtos.html ---
+  state.produtos.push({ id: uid('P'), name: 'Croissant avulso', kind: 'comprado', cost: 2.5, fornecedor_id: fornId });
+  await page.goto(PAGE + '?id=' + fornId);
+  await page.waitForSelector('#forn-name', { timeout: 6000 });
+  check('deep link opens the right fornecedor',
+    (await page.textContent('#forn-name')).includes('Padaria Ceci'));
+  const produtosText = norm(await page.textContent('#root'));
+  check('the produto sourced from this fornecedor is listed, got: ' + produtosText,
+    produtosText.includes('Croissant avulso') && produtosText.includes('R$ 2,50'));
+  await Promise.all([
+    page.waitForURL(/produtos\.html\?id=/, { timeout: 6000 }),
+    page.click('.row[data-produto]'),
+  ]);
+
+  // --- purchase history via fornecedor_detail (a SEPARATE concern from
+  // the Produtos list above — this is about pantry ingredient purchases) ---
   state.insumos['789001'] = { gtin: '789001', name: 'Croissant', brand: null, net_qty: 1, net_unit: 'un' };
   state.movements.push({
     id: uid('M'), gtin: '789001', delta: 50, unit_cost: 2.5, fornecedor_id: fornId,
@@ -154,24 +187,26 @@ function fornecedorOf(id) { return state.fornecedores.find(f => f.id === id); }
   });
   await page.goto(PAGE + '?id=' + fornId);
   await page.waitForSelector('#forn-name', { timeout: 6000 });
-  check('deep link opens the right fornecedor',
-    (await page.textContent('#forn-name')).includes('Padaria Ceci'));
   const purchaseText = norm(await page.textContent('#root'));
   check('purchase row shows the quantity and item, got: ' + purchaseText,
     purchaseText.includes('50× Croissant'));
   check('purchase row shows the unit cost', purchaseText.includes('R$ 2,50/un'));
 
-  // --- delete: a fornecedor with purchase history refuses first (shown as
-  // a confirm dialog naming the count), force unlinks on confirmation ---
+  // --- delete: a fornecedor with BOTH a produto and purchase history
+  // refuses first (shown as a confirm dialog naming both counts), force
+  // unlinks both on confirmation ---
   await page.click('#del-forn');
   await page.waitForSelector('#confirm-ok', { timeout: 6000 });
-  check('the refusal names the movement count',
-    (await page.textContent('.modal-card')).includes('1'));
+  const refusalText = await page.textContent('.modal-card');
+  check('the refusal names the produto count, got: ' + refusalText, refusalText.includes('1 produto'));
+  check('the refusal names the movement count', refusalText.includes('1 compra'));
   await page.click('#confirm-ok');
   await page.waitForSelector('#new-fornecedor', { timeout: 8000 });
   check('the fornecedor is gone from state', state.fornecedores.length === 0);
   check('the movement survives with fornecedor_id nulled',
     state.movements[0].fornecedor_id === null);
+  check('the produto survives with fornecedor_id nulled',
+    state.produtos[0].fornecedor_id === null);
 
   await page.screenshot({ path: path.join(SHOTS, 'fornecedor_detalhe.png'), fullPage: true });
   await browser.close();

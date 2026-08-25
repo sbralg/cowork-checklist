@@ -1,9 +1,13 @@
 // Headless UI test for receitas.html — a Receita costs itself from
 // Insumos (via the abstract ingredient) and optionally other Receitas.
-// Covers: create, add an ingredient line, the cost breakdown math, a
-// nested sub-recipe line, an ingredient with no purchase history showing
-// as "incomplete" rather than a wrong 0, batch-scaling display (ephemeral,
-// never saved), and the refusal-first delete when a recipe is in use.
+// Covers: create, add an ingredient line, the cost breakdown math (both
+// the batch total AND each line's own unit/line cost), a nested
+// sub-recipe line, an ingredient with no purchase history showing as
+// "incomplete" rather than a wrong 0, batch-scaling display (ephemeral,
+// never saved), the refusal-first delete when a recipe is in use, and the
+// "Categoria" control that creates/removes a linked manufaturado Produto
+// and renders its packaging/cost/margins panel inline (shared with
+// produtos.html via shared-produto-panel.js).
 //
 //   node test/receitas.test.js          # exits non-zero on any failure
 //   KEEP_SHOTS=1 node test/...          # also prints where screenshots went
@@ -47,10 +51,14 @@ function serve() {
   });
 }
 
-const state = { receitas: [], itens: [], ingredients: [], seq: 0 };
+const state = { receitas: [], itens: [], ingredients: [], produtos: [], fornecedores: [], seq: 0 };
 const uid = (p) => p + (++state.seq);
 function receitaOf(id) { return state.receitas.find(r => r.id === id); }
 function ingredientOf(id) { return state.ingredients.find(i => i.id === id); }
+function produtoOf(id) { return state.produtos.find(p => p.id === id); }
+function linkedProdutoFor(receitaId) {
+  return state.produtos.find(p => p.kind === 'manufaturado' && p.receita_id === receitaId) || null;
+}
 
 // Mirrors ingredientUnitCost() server-side: cost per base unit, or null
 // (never 0) when the ingredient has no last_cost recorded.
@@ -60,7 +68,8 @@ function ingredientUnitCost(ing) {
 }
 
 // Mirrors receitaCostFor() exactly — the household's real spreadsheet
-// formula, ported.
+// formula, ported. item_costs mirrors the per-line unit_cost/line_cost map
+// the backend now returns alongside the batch total.
 function computeReceitaCost(receitaId, visiting) {
   visiting = visiting || new Set();
   if (visiting.has(receitaId)) return { error: 'cyclic recipe reference' };
@@ -70,18 +79,21 @@ function computeReceitaCost(receitaId, visiting) {
   const itens = state.itens.filter(it => it.receita_id === receitaId);
   let batch_cost = 0;
   const incomplete = [];
+  const item_costs = {};
   for (const it of itens) {
     if (it.kind === 'ingrediente') {
       const ing = ingredientOf(it.ingredient_id);
       const uc = ingredientUnitCost(ing);
       if (uc == null) { incomplete.push(ing ? ing.name : '?'); continue; }
       batch_cost += it.quantity * uc;
+      item_costs[it.id] = { unit_cost: uc, line_cost: it.quantity * uc };
     } else {
       const sub = computeReceitaCost(it.sub_receita_id, visiting);
       const subR = receitaOf(it.sub_receita_id);
       if (sub.error) { incomplete.push((subR ? subR.name : '?') + ' (' + sub.error + ')'); continue; }
       incomplete.push(...sub.incomplete);
       batch_cost += it.quantity * sub.cost_per_yield_unit;
+      item_costs[it.id] = { unit_cost: sub.cost_per_yield_unit, line_cost: it.quantity * sub.cost_per_yield_unit };
     }
   }
   visiting.delete(receitaId);
@@ -89,7 +101,33 @@ function computeReceitaCost(receitaId, visiting) {
   const prep_labor_cost = (r.prep_minutes && r.labor_rate_per_hour)
     ? (r.prep_minutes / 60) * r.labor_rate_per_hour : 0;
   const cost_per_yield_unit = (batch_cost_with_margin + prep_labor_cost) / r.yield_qty;
-  return { cost_per_yield_unit, batch_cost, batch_cost_with_margin, prep_labor_cost, incomplete };
+  return { cost_per_yield_unit, batch_cost, batch_cost_with_margin, prep_labor_cost, incomplete, item_costs };
+}
+
+// Mirrors produtoCostFor()'s manufaturado branch — the only kind this
+// suite's Categoria section ever creates.
+function computeProdutoCost(id) {
+  const p = produtoOf(id);
+  const incomplete = [];
+  let cost_per_yield_unit = null;
+  const rc = computeReceitaCost(p.receita_id);
+  if (rc.error) incomplete.push(rc.error);
+  else { cost_per_yield_unit = rc.cost_per_yield_unit; incomplete.push(...rc.incomplete); }
+  const custo_ingredientes_pacote = cost_per_yield_unit == null ? null : cost_per_yield_unit * p.items_per_package;
+  const custo_total_por_unidade = custo_ingredientes_pacote; // no embalagens in this suite
+  let preco_atacado = null, lucro_atacado = null, preco_distribuidor = null, lucro_distribuidor = null, preco_varejo_sugerido = null;
+  if (custo_total_por_unidade != null) {
+    preco_atacado = custo_total_por_unidade / (1 - p.margin_atacado);
+    lucro_atacado = preco_atacado - custo_total_por_unidade;
+    preco_distribuidor = preco_atacado * (1 - p.margin_distribuidor);
+    lucro_distribuidor = preco_distribuidor - custo_total_por_unidade;
+    preco_varejo_sugerido = preco_atacado / (1 - p.margin_varejo);
+  }
+  return {
+    cost_per_yield_unit, custo_ingredientes_pacote, custo_embalagem: 0, custo_total_embalagem: 0,
+    custo_total_por_unidade, preco_atacado, lucro_atacado, preco_distribuidor, lucro_distribuidor,
+    preco_varejo_sugerido, incomplete, custo_embalagens: {},
+  };
 }
 
 (async () => {
@@ -168,8 +206,36 @@ function computeReceitaCost(receitaId, visiting) {
         const cost = computeReceitaCost(r.id);
         resp = {
           found: true, receita: r, itens,
+          linked_produto: linkedProdutoFor(r.id),
           cost: cost.error ? null : cost,
           incomplete: cost.error ? [cost.error] : cost.incomplete,
+        };
+      }
+    } else if (body.action === 'fornecedores') {
+      resp = { fornecedores: state.fornecedores.slice() };
+    } else if (body.action === 'produto_create') {
+      const p = {
+        id: uid('P'), name: body.name, kind: body.kind,
+        receita_id: body.receita_id ?? null, cost: body.cost ?? null, fornecedor_id: body.fornecedor_id ?? null,
+        items_per_package: body.items_per_package, packing_minutes: body.packing_minutes ?? null,
+        packing_labor_rate_per_hour: body.packing_labor_rate_per_hour ?? null,
+        margin_atacado: body.margin_atacado ?? 0.65, margin_distribuidor: body.margin_distribuidor ?? 0.3,
+        margin_varejo: body.margin_varejo ?? 0.4, notes: body.notes ?? null,
+      };
+      state.produtos.push(p);
+      resp = { ok: true, produto: p };
+    } else if (body.action === 'produto_delete') {
+      state.produtos = state.produtos.filter(p => p.id !== body.id);
+      resp = { ok: true, id: body.id };
+    } else if (body.action === 'produto_detail') {
+      const p = produtoOf(body.id);
+      if (!p) { resp = { found: false, id: body.id }; }
+      else {
+        const cost = computeProdutoCost(p.id);
+        resp = {
+          found: true,
+          produto: { ...p, receita: { id: p.receita_id, name: receitaOf(p.receita_id).name }, fornecedor: null },
+          embalagens: [], cost, incomplete: cost.incomplete,
         };
       }
     } else {
@@ -237,6 +303,11 @@ function computeReceitaCost(receitaId, visiting) {
   check('cost breakdown shows the batch cost, got: ' + totalsText, totalsText.includes('R$ 1,26') || totalsText.includes('R$ 1,25'));
   check('no incomplete warning yet (only one, complete, line)', (await page.$('.warn-card')) === null);
 
+  // --- the item row itself shows its own line cost (the spreadsheet's
+  // "Custo do Ingrediente" column), not just the aggregate total ---
+  const itemRowText = norm(await page.textContent('.item-row'));
+  check('item row shows its own line cost (1,26), got: ' + itemRowText, itemRowText.includes('R$ 1,26'));
+
   // --- add an ingredient with NO purchase history: incomplete, not 0 ---
   await page.click('#add-item');
   await page.waitForSelector('.kind-tab[data-kind="ingrediente"]', { timeout: 6000 });
@@ -291,6 +362,41 @@ function computeReceitaCost(receitaId, visiting) {
   await page.waitForTimeout(400);
   check('the receita still exists — delete was refused', receitaOf(receitaId) !== undefined);
   check('a toast explains why', (await page.textContent('#root')).length > 0);
+
+  // --- Categoria: no linked Produto yet -> only "Ingrediente" active ---
+  await page.goto(PAGE + '?id=' + outerId);
+  await page.waitForSelector('#rec-categoria', { timeout: 6000 });
+  await page.waitForSelector('#cat-produto-final', { timeout: 6000 });
+  check('starts categorized as Ingrediente, no linked produto',
+    linkedProdutoFor(outerId) === null);
+  check('no "editar em Produtos" link yet', (await page.$('#rec-categoria a')) === null);
+
+  // --- marking "Produto Final" creates a manufaturado Produto pointing
+  // back at this receita, and its packaging/cost/margins panel renders
+  // INLINE on the receita page — the spreadsheet's single-tab layout ---
+  await page.click('#cat-produto-final');
+  await page.waitForSelector('#cat-ingrediente', { timeout: 6000 });
+  const lp = linkedProdutoFor(outerId);
+  check('a manufaturado produto was created for this receita', lp !== null);
+  check('the produto is named after the receita', lp && lp.name === 'Bolo Decorado');
+  await page.waitForSelector('#rec-produto-panel .totals-card', { timeout: 6000 });
+  const panelText = norm(await page.textContent('#rec-produto-panel'));
+  // Bolo Decorado's own cost = 1x Bolo de Cacau's cost_per_yield_unit —
+  // same batch_cost_with_margin computed earlier (Fermento Mágico's
+  // incomplete-cost warning propagates through the nested recipe too).
+  check('the inline panel shows a real cost, got: ' + panelText, panelText.includes('R$'));
+  check('the incomplete warning propagates through the nested recipe into the produto panel',
+    (await page.textContent('#rec-produto-panel')).includes('Fermento Mágico'));
+  check('a link to edit packaging/margins in Produtos is offered',
+    (await page.textContent('#rec-categoria')).includes('Produtos'));
+
+  // --- reverting to "Ingrediente" removes the linked Produto ---
+  await page.click('#cat-ingrediente');
+  await page.waitForSelector('#confirm-ok', { timeout: 6000 });
+  await page.click('#confirm-ok');
+  await page.waitForSelector('#cat-produto-final', { timeout: 6000 });
+  check('the linked produto was removed', linkedProdutoFor(outerId) === null);
+  check('the receita itself still exists', receitaOf(outerId) !== undefined);
 
   await page.screenshot({ path: path.join(SHOTS, 'receita_detalhe.png'), fullPage: true });
   await browser.close();

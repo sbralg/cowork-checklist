@@ -14,12 +14,14 @@
   Pages, holds NO keys and NO data, asks for the shared passphrase, then
   talks only to the gated Supabase Edge Function (checklist-api).
 
-  Deliberately minimal fields (name/phone/email/notes) — there is no direct
-  FK from produtos to fornecedores. A fornecedor-sourced item (a croissant
-  bought to resell, or bought to use INSIDE a recipe) is an ordinary
-  insumo/ingredient; what THIS page's detail view shows as "purchase
-  history" is simply every inbound stock_movements row tagged with this
-  fornecedor_id, joined to the insumo for its name — no separate table.
+  Deliberately minimal fields (name/phone/email/notes). Two SEPARATE
+  fornecedor relationships show on the detail page: "Produtos"
+  (produtos.fornecedor_id — comprado items priced directly by hand, this
+  is purely reference metadata, not a costing input) and "Compras"
+  (every inbound stock_movements row tagged with this fornecedor_id,
+  joined to the insumo for its name — pantry INGREDIENT purchases, no
+  separate table). A comprado item is created from here via "+ Novo
+  Produto", which hands off to produtos.html with the fornecedor preset.
 
   "Enviar WhatsApp" is a wa.me deep link, not a send API — same reasoning
   and same limitation as clientes.html: this household's WhatsApp bridge is
@@ -318,9 +320,24 @@ function buyRowHtml(m){
   '</div>';
 }
 
+// A comprado Produto sourced from this fornecedor — directly answers
+// "what do I buy from this supplier", separate from the pantry purchase
+// history below (that's about recipe ingredients, this is about sellable
+// items — see checklist-api's module comment above produtoCostFor).
+function produtoRowHtml(p){
+  return '<div class="row" data-produto="' + esc(p.id) + '">' +
+    '<p class="nm">' + esc(p.name) + '</p>' +
+    '<p class="meta">' + (p.cost == null ? "sem custo informado" : fmtMoney(p.cost)) + '</p>' +
+  '</div>';
+}
+
 function renderFornecedor(data){
   const f = data.fornecedor;
+  const produtos = data.produtos || [];
   const purchases = data.purchases || [];
+  const produtosHtml = produtos.length === 0
+    ? '<p class="msg small">Nenhum produto cadastrado ainda.</p>'
+    : '<div class="card" id="forn-produtos-list">' + produtos.map(produtoRowHtml).join("") + '</div>';
   const purchasesHtml = purchases.length === 0
     ? '<p class="msg small">Nenhuma compra registrada ainda.</p>'
     : '<div class="card">' + purchases.map(buyRowHtml).join("") + '</div>';
@@ -335,6 +352,8 @@ function renderFornecedor(data){
       '<button class="primary small alt" id="edit-forn">✎ Editar</button>' +
       '<button class="primary small alt danger" id="del-forn">🗑 Remover</button>' +
     '</div>' +
+    '<h3>Produtos</h3>' + produtosHtml +
+    '<button class="primary small alt addrow-btn" id="new-produto">+ Novo Produto</button>' +
     '<h3>💬 WhatsApp</h3>' +
     '<div class="card wa-card">' +
       (waDigits
@@ -342,21 +361,33 @@ function renderFornecedor(data){
           '<a class="wa-send" id="wa-send" target="_blank" rel="noopener">Abrir contato no WhatsApp</a>'
         : '<p class="wa-hint">Adicione um telefone ao fornecedor para enviar mensagens pelo WhatsApp.</p>') +
     '</div>' +
-    '<h3>Compras</h3>' + purchasesHtml;
+    '<h3>Compras (insumos)</h3>' + purchasesHtml;
 
   wireNav(loadFornecedores);
 
   document.getElementById("edit-forn").addEventListener("click", () => openFornecedorModal(f));
   document.getElementById("forn-name").addEventListener("click", () => openFornecedorModal(f));
 
+  document.getElementById("new-produto").addEventListener("click", () => {
+    location.href = "produtos.html?new=1&fornecedor_id=" + encodeURIComponent(f.id);
+  });
+  root.querySelectorAll(".row[data-produto]").forEach(row => {
+    row.addEventListener("click", () => {
+      location.href = "produtos.html?id=" + encodeURIComponent(row.dataset.produto);
+    });
+  });
+
   document.getElementById("del-forn").addEventListener("click", async () => {
     let force = false;
     try{
       let res = await api("fornecedor_delete", { id: f.id });
       if(res.ok === false && res.reason === "has_history"){
+        const parts = [];
+        if(res.produtos > 0) parts.push(res.produtos + " produto(s)");
+        if(res.movements > 0) parts.push(res.movements + " compra(s) de insumo");
         if(!(await confirmModal(
-          'Este fornecedor tem ' + res.movements + ' compra(s) registrada(s). Removê-lo mantém as ' +
-          'compras no histórico do insumo, apenas sem o vínculo com o fornecedor. Não dá para desfazer.',
+          'Este fornecedor tem ' + parts.join(" e ") + ' registrado(s). Removê-lo mantém tudo, ' +
+          'apenas sem o vínculo com o fornecedor. Não dá para desfazer.',
           "Remover mesmo assim"))) return;
         force = true;
         res = await api("fornecedor_delete", { id: f.id, force: true });

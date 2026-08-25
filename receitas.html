@@ -75,6 +75,12 @@
   .totals-grid .val{font-size:16px;font-weight:650;margin:2px 0 0}
   .warn-card{padding:12px 14px;background:rgba(180,83,9,.1);border-radius:12px;margin-top:10px}
   .warn-card p{font-size:13px;color:var(--warn);margin:0}
+  /* ---- shared produto panel (packaging/margins/reverse calc) ---- */
+  .reverse-card{padding:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .reverse-card label{font-size:13px;color:var(--muted);flex:1;min-width:140px}
+  .reverse-card .field{max-width:120px}
+  .reverse-out{font-size:13px;color:var(--text);margin:10px 0 0;width:100%}
+  .reverse-out p{margin:2px 0}
   /* ---- item picker ---- */
   .kind-tabs{display:flex;gap:6px;margin:0 0 12px}
   .kind-tab{
@@ -115,6 +121,7 @@ const PAGE_LOGIN = {
 <script src="shared-ui.js"></script>
 <script src="shared-format.js"></script>
 <script src="shared-inputs.js"></script>
+<script src="shared-produto-panel.js"></script>
 <script>
 
 const CURRENT_PAGE = "receitas";
@@ -442,12 +449,19 @@ async function openReceita(id){
   }catch(e){ handleAuthError(e, loadReceitas); }
 }
 
-function itemRowHtml(it, scale){
+function itemRowHtml(it, scale, itemCosts){
   const isIng = it.kind === "ingrediente";
   const target = isIng ? it.ingredient : it.sub_receita;
   const unit = isIng ? (target && target.base_unit) || "" : (target && target.yield_unit) || "";
   const scaledHtml = (scale && scale !== 1)
     ? '<p class="scaled">Para o rendimento desejado: ' + fmtStockQty(it.quantity * scale) + ' ' + unit + '</p>'
+    : '';
+  // "Custo por unidade" / "custo do ingrediente" — the spreadsheet's own
+  // per-row columns, resolved server-side in receitaCostFor's item_costs.
+  const ic = (itemCosts || {})[it.id];
+  const costHtml = ic
+    ? '<p class="meta">' + fmtMoney(ic.unit_cost) + '/' + esc(unit || "un") +
+        ' · ' + fmtMoney(scale && scale !== 1 ? ic.line_cost * scale : ic.line_cost) + '</p>'
     : '';
   return '<div class="item-row" data-item="' + esc(it.id) + '">' +
     '<span class="badge">' + (isIng ? "🧂" : "📖") + '</span>' +
@@ -455,6 +469,7 @@ function itemRowHtml(it, scale){
       '<p class="txt">' + esc(target ? target.name : "?") + '</p>' +
       '<p class="meta">' + fmtStockQty(it.quantity) + ' ' + esc(unit) + '</p>' +
       scaledHtml +
+      costHtml +
     '</span>' +
     '<span class="row-actions">' +
       '<button class="icon-btn" data-edit-item title="Editar quantidade">✎</button>' +
@@ -468,10 +483,13 @@ function renderReceita(data){
   const itens = data.itens || [];
   const cost = data.cost;
   const incomplete = data.incomplete || [];
+  const itemCosts = cost && cost.item_costs;
 
   const itensHtml = itens.length === 0
     ? '<p class="msg small">Nenhum item ainda.</p>'
-    : '<div class="card" id="itens-card">' + itens.map(it => itemRowHtml(it, currentScale())).join("") + '</div>';
+    : '<div class="card" id="itens-card">' +
+        itens.map(it => itemRowHtml(it, currentScale(), itemCosts)).join("") +
+      '</div>';
 
   const costHtml = cost
     ? '<div class="card totals-card">' +
@@ -506,7 +524,9 @@ function renderReceita(data){
         fmtStockQty(r.yield_qty) + '"></span>' +
     '</div>' +
     '<h3>Itens</h3>' + itensHtml +
-    '<button class="primary small alt addrow-btn" id="add-item">+ Item</button>';
+    '<button class="primary small alt addrow-btn" id="add-item">+ Item</button>' +
+    '<h3>Categoria</h3>' +
+    '<div id="rec-categoria"></div>';
 
   wireNav(loadReceitas);
 
@@ -549,6 +569,91 @@ function renderReceita(data){
     }
   });
   wireItemRowActions(data);
+  renderCategoria(data);
+}
+
+// "Categoria" isn't a stored field on the receita — it's just whether a
+// manufaturado Produto already points back at it (receita_detail's
+// linked_produto). Picking "Produto Final" here creates that Produto on
+// the spot with sane defaults; produtos.html can still edit/create one too
+// (same record either way) — this is just the more direct path, matching
+// the spreadsheet where every recipe tab already carries its own pricing
+// panel.
+function renderCategoria(data){
+  const r = data.receita;
+  const lp = data.linked_produto;
+  const el = document.getElementById("rec-categoria");
+  if(!el) return;
+
+  if(!lp){
+    el.innerHTML =
+      '<div class="kind-tabs">' +
+        '<button class="kind-tab active" disabled>🧂 Ingrediente</button>' +
+        '<button class="kind-tab" id="cat-produto-final">🏷️ Produto Final</button>' +
+      '</div>' +
+      '<p class="msg small">Esta receita só é usada como ingrediente de outras receitas. ' +
+      'Marque "Produto Final" para vendê-la, com embalagem, margens e preço sugerido.</p>';
+    el.querySelector("#cat-produto-final").addEventListener("click", async () => {
+      try{
+        await api("produto_create", {
+          name: r.name, kind: "manufaturado", receita_id: r.id, items_per_package: 1,
+        });
+        receitas = [];
+        openReceita(r.id);
+      }catch(e){
+        if(e.unauthorized) return handleAuthError(e, loadReceitas);
+        listToast("Não foi possível criar o produto", true);
+      }
+    });
+    return;
+  }
+
+  el.innerHTML =
+    '<div class="kind-tabs">' +
+      '<button class="kind-tab" id="cat-ingrediente">🧂 Ingrediente</button>' +
+      '<button class="kind-tab active" disabled>🏷️ Produto Final</button>' +
+    '</div>' +
+    '<p class="meta" style="margin:0 0 10px">' +
+      '<a class="link" href="produtos.html?id=' + esc(lp.id) + '">Editar embalagem, mão de obra e margens em Produtos →</a>' +
+    '</p>' +
+    '<div id="rec-produto-panel"><p class="msg small">Carregando…</p></div>';
+
+  el.querySelector("#cat-ingrediente").addEventListener("click", async () => {
+    if(!(await confirmModal(
+      'Remover "' + lp.name + '" de Produtos? A receita continua existindo, apenas deixa de ser vendável.',
+      "Remover produto",
+    ))) return;
+    try{
+      await api("produto_delete", { id: lp.id });
+      receitas = [];
+      openReceita(r.id);
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadReceitas);
+      listToast("Não foi possível remover", true);
+    }
+  });
+
+  // The panel needs the linked produto's own embalagens/cost, which
+  // receita_detail doesn't carry (it would just duplicate produto_detail's
+  // work for the common case where no produto exists yet) — one extra
+  // round trip only when a Produto Final is actually linked.
+  (async () => {
+    let pd;
+    try{
+      pd = await api("produto_detail", { id: lp.id });
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadReceitas);
+      listToast("Não foi possível carregar o produto", true);
+      return;
+    }
+    if(!pd.found) return;
+    renderProdutoPanel(document.getElementById("rec-produto-panel"), {
+      produto: pd.produto, embalagens: pd.embalagens || [], cost: pd.cost,
+      incomplete: pd.incomplete || [],
+      onChanged: () => { receitas = []; openReceita(r.id); },
+      onAuthError: (e) => handleAuthError(e, loadReceitas),
+    });
+  })();
 }
 
 function currentScale(){
@@ -563,11 +668,12 @@ function redrawItems(data){
   const desired = parseQtyInput(scaleRaw);
   const scale = desired ? desired / Number(data.receita.yield_qty) : 1;
   const itens = data.itens || [];
+  const itemCosts = data.cost && data.cost.item_costs;
   const card = document.getElementById("itens-card");
   if(!card) return;
   // The wrapping div (and its id) must survive the redraw, or the NEXT
   // scale-input event finds nothing to update — only innerHTML changes.
-  card.innerHTML = itens.map(it => itemRowHtml(it, scale)).join("");
+  card.innerHTML = itens.map(it => itemRowHtml(it, scale, itemCosts)).join("");
   wireItemRowActions(data);
 }
 
