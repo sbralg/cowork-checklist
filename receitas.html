@@ -423,8 +423,8 @@ async function receitaItemPickerModal(currentReceitaId){
           // empty state points at that page instead of just reporting it.
           html = kind === "ingrediente"
             ? '<p class="msg small">Nenhum ingrediente ainda.<br>' +
-              'Um ingrediente nasce ao vincular um insumo do catálogo a ele.<br>' +
-              '<a class="link" href="insumos.html">Abrir Insumos →</a></p>'
+              'Crie um em Ingredientes para já montar a receita — o preço entra depois.<br>' +
+              '<a class="link" href="ingredientes.html">Abrir Ingredientes →</a></p>'
             : '<p class="msg small">Nenhuma outra receita ainda.<br>' +
               'Crie uma segunda receita (uma massa ou calda, por exemplo) ' +
               'para poder usá-la dentro desta.</p>';
@@ -515,7 +515,7 @@ function itemRowHtml(it, scale, itemCosts){
   const costHtml = ic
     ? '<p class="meta">' + fmtUnitMoney(ic.unit_cost) + '/' + esc(unit || "un") + ' · ' +
         fmtMoney(scaled ? ic.line_cost * scale : ic.line_cost) + '</p>'
-    : '<p class="meta nocost">⚠️ sem custo — nunca foi comprado</p>';
+    : '<p class="meta nocost">⚠️ sem custo ainda</p>';
   return '<div class="item-row" data-item="' + esc(it.id) + '">' +
     '<span class="badge">' + (isIng ? "🧂" : "📖") + '</span>' +
     '<span class="body">' +
@@ -564,10 +564,17 @@ function renderReceita(data){
         '</div>' +
       '</div>'
     : '';
+  // Deliberately worded as a waypoint, not a failure: a recipe with an
+  // unpriced ingredient is a perfectly good recipe, and the household
+  // writes recipes down long before every box gets scanned. Covers both
+  // reasons an ingredient has no cost — never linked to an insumo, or
+  // linked but never bought — since receita_detail doesn't say which.
   const warnHtml = incomplete.length > 0
-    ? '<div class="warn-card"><p>⚠️ Custo incompleto — os itens marcados acima nunca foram ' +
-        'comprados, então não entram na conta: ' + esc(incomplete.join(", ")) + '. ' +
-        'Registre uma compra em Estoque para completar o custo.</p></div>'
+    ? '<div class="warn-card"><p>⚠️ <strong>Custo incompleto.</strong> A receita está ' +
+        'salva e completa; só estes itens ainda não têm preço, então ficam de fora ' +
+        'da conta: ' + esc(incomplete.join(", ")) + '. ' +
+        'O custo se completa sozinho quando um insumo com preço estiver vinculado ' +
+        'a eles (Insumos → Estoque).</p></div>'
     : '';
 
   root.innerHTML = navHeader(r.name, loadReceitas) +

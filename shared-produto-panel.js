@@ -53,8 +53,9 @@ async function embalagemPickerModal(){
           (x.base_unit ? '<span class="cnt">por ' + esc(x.base_unit) + '</span>' : '') +
         '</button>').join("");
         if(!html){
-          html = '<p class="msg small">Nenhum ingrediente de embalagem ainda. Marque um insumo como ' +
-            '"embalagem" em Insumos primeiro.</p>';
+          html = '<p class="msg small">Nenhum ingrediente de embalagem ainda.<br>' +
+            'Crie um em <a class="link" href="ingredientes.html">Ingredientes</a> ' +
+            '(tipo "embalagem"), ou marque um insumo como embalagem em Insumos.</p>';
         }
         listEl.innerHTML = html;
         listEl.querySelectorAll("[data-id]").forEach(btn => {

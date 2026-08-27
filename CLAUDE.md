@@ -13,11 +13,13 @@ by a typo in the insumo picker ("Leit Condesado") was permanent, and no
 screen anywhere even listed what existed. The only ingredient UI was the
 picker, which can create and link but never rename or remove.
 
-- **The page reads only actions that already exist** — `ingredients` for
-  the list and `insumos` (whose rows embed their ingredient) to resolve
-  what is linked and what is in the cupboard. **No backend change, so it
-  works the moment Pages serves it**, with no dependency on the Edge
-  Function redeploy the backend repo is still waiting on.
+- **Everything except creating/editing reads actions that already exist** —
+  `ingredients` for the list and `insumos` (whose rows embed their
+  ingredient) to resolve what is linked and what is in the cupboard — so
+  the list, the rollup, rename and delete all work the moment Pages serves
+  the page. **`ingredient_create`/`ingredient_update` are new and need the
+  Edge Function redeploy** (see the create bullet below for how the page
+  says so rather than failing generically).
 - **The detail view is the payoff of the whole two-level model**, and the
   one thing neither Insumos nor Estoque can show, because both are
   organised by barcode: **"5 pacotes · 1,975 kg no total · somando 2
@@ -42,22 +44,71 @@ picker, which can create and link but never rename or remove.
   **live formula**, so the API refuses outright with no force option; the
   page turns that 400 into a dialog naming how many lines still reference
   it.
-- **There is deliberately NO "+ Novo ingrediente", and that is the design,
-  not a gap.** An ingredient exists because some insumo IS it. One minted
-  here with nothing linked would have no purchase history, so every recipe
-  using it would price at "sem custo" — the app would be inviting you to
-  build the broken state it otherwise works hard to report. Creation stays
-  in the Insumos picker, where the knowledge is; the page says so and links
-  there rather than leaving a silent absence.
+- **"+ Novo ingrediente" creates one BY HAND, with no insumo behind it.**
+  This page first shipped WITHOUT that, on the reasoning that an ingredient
+  exists because some insumo IS it, and a hand-made one prices every recipe
+  using it as incomplete. **The user overruled it, and was right:** *"I
+  don't want to keep the user from registering her recipes just because she
+  didn't scan a bar code yet."* Recipes get written down long before every
+  box gets scanned; refusing to store "450 g de farinha" until a barcode
+  exists blocks the actual work to protect a number nobody asked for yet.
+  An unknown cost was already a first-class, loudly-reported state
+  everywhere it surfaces (never a silent 0) — so the right answer was to
+  let the recipe be written and keep saying the cost isn't known.
+  **The general lesson: this app's "unknown is never zero" rule is about
+  never LYING about a number, not about refusing to store anything the
+  number depends on.**
+  - **Two NEW Edge Function actions**, `ingredient_create` and
+    `ingredient_update` — the first backend change this page needed.
+    No migration: `ingredients.kind` and `.base_unit` were already
+    nullable, and the existing CHECK constraints already allow every value
+    the dialog offers.
+  - **The dialog asks for a unit, because a recipe line is meaningless
+    without one** ("450" of what?) and the path that normally sets it —
+    the first insumo linked — hasn't happened yet.
+  - **`kind`/`base_unit` are editable only while NO insumo is linked.**
+    Once one is, the INSUMO is the authority (that is exactly what
+    `checkIngredientUnitAndKind` enforces on every link), so
+    `ingredient_update` refuses and the dialog shows them locked with the
+    reason. Letting this action move them would be the silent g-vs-ml
+    mixing that check exists to prevent.
+  - **A name-only edit still goes through `ingredient_rename`**, which has
+    been deployed since 2026-08-13 — so fixing a typo keeps working even
+    before the redeploy the two new actions need. Only a unit/kind change
+    calls `ingredient_update`.
+  - **The page degrades in words, not generically, when the Edge Function
+    is behind**: `checklist-api` answers an unknown action with a 400
+    `{error:"bad action"}`, which — now that `api()` surfaces the parsed
+    body — is told apart from a real validation failure and reported as
+    "republish the Edge Function".
+  - **The list badge names the CONSEQUENCE, "⚠️ sem custo", not the
+    mechanism.** Someone scanning the list is there to find out why a
+    recipe says "custo incompleto". The detail sheet then names which of
+    the two causes it is (nothing linked, or linked but never bought),
+    because the fix differs — and says plainly that the recipes using it
+    *funcionam normalmente* meanwhile.
+  - `receitas.html`'s wording moved with it: a line reads "⚠️ sem custo
+    ainda" (not "nunca foi comprado", which is only one of the two causes),
+    and the summary warning leads with "A receita está salva e completa"
+    before naming what is missing. A recipe with an unpriced ingredient is
+    a perfectly good recipe.
 - `insumos.html`'s "Ingrediente" line now **links through** to it, and the
   page sits in the menu/dashboard's **Produção** group between Insumos and
   Receitas — which is the pipeline order (barcode → what it is → recipe →
   product).
 - `test/ingredientes.test.js` covers the list, brand search, the kind
-  filter, the orphan marker, the rollup math, the duplicate-name rename
-  refusal, the blocked delete and the unlink count. Its fake keeps insumos
-  pointing at ingredients by id, so the rollup and the unlink count are
+  filter, the "sem custo" badge, the rollup math, the duplicate-name
+  refusal on create and on rename, the blocked delete, the unlink count,
+  and the hand-create flow including unit/kind being editable while
+  unlinked and locked once an insumo is. Its fake keeps insumos pointing
+  at ingredients by id, so the rollup, the unlink count and the lock are
   computed from that graph rather than canned.
+- **Not runtime-verified**: this sandbox has no Docker, so the local
+  Supabase stack is unavailable, and the `http`-extension fallback only
+  reaches the DEPLOYED function — which does not have the two new actions
+  yet. They are syntax-clean (TypeScript parse, 0 diagnostics) and follow
+  the file's existing conventions, but the first real exercise of them
+  will be the user's own redeploy.
 
 **Shared change riding along: `api()` now exposes the parsed error body as
 `e.body`.** Several refusals carry STRUCTURED detail that every page was
@@ -417,9 +468,10 @@ build step, no framework:
   from the catalogue.
 - `ingredientes.html` — what an insumo IS, as opposed to which SKU it is:
   the list of ingredients, which insumos are linked to each, the combined
-  pantry total across every brand of the same thing, and rename/remove.
-  Deliberately has no create button — ingredients are born in the Insumos
-  picker, where the knowledge is.
+  pantry total across every brand of the same thing, create/edit/remove.
+  An ingredient can be created BY HAND with no barcode behind it, so a
+  recipe can be written down before anything is scanned — it just carries
+  a "sem custo" badge until a priced insumo is linked.
 - `clientes.html` — the contact record behind an evento: full-field create/
   edit/delete, the eventos + pagamentos rollup for that cliente, and a
   `wa.me`-based "Enviar WhatsApp" composer.
@@ -607,10 +659,11 @@ in-memory fake, so none touches Supabase nor holds a passphrase.
   Their fakes reimplement `receitaCostFor`/`produtoCostFor` line for line,
   same "don't fake away the interesting half" rule as the others.
 - `test/ingredientes.test.js` — the list, search across brand names, the
-  kind filter, the "sem insumo" orphan marker, the combined pantry rollup
-  across brands, the duplicate-name rename refusal, the blocked delete
-  while a receita line still references the ingredient, and the unlink
-  count on a successful one.
+  kind filter, the "sem custo" badge, the combined pantry rollup across
+  brands, the duplicate-name refusal on both create and rename, the
+  blocked delete while a receita line still references the ingredient, the
+  unlink count on a successful one, and creating an ingredient by hand
+  with unit/kind editable while unlinked and locked once an insumo is.
 
 ## Conventions
 

@@ -21,17 +21,24 @@
   even listed what existed. Reported by the user as "how can I delete an
   ingrediente. Example, leite condensado."
 
-  Deliberately NO create button, and that is the design rather than a gap:
-  an ingredient exists because some insumo IS it. One minted here with
-  nothing linked would have no purchase history, so every recipe using it
-  would price at "sem custo" — the app would be inviting you to build the
-  broken state it otherwise works hard to report. Creation stays where the
-  knowledge is, in the Insumos picker; this page says so and links there.
+  An ingredient CAN be created here by hand, with no insumo behind it.
+  This page originally shipped without that on the reasoning that an
+  ingredient exists because some insumo IS it, and a hand-made one prices
+  every recipe using it as "incomplete". The user overruled it, correctly:
+  "I don't want to keep the user from registering her recipes just because
+  she didn't scan a barcode yet." Recipes get written down long before
+  every box gets scanned, and an unknown cost is already a first-class,
+  loudly-reported state everywhere it surfaces — never a silent zero. So
+  the recipe gets written now and the cost fills in later; what the app
+  owes her is a clear warning, not a locked door.
 
-  Reads only actions that already exist: `ingredients` for the list, and
-  `insumos` (which embeds each insumo's ingredient) to resolve what is
-  linked and what is in the cupboard. No new backend work, so it works the
-  moment it is deployed to Pages.
+  `ingredient_create`/`ingredient_update` are the two actions this needed
+  and they are NEW — the page degrades explicitly if the Edge Function
+  hasn't been redeployed yet (a "bad action" 400 says so in words rather
+  than failing generically). Everything else here reads actions that
+  already existed: `ingredients` for the list, and `insumos` (which embeds
+  each insumo's ingredient) for what is linked and what is in the
+  cupboard.
 
   Same pattern as every other page here: hosted on public GitHub Pages,
   holds NO keys and NO data, asks for the shared passphrase, then talks
@@ -87,6 +94,27 @@
      down the list. Muted, not alarming — same treatment as insumos.html's
      "sem ingrediente". */
   .kind-badge.orphan{background:rgba(180,83,9,.12);color:var(--warn)}
+  .kind-badge.nocost{background:rgba(180,83,9,.14);color:var(--warn)}
+  .addrow-btn{margin:12px 0 0}
+  button.primary.full{width:100%}
+  .kind-tabs{display:flex;gap:6px;margin:0 0 14px}
+  .kind-tab{
+    flex:1;font-size:13px;font-weight:600;padding:9px;border-radius:10px;cursor:pointer;
+    background:rgba(127,127,127,.1);color:var(--muted);border:none;
+    transition:background-color .15s ease,color .15s ease;
+  }
+  .kind-tab.active{background:var(--accent);color:var(--accent-text)}
+  .kind-tab:disabled{opacity:.55;cursor:default}
+  /* The cost state, said plainly on the detail sheet: an ingredient with no
+     priced insumo behind it is a normal, expected, temporary state — it
+     just has to be visible, because it is what makes a recipe read
+     "custo incompleto". */
+  .cost-warn{
+    display:flex;gap:10px;align-items:flex-start;
+    padding:12px 14px;background:rgba(180,83,9,.1);border-radius:12px;margin:0 0 10px;
+  }
+  .cost-warn .ic{flex:none;font-size:15px;line-height:1.45}
+  .cost-warn p{font-size:13px;color:var(--warn);line-height:1.45;margin:0}
   .stock-badge{
     flex:none;font-size:12px;font-weight:650;padding:5px 9px;border-radius:999px;
     background:rgba(127,127,127,.12);color:var(--muted);white-space:nowrap;
@@ -160,7 +188,7 @@ function navHeader(title, backAction){
   if(!backAction) return topRow;
   return topRow + '<div class="subheader">' +
     '<button class="link" id="back">← Ingredientes</button>' +
-    (title ? '<h2 class="ing-title" id="ing-name" title="Renomear">' + esc(title) + '</h2>' : '') +
+    (title ? '<h2 class="ing-title" id="ing-name" title="Editar ingrediente">' + esc(title) + '</h2>' : '') +
   '</div>';
 }
 function wireNav(backAction){
@@ -203,17 +231,54 @@ function kindBadgeHtml(i){
     : '<span class="kind-badge ing">🧂 ingrediente</span>';
 }
 
+const BASE_UNITS = ["g", "ml", "un", "cm"];
+
+// Whether this ingredient can price a recipe line at all. "No insumo
+// linked" is the hand-created case; "linked but never bought" is the
+// scanned-but-never-stocked one. Both read the same to a recipe (its cost
+// is unknown), so both get the same badge — but the detail sheet names
+// which it is, because the fix is different.
+function costStateFor(i){
+  const linked = insumosFor(i.id);
+  if(linked.length === 0) return { ok: false, reason: "sem-insumo" };
+  if(!linked.some(p => p.last_price != null)) return { ok: false, reason: "sem-compra" };
+  return { ok: true, reason: null };
+}
+
+// ingredient_create/ingredient_update are newer than the deployed Edge
+// Function may be. checklist-api answers an unrecognised action with a 400
+// {error:"bad action"}, which — now that api() surfaces the parsed body —
+// can be told apart from a real validation failure and explained in words
+// instead of a generic "não foi possível".
+function notDeployed(e){
+  return !!(e && e.badRequest && e.body && e.body.error === "bad action");
+}
+
 // ---- list screen ----
+
+// Both in one round trip's worth of wall time: the catalogue is what turns
+// a bare count into "3 insumos · 1.185 g no total".
+async function fetchAll(){
+  const [ingRes, insRes] = await Promise.all([api("ingredients"), api("insumos")]);
+  ingredientes = ingRes.ingredients || [];
+  insumos = insRes.insumos || [];
+}
+
+// Refresh after a write and stay on the SAME screen — an edit made from a
+// detail sheet must not bounce the user back to the list.
+async function refreshInto(id){
+  try{
+    await fetchAll();
+    if(id && ingredientes.some(i => i.id === id)) openIngrediente(id);
+    else renderList();
+  }catch(e){ handleAuthError(e, loadIngredientes); }
+}
 
 async function loadIngredientes(){
   root.innerHTML = '<p class="msg">Carregando…</p>';
   if(!getPass()){ showLogin(); return; }
   try{
-    // Both in one round trip's worth of wall time: the catalogue is what
-    // turns a bare count into "3 insumos · 1.185 g no total".
-    const [ingRes, insRes] = await Promise.all([api("ingredients"), api("insumos")]);
-    ingredientes = ingRes.ingredients || [];
-    insumos = insRes.insumos || [];
+    await fetchAll();
     const wanted = new URLSearchParams(location.search).get("id");
     if(wanted){
       history.replaceState(null, "", location.pathname);
@@ -240,6 +305,7 @@ function matchesFilters(i, term, kind){
 function ingredienteRowHtml(i){
   const have = haveFor(i.id);
   const count = have.linked.length;
+  const cost = costStateFor(i);
   const bits = [count + (count === 1 ? " insumo" : " insumos")];
   if(i.base_unit) bits.push("medido em " + i.base_unit);
   return '<div class="row" data-id="' + esc(i.id) + '">' +
@@ -247,7 +313,10 @@ function ingredienteRowHtml(i){
       '<p class="nm">' + esc(i.name) + '</p>' +
       '<p class="meta">' + esc(bits.join(" · ")) + '</p>' +
       '<span class="tagrow">' + kindBadgeHtml(i) +
-        (count === 0 ? '<span class="kind-badge orphan">⚠️ sem insumo</span>' : '') +
+        // The badge names the CONSEQUENCE ("no cost"), not the mechanism,
+        // because that is what someone scanning this list is here to
+        // understand: it is why her recipe says "custo incompleto".
+        (cost.ok ? '' : '<span class="kind-badge nocost">⚠️ sem custo</span>') +
       '</span>' +
     '</span>' +
     '<span class="stock-badge' + (have.packages > 0 ? ' has' : '') + '">' +
@@ -256,11 +325,123 @@ function ingredienteRowHtml(i){
   '</div>';
 }
 
+// Create by hand, or correct one that was. `kind`/`base_unit` are only
+// editable while NO insumo is linked — once one is, the insumo is the
+// authority (the API enforces exactly that, and refuses otherwise), so the
+// dialog shows them locked with the reason rather than offering a control
+// that would be rejected.
+function ingredienteModal(existing){
+  const isEdit = !!existing;
+  const linkedCount = isEdit ? insumosFor(existing.id).length : 0;
+  const locked = linkedCount > 0;
+  let kind = (isEdit ? existing.kind : null) || "ingrediente";
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML =
+    '<div class="modal-card">' +
+      '<h3>' + (isEdit ? "Editar ingrediente" : "Novo ingrediente") + '</h3>' +
+      '<label for="ing-name-i">Nome</label>' +
+      '<input type="text" id="ing-name-i" placeholder="ex: leite condensado" ' +
+        'value="' + esc(isEdit ? existing.name : "") + '">' +
+      '<label>Tipo</label>' +
+      '<div class="kind-tabs" id="ing-kinds">' +
+        '<button class="kind-tab' + (kind === "ingrediente" ? " active" : "") + '" ' +
+          'data-kind="ingrediente"' + (locked ? " disabled" : "") + '>🧂 Ingrediente</button>' +
+        '<button class="kind-tab' + (kind === "embalagem" ? " active" : "") + '" ' +
+          'data-kind="embalagem"' + (locked ? " disabled" : "") + '>📦 Embalagem</button>' +
+      '</div>' +
+      '<label for="ing-unit">Unidade de medida</label>' +
+      '<select id="ing-unit" style="width:100%;margin-bottom:6px"' + (locked ? " disabled" : "") + '>' +
+        '<option value="">— não definida —</option>' +
+        BASE_UNITS.map(u => '<option value="' + u + '"' +
+          (isEdit && existing.base_unit === u ? " selected" : "") + '>' + u + '</option>').join("") +
+      '</select>' +
+      '<p class="hint">' + (locked
+        ? "Tipo e unidade vêm dos " + linkedCount +
+          (linkedCount === 1 ? " insumo vinculado" : " insumos vinculados") +
+          " e não podem ser alterados aqui."
+        : "É a unidade em que as receitas vão pedir este item — 450 <strong>g</strong> " +
+          "de farinha, 2 <strong>un</strong> de ovo. Pode ficar em branco e ser " +
+          "definida depois pelo primeiro insumo vinculado.") + '</p>' +
+      '<div class="modal-actions">' +
+        '<button class="cancel" id="ing-cancel">Cancelar</button>' +
+        '<button class="save" id="ing-ok">Salvar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(backdrop);
+
+  const close = () => { backdrop.remove(); document.removeEventListener("keydown", onKey); };
+  function onKey(e){ if(e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  backdrop.addEventListener("click", e => { if(e.target === backdrop) close(); });
+  backdrop.querySelector("#ing-cancel").addEventListener("click", close);
+
+  backdrop.querySelectorAll("#ing-kinds [data-kind]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if(locked) return;
+      kind = btn.dataset.kind;
+      backdrop.querySelectorAll("#ing-kinds [data-kind]").forEach(b =>
+        b.classList.toggle("active", b.dataset.kind === kind));
+    });
+  });
+
+  const nameEl = backdrop.querySelector("#ing-name-i");
+  const unitEl = backdrop.querySelector("#ing-unit");
+
+  backdrop.querySelector("#ing-ok").addEventListener("click", async () => {
+    const name = nameEl.value.trim();
+    if(!name){ alert("O nome não pode ficar vazio."); return; }
+    const baseUnit = unitEl.value || null;
+    try{
+      if(!isEdit){
+        const res = await api("ingredient_create", { name, kind, base_unit: baseUnit });
+        close();
+        listToast("Ingrediente criado");
+        // Straight into the new ingredient's detail sheet: it was just
+        // created with no insumo, so the cost warning it opens on is the
+        // thing worth reading before writing a recipe against it.
+        await refreshInto(res.ingredient ? res.ingredient.id : null);
+        return;
+      }
+      // A name-only change goes through ingredient_rename, which has been
+      // deployed since 2026-08-13 — so correcting a typo keeps working even
+      // before the redeploy that ingredient_update needs.
+      const unitChanged = !locked &&
+        ((existing.base_unit || null) !== baseUnit || (existing.kind || "ingrediente") !== kind);
+      if(unitChanged){
+        await api("ingredient_update", { id: existing.id, name, kind, base_unit: baseUnit });
+      }else if(name !== existing.name){
+        await api("ingredient_rename", { id: existing.id, name });
+      }else{
+        close();
+        return;
+      }
+      close();
+      listToast("Ingrediente atualizado");
+      await refreshInto(existing.id);
+    }catch(e){
+      if(e.unauthorized) return handleAuthError(e, loadIngredientes);
+      if(notDeployed(e)){
+        alert("Esta função ainda não está publicada no servidor. " +
+          "Republique a Edge Function checklist-api e tente de novo.");
+        return;
+      }
+      const already = e.body && String(e.body.error || "").indexOf("already exists") >= 0;
+      alert(already ? "Já existe um ingrediente com esse nome." : "Não foi possível salvar.");
+    }
+  });
+
+  nameEl.focus();
+  nameEl.select();
+}
+
 function renderList(){
   const shown = ingredientes.filter(i => matchesFilters(i, searchTerm, kindFilter));
   const rowsHtml = ingredientes.length === 0
     ? '<div class="card"><p class="msg">Nenhum ingrediente ainda.<br>' +
-      'Eles nascem em Insumos, ao dizer o que um código de barras É.</p></div>'
+      'Crie um aqui para já escrever suas receitas, ou vincule um código de ' +
+      'barras em <a class="link" href="insumos.html">Insumos</a>.</p></div>'
     : (shown.length === 0
         ? '<p class="msg" id="no-match">Nenhum ingrediente encontrado.</p>'
         : '<div class="card" id="ing-card">' + shown.map(ingredienteRowHtml).join("") + '</div>');
@@ -276,13 +457,13 @@ function renderList(){
       '<span class="chip' + (kindFilter === "embalagem" ? " active" : "") + '" data-kind="embalagem">📦 Embalagens</span>' +
     '</div>' +
     rowsHtml +
-    // There is no "+ Novo ingrediente" and that is deliberate — see the
-    // file comment. Saying where they come from beats a button that would
-    // mint a costless one.
+    '<button class="primary full addrow-btn" id="new-ing">+ Novo ingrediente</button>' +
     '<div class="note-card"><p>Um ingrediente é o que um insumo <strong>É</strong>: ' +
-      'marcas diferentes da mesma coisa compartilham um. Eles são criados em ' +
-      '<a class="link" href="insumos.html">Insumos</a>, ao vincular um código de barras — ' +
-      'aqui você renomeia, remove e vê o que está ligado a cada um.</p></div>';
+      'marcas diferentes da mesma coisa compartilham um. Crie os seus aqui para ' +
+      'escrever as receitas desde já — o <strong>custo</strong> só aparece depois, ' +
+      'quando um insumo com preço estiver vinculado (por <a class="link" ' +
+      'href="insumos.html">Insumos</a> e <a class="link" href="estoque.html">Estoque</a>). ' +
+      'Até lá a receita fica pronta e marcada como custo incompleto.</p></div>';
 
   wireNav(null);
   const search = document.getElementById("search");
@@ -290,6 +471,8 @@ function renderList(){
   root.querySelectorAll(".chip[data-kind]").forEach(chip => {
     chip.addEventListener("click", () => { kindFilter = chip.dataset.kind; renderList(); });
   });
+  const newBtn = document.getElementById("new-ing");
+  if(newBtn) newBtn.addEventListener("click", () => ingredienteModal(null));
   wireListRows();
 }
 
@@ -342,25 +525,39 @@ function renderIngrediente(i){
   const have = haveFor(i.id);
   const count = have.linked.length;
 
-  const haveHtml = '<div class="card have-card">' +
-    (count === 0
-      ? '<p class="big none">Nenhum insumo vinculado</p>' +
-        '<p class="sub">Nada aponta para este ingrediente ainda, então ele não ' +
-          'tem custo nem estoque.</p>'
-      : '<p class="big">' + fmtStockQty(have.packages) + ' ' +
-          (have.packages === 1 ? 'pacote' : 'pacotes') + '</p>' +
-        '<p class="sub">' +
-          (have.net != null && have.net > 0
-            ? esc(fmtNetQty(have.net, have.unit)) + ' no total · '
-            : '') +
-          'somando ' + count + (count === 1 ? ' insumo' : ' insumos') + '</p>') +
-  '</div>';
+  // Only when there is something to report. With no insumo linked, the
+  // cost warning above and the empty Insumos list below already say it
+  // twice — a third card saying "nothing" is noise.
+  const haveHtml = count === 0 ? '' :
+    '<div class="card have-card">' +
+      '<p class="big">' + fmtStockQty(have.packages) + ' ' +
+        (have.packages === 1 ? 'pacote' : 'pacotes') + '</p>' +
+      '<p class="sub">' +
+        (have.net != null && have.net > 0
+          ? esc(fmtNetQty(have.net, have.unit)) + ' no total · '
+          : '') +
+        'somando ' + count + (count === 1 ? ' insumo' : ' insumos') + '</p>' +
+    '</div>';
 
   const insumosHtml = count === 0
     ? '<div class="card"><p class="msg small">Nenhum insumo aponta para este ingrediente.<br>' +
       'Abra um insumo em <a class="link" href="insumos.html">Insumos</a> e defina o ' +
       'ingrediente dele.</p></div>'
     : '<div class="card" id="ins-card">' + have.linked.map(insumoRowHtml).join("") + '</div>';
+
+  // Says the cost state out loud, and — the part that matters — says it is
+  // fine. This is a normal waypoint, not an error: the recipe is usable
+  // now and prices itself the moment a purchase exists.
+  const cost = costStateFor(i);
+  const costHtml = cost.ok ? '' :
+    '<div class="cost-warn" id="cost-warn"><span class="ic">⚠️</span><p>' +
+      '<strong>Sem custo ainda.</strong> ' +
+      (cost.reason === "sem-insumo"
+        ? 'Nenhum insumo está vinculado a este ingrediente, então nada diz quanto ele custa. '
+        : 'Os insumos vinculados nunca foram comprados, então não há preço para usar. ') +
+      'As receitas que o usam funcionam normalmente — só aparecem marcadas como ' +
+      '<strong>custo incompleto</strong> até que uma compra seja registrada.' +
+    '</p></div>';
 
   root.innerHTML = navHeader(i.name, loadIngredientes) +
     '<div class="card pad">' +
@@ -376,16 +573,17 @@ function renderIngrediente(i){
       '</div>' +
     '</div>' +
     '<div class="detail-actions">' +
-      '<button class="primary small alt" id="rename-ing">✎ Renomear</button>' +
+      '<button class="primary small alt" id="edit-ing">✎ Editar</button>' +
       '<button class="primary small alt danger" id="del-ing">🗑 Remover</button>' +
     '</div>' +
+    costHtml +
     haveHtml +
     '<h3>Insumos</h3>' + insumosHtml;
 
   wireNav(loadIngredientes);
 
-  document.getElementById("ing-name").addEventListener("click", () => renameIngrediente(i));
-  document.getElementById("rename-ing").addEventListener("click", () => renameIngrediente(i));
+  document.getElementById("ing-name").addEventListener("click", () => ingredienteModal(i));
+  document.getElementById("edit-ing").addEventListener("click", () => ingredienteModal(i));
   document.getElementById("del-ing").addEventListener("click", () => deleteIngrediente(i));
 
   root.querySelectorAll(".ins-row[data-gtin]").forEach(row => {
@@ -393,30 +591,6 @@ function renderIngrediente(i){
       location.href = "insumos.html?gtin=" + encodeURIComponent(row.dataset.gtin);
     });
   });
-}
-
-// Renaming is safe by construction — insumos, receita lines and packaging
-// lines all point at the id, so every one of them follows the new name.
-async function renameIngrediente(i){
-  const val = await promptModal("Renomear ingrediente", "Nome", i.name);
-  if(val === null) return;
-  const name = val.trim();
-  if(!name){ listToast("O nome não pode ficar vazio", true); return; }
-  if(name === i.name) return;
-  try{
-    const res = await api("ingredient_rename", { id: i.id, name });
-    i.name = res.ingredient ? res.ingredient.name : name;
-    // The catalogue carries its own copy of the embedded name, so refresh
-    // it too rather than re-fetching the whole list for one string.
-    insumos.forEach(p => { if(p.ingredient && p.ingredient.id === i.id) p.ingredient.name = i.name; });
-    listToast("Ingrediente renomeado");
-    renderIngrediente(i);
-  }catch(e){
-    if(e.unauthorized) return handleAuthError(e, loadIngredientes);
-    // The unique index on lower(name) is what answers "that one already
-    // exists" — merging two ingredients is a different act and isn't this.
-    listToast(e.badRequest ? "Já existe um ingrediente com esse nome" : "Não foi possível renomear", true);
-  }
 }
 
 // Two different outcomes, and the difference matters: deleting UNLINKS the

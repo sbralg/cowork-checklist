@@ -1,10 +1,13 @@
 // Headless UI test for ingredientes.html — the layer between a barcode and
 // a recipe. Covers: the list and its search across BRAND names (not just
-// the ingredient's own), the kind filter, the "sem insumo" orphan marker,
-// the combined pantry rollup across brands (the whole point of the
-// two-level model), rename with the duplicate-name refusal, delete with the
-// unlink count, and the blocking refusal when a receita line still
-// references the ingredient.
+// the ingredient's own), the kind filter, the "sem custo" badge, the
+// combined pantry rollup across brands (the whole point of the two-level
+// model), rename with the duplicate-name refusal, delete with the unlink
+// count, the blocking refusal when a receita line still references the
+// ingredient, and — the point of the whole page — creating an ingredient
+// BY HAND with no insumo behind it, so a recipe can be written down before
+// anything has been scanned, with unit/kind editable until an insumo is
+// linked and locked afterwards.
 //
 //   node test/ingredientes.test.js      # exits non-zero on any failure
 //
@@ -73,6 +76,7 @@ const state = {
   // A live recipe line, so the blocking delete has something real to block on.
   receitaItens: [{ id: 'RI1', ingredient_id: 'I1' }],
   produtoEmbalagens: [],
+  seq: 100,
 };
 
 const ingredientOf = (id) => state.ingredients.find(i => i.id === id);
@@ -104,6 +108,38 @@ const ingredientOf = (id) => state.ingredients.find(i => i.id === id);
         const ing = p.ingredient_id ? ingredientOf(p.ingredient_id) : null;
         return { ...p, ingredient: ing ? { id: ing.id, name: ing.name } : null };
       }) };
+    } else if (body.action === 'ingredient_create') {
+      const name = String(body.name || '').trim();
+      const clash = state.ingredients.some(x => x.name.toLowerCase() === name.toLowerCase());
+      if (!name || clash) {
+        status = 400;
+        resp = { error: clash ? 'ingredient already exists' : 'name required' };
+      } else {
+        const i = { id: 'I' + (++state.seq), name,
+                    kind: body.kind || 'ingrediente', base_unit: body.base_unit ?? null };
+        state.ingredients.push(i);
+        resp = { ok: true, ingredient: i };
+      }
+    } else if (body.action === 'ingredient_update') {
+      const i = ingredientOf(body.id);
+      if (!i) { status = 400; resp = { error: 'unknown ingredient' }; }
+      else {
+        const linked = state.insumos.filter(p => p.ingredient_id === body.id).length;
+        // The guard that matters: once an insumo is linked, IT is the
+        // authority on unit and kind (checkIngredientUnitAndKind enforces
+        // that on every link), so this action refuses to move them.
+        if (('kind' in body || 'base_unit' in body) && linked > 0) {
+          status = 400;
+          resp = { error: 'unit and kind are set by the linked insumos',
+                   insumo_count: linked, base_unit: i.base_unit, kind: i.kind };
+        } else {
+          if ('name' in body) i.name = String(body.name).trim();
+          if ('kind' in body) i.kind = body.kind;
+          if ('base_unit' in body) i.base_unit = body.base_unit;
+          resp = { ok: true, ingredient: { id: i.id, name: i.name,
+                                           base_unit: i.base_unit, kind: i.kind } };
+        }
+      }
     } else if (body.action === 'ingredient_rename') {
       const i = ingredientOf(body.id);
       const name = String(body.name || '').trim();
@@ -167,10 +203,12 @@ const ingredientOf = (id) => state.ingredients.find(i => i.id === id);
     listText.includes('2 insumos'));
   check('and shows the combined package count across brands (3 + 2 = 5)',
     listText.includes('5 un'));
-  // The orphan marker is what makes a picker typo findable at all.
-  check('an ingredient nothing points at is marked',
-    (await page.$$('.kind-badge.orphan')).length === 1 &&
-    norm(await page.textContent('.row[data-id="I3"]')).includes('sem insumo'));
+  // The badge names the consequence ("no cost"), which is what makes both a
+  // picker typo AND a deliberately hand-made ingredient findable, and is
+  // the reason a recipe using it reads "custo incompleto".
+  check('an ingredient with no priced insumo is marked',
+    (await page.$$('.kind-badge.nocost')).length === 1 &&
+    norm(await page.textContent('.row[data-id="I3"]')).includes('sem custo'));
 
   // --- search matches the BRAND, not only the ingredient's own name ---
   await page.fill('#search', 'italac');
@@ -203,20 +241,24 @@ const ingredientOf = (id) => state.ingredients.find(i => i.id === id);
     (await page.getAttribute('.ins-row', 'data-gtin')) === '7891000100103');
 
   // --- rename: refused when the name already exists ---
-  await page.click('#rename-ing');
-  await page.waitForSelector('#prompt-input', { timeout: 6000 });
-  await page.fill('#prompt-input', 'Caixa Kraft');
-  await page.click('#prompt-ok');
-  await page.waitForSelector('#list-toast.show.err', { timeout: 6000 });
+  await page.click('#edit-ing');
+  await page.waitForSelector('#ing-name-i', { timeout: 6000 });
+  await page.fill('#ing-name-i', 'Caixa Kraft');
+  page.once('dialog', d => d.dismiss());
+  await page.click('#ing-ok');
+  await page.waitForTimeout(300);
   check('renaming onto an existing name is refused, not silently merged',
-    norm(await page.textContent('#list-toast')).includes('Já existe'));
-  check('and the name is unchanged', ingredientOf('I1').name === 'Leite Condensado');
+    ingredientOf('I1').name === 'Leite Condensado');
+  await page.click('#ing-cancel');
 
-  // --- rename: a real correction goes through, and the insumos follow ---
-  await page.click('#rename-ing');
-  await page.waitForSelector('#prompt-input', { timeout: 6000 });
-  await page.fill('#prompt-input', 'Leite Condensado Integral');
-  await page.click('#prompt-ok');
+  // --- rename: a real correction goes through, and the insumos follow.
+  // This ingredient HAS linked insumos, so the name-only path is used —
+  // ingredient_rename, deployed since 2026-08-13 — and unit/kind stay
+  // locked (asserted further down).
+  await page.click('#edit-ing');
+  await page.waitForSelector('#ing-name-i', { timeout: 6000 });
+  await page.fill('#ing-name-i', 'Leite Condensado Integral');
+  await page.click('#ing-ok');
   await page.waitForFunction(
     () => (document.getElementById('ing-name') || {}).textContent === 'Leite Condensado Integral',
     null, { timeout: 6000 });
@@ -250,6 +292,76 @@ const ingredientOf = (id) => state.ingredients.find(i => i.id === id);
     state.insumos.filter(p => p.ingredient_id === 'I1').length === 0);
   check('a toast reports the unlink count',
     norm(await page.textContent('#list-toast')).includes('2 insumos desvinculados'));
+
+  // --- create by hand, with NO insumo behind it: the whole point is that
+  // writing a recipe down must not wait on a barcode scanner ---
+  await page.click('#new-ing');
+  await page.waitForSelector('#ing-name-i', { timeout: 6000 });
+  await page.fill('#ing-name-i', 'Farinha de Trigo');
+  await page.click('.kind-tab[data-kind="ingrediente"]');
+  await page.selectOption('#ing-unit', 'g');
+  await page.click('#ing-ok');
+  // Creating lands on the new ingredient's OWN detail sheet — it was just
+  // made with no insumo, so the cost warning there is the thing worth
+  // reading before writing a recipe against it.
+  await page.waitForSelector('#cost-warn', { timeout: 6000 });
+  const created = state.ingredients.find(i => i.name === 'Farinha de Trigo');
+  check('a hand-made ingredient is stored', !!created);
+  check('with the unit a recipe line needs to mean anything',
+    created && created.base_unit === 'g' && created.kind === 'ingrediente');
+
+  // --- the detail sheet explains the missing cost, and says it is fine ---
+  const warn = norm(await page.textContent('#cost-warn'));
+  check('the cost warning names the cause, got: ' + warn,
+    warn.includes('Nenhum insumo está vinculado'));
+  check('and says the recipe still works',
+    warn.includes('funcionam normalmente'));
+
+  // …and back on the list it is flagged as costless rather than silently
+  // priced at 0.
+  await page.click('#back');
+  await page.waitForSelector('.row[data-id="' + created.id + '"]', { timeout: 6000 });
+  const createdRow = await page.textContent('.row[data-id="' + created.id + '"]');
+  check('a costless ingredient carries a warning badge, got: ' + norm(createdRow),
+    norm(createdRow).includes('sem custo'));
+
+  // --- a duplicate name is refused, not silently merged ---
+  await page.click('#new-ing');
+  await page.waitForSelector('#ing-name-i', { timeout: 6000 });
+  await page.fill('#ing-name-i', 'farinha de trigo');
+  page.once('dialog', d => d.dismiss());
+  await page.click('#ing-ok');
+  await page.waitForTimeout(300);
+  check('a duplicate name does not create a second ingredient',
+    state.ingredients.filter(i => /farinha/i.test(i.name)).length === 1);
+  await page.click('#ing-cancel');
+  await page.click('.row[data-id="' + created.id + '"]');
+  await page.waitForSelector('#edit-ing', { timeout: 6000 });
+
+  // --- unit/kind stay editable while nothing is linked ---
+  await page.click('#edit-ing');
+  await page.waitForSelector('#ing-unit', { timeout: 6000 });
+  check('unit is editable on an unlinked ingredient',
+    !(await page.getAttribute('#ing-unit', 'disabled') !== null));
+  await page.selectOption('#ing-unit', 'un');
+  await page.click('#ing-ok');
+  await page.waitForFunction(
+    () => /medido em un|un/.test(document.body.textContent || ''), null, { timeout: 6000 });
+  check('the corrected unit is stored', ingredientOf(created.id).base_unit === 'un');
+
+  // --- but are LOCKED once an insumo is linked: the insumo is the
+  // authority, and the API refuses to move them out from under it ---
+  await page.click('#back');
+  await page.waitForSelector('.row[data-id="I2"]', { timeout: 6000 });
+  await page.click('.row[data-id="I2"]');
+  await page.waitForSelector('#edit-ing', { timeout: 6000 });
+  await page.click('#edit-ing');
+  await page.waitForSelector('#ing-unit', { timeout: 6000 });
+  check('unit is locked while an insumo is linked',
+    (await page.getAttribute('#ing-unit', 'disabled')) !== null);
+  check('and the dialog says why',
+    norm(await page.textContent('.modal-card')).includes('vêm dos'));
+  await page.click('#ing-cancel');
 
   // --- the deep link opens a detail sheet directly ---
   await page.goto(PAGE + '?id=I2');
