@@ -2,6 +2,138 @@
 
 Context file for Claude Code / Claude sessions working on this repo.
 
+## Status (2026-08-27): UI/usability pass — the three reported bugs, a reordered Receitas detail, grouped navigation, and the FULL test suite green for the first time
+
+Reported by the user against the live pages: "the recipe page [is]
+confusing. I can't edit or delete ingredients. The insumos page ingredient
+and category pills are not aligned, recipe edit and remove buttons are
+overlapping the table below." All three were real and are fixed; each was
+measured in a headless browser before and after rather than eyeballed.
+
+- **"I can't edit or delete ingredients" was a HIT-TARGET bug, not a
+  broken handler.** `.icon-btn` (shared-base.css) rendered at **25×28 /
+  28×28 CSS px** — the ✎/🗑 on a recipe's ingredient rows were wired
+  correctly the whole time and simply too small to hit on a phone. Now
+  `min-width/min-height:40px` with the glyph centred via inline-flex; the
+  visible ink is unchanged, only the hit area grew. This lands on every
+  row-action button in the app (tarefas, compras, eventos, financeiro,
+  insumos, receitas and the shared produto panel), not just Receitas.
+  - **Regression this caused, and the fix — worth remembering.** Giving
+    `.icon-btn` an explicit `display` made a class rule outrank the UA
+    sheet's `[hidden]{display:none}`, so every hidden icon button silently
+    reappeared — specifically compras.html's per-row camera, which is
+    hidden once a row has a barcode. Caught by `compras.test.js` (4
+    assertions), fixed with an explicit `.icon-btn[hidden]{display:none}`.
+    Same specificity trap as the 2026-08-11 scan-dialog price field: **in
+    this codebase, adding `display` to a shared class needs a `[hidden]`
+    guard.**
+- **"Edit and remove buttons overlapping the table below": `.detail-actions`
+  had `margin:14px 0 0` and no bottom margin**, so the button row's bottom
+  edge sat exactly on the following card's top edge — measured gap **0px**.
+  Now `14px 0 18px` on all five detail pages that had it (receitas,
+  produtos, clientes, eventos, fornecedores); measured gap 22px.
+  `insumos.html` deliberately keeps no bottom margin — its actions row sits
+  INSIDE a `.card.pad` and the next block's own border-top divider already
+  separates it.
+- **"Pills are not aligned" on insumos rows: the kind badge and the
+  ingredient tag were bare inline-blocks** sharing a text baseline at
+  different font sizes, and the kind badge carries an emoji (taller line
+  box). Measured **6px apart vertically**. They now sit in a
+  `<span class="tagrow">` flex row with `align-items:center` and one type
+  scale; measured delta **0px**. Matching the font sizes alone would NOT
+  have fixed it — the emoji still lifts its own line box, so the flex row
+  is the load-bearing part.
+- **Receitas detail reordered so it reads cause → effect.** It opened on
+  the cost totals with the ingredient lines that produce them further down,
+  which is why it read as a report rather than as something editable. Now:
+  actions → **Ingredientes** (with the batch-scaling control directly above
+  the list it affects) → **Custo** → Categoria. Also:
+  - **A per-gram unit cost no longer renders as "R$ 0,00".** `fmtMoney`'s
+    fixed two decimals turned every sub-centavo unit cost into something
+    that reads as free — the exact failure this project's standing
+    "unknown is never zero" rule exists to prevent. A page-local
+    `fmtUnitMoney()` gives small values the digits they need
+    (`R$ 0,0055/g`); LINE totals still use `fmtMoney`, since those really
+    are a number of centavos.
+  - **A line with no cost says so on the row** ("⚠️ sem custo — nunca foi
+    comprado") instead of rendering blank and leaving only a summary
+    warning further up the page to explain the gap.
+  - **The batch-scaling control always states what it is doing** — "×2,5 —
+    quantidades e custos abaixo ajustados para esta fornada" plus a "Voltar
+    ao original" link — where before it was a bare input under a long
+    parenthetical label with nothing confirming it had taken effect.
+  - **The Custo card is deliberately NOT scaled, and now says so** when a
+    scale is active ("valores da receita original (1200 g)"). Safety margin
+    and prep labour do not scale linearly with the batch, so multiplying
+    the server's number client-side would invent one; labelling it is what
+    stops the card from silently disagreeing with the scaled lines above.
+  - Empty states became actionable: the ingredient picker's dead end now
+    links to Insumos (an ingredient only exists once an insumo is linked to
+    one), and the empty item list explains that a line can be another
+    receita too.
+  - **The header was NOT changed.** An earlier pass here made the recipe
+    name the h1 and it looked better in isolation — but all five detail
+    pages share the "h1 = module, record name right-aligned beside the back
+    link" shape, and the user tuned that shape on eventos across four
+    commits (`d73492b`, `7414e40`, `bc3dfce`, `a812128`). One page
+    departing from it reads as a bug, not a refinement, so it was reverted
+    to match.
+- **Navigation grouped into Dia a dia / Produção / Negócio**, in
+  `shared-menu.js` (`MENU_GROUPS` + a `group` key per item) and rendered by
+  both the drawer and the dashboard from that one source — twelve flat
+  destinations gave no clue which belong to the same job, and the
+  production chain (Insumos → Receitas → Produtos) only reads as a chain
+  once its four pages sit under one heading. The dashboard adds a one-line
+  hint per group. Group headings are `<p class="menu-group">` and
+  deliberately never carry `.menu-item`, since every count/query over the
+  drawer's destinations keys off that class. The drawer also gained
+  `overflow-y:auto` — 12 items plus 3 headings can outgrow a short phone.
+
+### The test suite is green end to end — first time
+
+All ten suites pass. Before this session **six assertions across five
+suites were failing**, logged in the backend repo's CLAUDE.md as
+pre-existing and "worth a dedicated pass". A baseline run (`git stash`,
+run, `git stash pop`) confirmed the same failure set before and after this
+session's UI changes, so none of them were caused here. What each turned
+out to be:
+
+- **`compras.test.js` (timeout) was a REAL, live, user-facing bug.**
+  `redrawItemText()` still called `productMeta(it)` — a function renamed to
+  `insumoMeta` by the 2026-08-24 Produtos→Insumos rename (`8fe4bd7`). It
+  threw a `ReferenceError` on every in-place row redraw, so **the brand/
+  size line under a shopping-list item silently never updated after an
+  edit or a barcode scan**. One-word fix; the rename's grep sweep missed
+  this one call site.
+- **`eventos.test.js` (timeout) was a test race.** It waited on
+  `.evento-head` after a payment edit, but that element is present before
+  the edit too, so `waitForSelector` resolved instantly while `#root` still
+  held the "Carregando…" placeholder — the pay-row count then read 0 and
+  the following `waitForFunction` could never be satisfied. It now waits
+  for the edited amount to actually be on screen. A second assertion read
+  `.evento-head .name`, stale since `d73492b` moved the name into the
+  header (`#evento-name`).
+- **`clientes.test.js` (2 failures) were stale expectations**, describing
+  behaviour the user deliberately removed in `d2df750` (the WhatsApp button
+  stays enabled and opens the contact when no message is typed; the
+  "Histórico de mensagens" note was dropped). The assertions now describe
+  what the page is meant to do.
+- **`stock.test.js` carried a latent flake** (~1 run in 5) that only
+  surfaced once the rest of the suite stopped failing: deleting a ledger
+  movement also kicks a full detail reload, and the assertion re-read the
+  DOM after its own `waitForFunction` had already settled — a `$$` landing
+  inside the reload's "Carregando…" window counted 0 rows. It now asserts
+  the fake's ledger, since the row count is what the wait just proved.
+- **`hoje.test.js`/`tarefas.test.js` hard-coded "9 destinations"**, stale
+  from the moment Receitas/Produtos/Fornecedores were added. Both now
+  derive the expected count from `MENU_ITEMS.length`, so adding a page
+  can't quietly break them again.
+
+Node 20+/Playwright is available in this sandbox (`NODE_PATH=/opt/node22/
+lib/node_modules`), so **there is no longer any excuse for shipping a
+change here unrun** — the older entries below that say "could not be run
+in this sandbox" reflect earlier sandboxes, not this one.
+
 ## Status (2026-08-24): Receitas + Produtos + Fornecedores modules shipped — the (Shopping List >) Insumos → Receita → Produto reshape is now complete end to end
 
 Full plan and reasoning in `sbralg/cowork-personal-daily-summary`'s
@@ -319,7 +451,9 @@ what that changes and what stays the same).
   subtitle, onSuccess, beforeShow?}` *before* this script tag loads, so
   `showLogin()` can render the right copy without every call site passing
   it in.
-- `shared-menu.js` — `MENU_ITEMS` (now 9 entries) + the hamburger drawer.
+- `shared-menu.js` — `MENU_ITEMS` (12 entries) + `MENU_GROUPS` (the three
+  section headings the drawer AND `index.html`'s dashboard both render
+  from) + the hamburger drawer.
   **This is the file that used to bite**: adding a page used to mean
   hand-editing this array in every other page's copy of it; now it's one
   edit.
@@ -348,7 +482,7 @@ per-page differences), each page's own row rendering and search-matching
 (different data shapes), and — unchanged since before this refactor — the
 barcode scanner, which lives only in `compras.html`.
 
-Seven headless Chromium tests, each next to the pages it guards. All serve
+Ten headless Chromium tests, each next to the pages it guards. All serve
 the repo root on an ephemeral port and answer `checklist-api` from an
 in-memory fake, so none touches Supabase nor holds a passphrase.
 **There is no CI — run them by hand before pushing.**
@@ -387,6 +521,16 @@ in-memory fake, so none touches Supabase nor holds a passphrase.
   read through `cliente_detail`, the wa.me phone normalization and its
   href, and the deep link. Its fake keeps clientes/eventos/pagamentos as
   real relational state, same reasoning as `eventos.test.js`.
+- `test/receitas.test.js` / `test/produtos.test.js` /
+  `test/fornecedores.test.js` — the Insumos→Receita→Produto chain: recipe
+  create/edit, ingredient and sub-recipe lines, the per-line and batch cost
+  math, an ingredient with no purchase history reading as "incomplete"
+  rather than a wrong 0, batch scaling (ephemeral, never saved), the
+  refusal-first delete when a recipe is in use, the Categoria control that
+  creates/removes a linked manufaturado Produto, the produto pricing panel
+  and its reverse retail calculator, and a fornecedor's purchase history.
+  Their fakes reimplement `receitaCostFor`/`produtoCostFor` line for line,
+  same "don't fake away the interesting half" rule as the others.
 
 ## Conventions
 
@@ -400,10 +544,11 @@ in-memory fake, so none touches Supabase nor holds a passphrase.
   through a PR meant the user had to merge before seeing it and then do
   branch surgery whenever it needed another pass. Push the work, let
   them look at the live page, iterate with another commit.
-  - Run all seven test files BEFORE pushing, every time (`node
-    test/compras.test.js`, `test/stock.test.js`, `test/tarefas.test.js`,
-    `test/hoje.test.js`, `test/eventos.test.js`, `test/financeiro.test.js`,
-    `test/clientes.test.js`).
+  - Run ALL TEN test files BEFORE pushing, every time — `for t in
+    test/*.test.js; do node "$t"; done` (with
+    `NODE_PATH=/opt/node22/lib/node_modules` if playwright is only
+    installed globally). They all pass as of 2026-08-27; a single FAIL line
+    is a real regression, not background noise.
     They are the only gate left between a broken page and the live site.
     Any change to a `shared-*.js`/`shared-*.css` file can touch every
     page that loads it, so run the FULL suite (not just the one page you

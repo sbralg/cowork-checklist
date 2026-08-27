@@ -342,7 +342,15 @@ function clienteEmbed(id) {
   await page.waitForSelector('#pe-amount', { timeout: 6000 });
   await page.fill('#pe-amount', '4500');
   await page.click('#pe-ok');
-  await page.waitForSelector('.evento-head', { timeout: 6000 });
+  // `.evento-head` is NOT a usable signal that the re-render finished — it
+  // is present before the edit too, so waitForSelector resolved instantly
+  // while #root still held the "Carregando…" placeholder, and the pay-row
+  // count captured a moment later read 0. Wait for the edited amount to
+  // actually be on screen instead.
+  await page.waitForFunction(
+    () => document.querySelectorAll('.pay-row').length === 2 &&
+      /R\$\s*45,00/.test(document.querySelector('.pay-row').textContent.replace(/\u00A0/g, ' ')),
+    null, { timeout: 6000 });
   const editedLanc = state.lancamentos.find(l => l.amount === 45 && l.evento_id === eventoId);
   check('the linked lançamento amount followed the edited payment', !!editedLanc);
 
@@ -400,7 +408,7 @@ function clienteEmbed(id) {
   await page.goto(PAGE + '?id=' + deepId);
   await page.waitForSelector('.evento-head', { timeout: 6000 });
   check('the deep link opens the right evento directly',
-    (await page.textContent('.evento-head .name')).includes('Evento para deep link'));
+    (await page.textContent('#evento-name')).includes('Evento para deep link'));
 
   // --- cliente delete unlinks without breaking the detail sheet ---
   await page.click('#back');

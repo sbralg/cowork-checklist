@@ -51,11 +51,25 @@ body{
 .link:hover{color:var(--text);text-decoration:underline}
 .link:active{opacity:.6}
 
+/* Row action buttons (edit/delete/undo). Sized to a real finger target:
+   these used to be 28x28 CSS px, which on a phone meant the edit/remove
+   controls on a recipe's ingredient rows were routinely missed entirely —
+   reported as "I can't edit or delete ingredients" when the handlers were
+   in fact wired correctly all along. 40px is the platform minimum on both
+   iOS and Android; the visible ink is unchanged, only the hit area grew. */
 .icon-btn{
-  background:none;border:none;color:var(--muted);font-size:16px;padding:6px;cursor:pointer;
-  flex:none;line-height:1;border-radius:8px;
+  background:none;border:none;color:var(--muted);font-size:17px;padding:0;cursor:pointer;
+  flex:none;line-height:1;border-radius:10px;
+  min-width:40px;min-height:40px;
+  display:inline-flex;align-items:center;justify-content:center;
   transition:background-color .15s ease,color .15s ease,transform .1s ease;
 }
+/* A class rule outranks the UA sheet's `[hidden]{display:none}`, so giving
+   .icon-btn an explicit `display` silently un-hid every hidden one (the
+   shopping list's per-row camera icon, hidden once a row has a barcode).
+   Same specificity trap this project already hit with the scan dialog's
+   price field — see CLAUDE.md, 2026-08-11. */
+.icon-btn[hidden]{display:none}
 .icon-btn:hover{background:rgba(127,127,127,.15);color:var(--text)}
 .icon-btn:active{transform:scale(.9)}
 .icon-btn.danger{color:var(--danger)}

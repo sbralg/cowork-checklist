@@ -607,6 +607,7 @@ function handleMove(body) {
 
   // --- removing a mis-tapped ledger entry ---
   const movsBefore = (await page.$$('#mov-card .mov')).length;
+  const ledgerBefore = state.movements.length;
   await page.click('#mov-card .mov [data-del-mov]');
   // An in-page modal, not a native confirm() — the convention across every
   // page here is that a decision gets a real dialog.
@@ -615,8 +616,13 @@ function handleMove(body) {
   await page.waitForFunction(
     (n) => document.querySelectorAll('#mov-card .mov').length === n - 1,
     movsBefore, { timeout: 6000 });
+  // Re-reading the DOM here was flaky: deleting a movement also kicks a
+  // full detail reload, and a $$ landing inside that reload's
+  // "Carregando…" window counted 0 rows even though the waitForFunction
+  // above had already proved the delete rendered. Assert the fake's own
+  // ledger instead — the row count is what waitForFunction just settled.
   check('a movement can be removed when it was a mis-tap',
-    (await page.$$('#mov-card .mov')).length === movsBefore - 1);
+    state.movements.length === ledgerBefore - 1);
 
   // --- the ingredient, from the catalogue side ---
   await page.click('#back');

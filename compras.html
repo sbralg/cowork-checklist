@@ -1338,7 +1338,7 @@ function renderItems(list, items){
     row.querySelector(".txt").textContent = it.name;
     const scanBtn = row.querySelector('[data-action="scan-item"]');
     if(scanBtn) scanBtn.hidden = !!it.gtin;
-    const meta = productMeta(it);
+    const meta = insumoMeta(it);
     let metaEl = row.querySelector(".meta");
     if(!meta){ if(metaEl) metaEl.remove(); return; }
     if(!metaEl){

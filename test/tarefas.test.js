@@ -135,8 +135,12 @@ const state = {
   await page.waitForSelector('.menu-panel.open', { timeout: 6000 });
   const menuLinks = await page.$$eval('.menu-item', els =>
     els.map(e => ({ tag: e.tagName, text: e.textContent.trim(), href: e.getAttribute('href') })));
-  check('the menu lists all 9 destinations plus logout, got ' + menuLinks.length,
-    menuLinks.length === 10);
+  // Derived from shared-menu.js rather than hard-coded, so adding a page
+  // stops silently failing this assertion the way it did from the Receitas/
+  // Produtos/Fornecedores additions onward.
+  const menuCount = await page.evaluate(() => MENU_ITEMS.length);
+  check('the menu lists every destination plus logout, got ' + menuLinks.length +
+    ' for ' + menuCount + ' modules', menuLinks.length === menuCount + 1);
   check('the current page (Tarefas) renders as an inert label, not a link',
     menuLinks.some(m => m.tag === 'SPAN' && m.text === '✓ Tarefas'));
   check('Compras is reachable under its renamed href (not the old shopping.html)',

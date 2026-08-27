@@ -54,19 +54,40 @@
   /* ---- detail ---- */
   .rec-title{font-size:16px;font-weight:650;margin:0;text-align:right;word-wrap:break-word;cursor:pointer}
   .rec-title:hover{opacity:.75}
-  .detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
-  .scale-card{padding:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .scale-card label{font-size:13px;color:var(--muted);flex:1;min-width:140px}
-  .scale-card .field{max-width:120px}
+  .rec-sub{font-size:13px;color:var(--muted);margin:-2px 0 0;text-align:right}
+  .detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 18px}
+  /* Section heading with a count/hint on the right of the same line. */
+  .sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:22px 0 8px}
+  .sec-head h3{margin:0}
+  .sec-head .cnt{font-size:12.5px;color:var(--muted);flex:none}
+  .scale-card{padding:14px;margin:0 0 10px}
+  .scale-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .scale-top label{font-size:13.5px;font-weight:600;color:var(--text);flex:1;min-width:140px}
+  .scale-card .field .num-input{border-radius:8px 0 0 8px;width:82px}
+  /* Mirror of shared-inputs.css's `.prefix`, on the trailing edge: the
+     scale field is a rendimento, so its unit belongs after the number. */
+  .scale-card .suffix{
+    font-size:12px;color:var(--muted);background:rgba(127,127,127,.1);
+    border:1px solid var(--border-strong);border-left:none;border-radius:0 8px 8px 0;
+    padding:9px 8px;line-height:1;white-space:nowrap;
+  }
+  .scale-hint{font-size:12.5px;color:var(--muted);line-height:1.45;margin:10px 0 0}
+  .scale-hint.on{color:var(--accent)}
+  .scale-hint button{font-size:12.5px;padding:0 0 0 6px}
   .item-row{
-    display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:10px;padding:10px 8px 10px 14px;border-bottom:1px solid var(--border);
   }
   .item-row:last-child{border-bottom:none}
   .item-row .badge{font-size:18px;flex:none;width:24px;text-align:center}
   .item-row .body{flex:1;min-width:0}
-  .item-row .body .txt{font-size:14.5px;margin:0;word-wrap:break-word}
-  .item-row .body .meta{font-size:12.5px;color:var(--muted);margin:3px 0 0}
-  .item-row .scaled{font-size:12.5px;color:var(--accent);margin:2px 0 0}
+  .item-row .body .txt{font-size:15px;font-weight:600;margin:0;word-wrap:break-word}
+  .item-row .body .qty{font-size:13px;color:var(--text);margin:2px 0 0}
+  .item-row .body .meta{font-size:12.5px;color:var(--muted);margin:2px 0 0}
+  /* An ingredient nobody has ever bought has NO cost, which is a different
+     statement from costing nothing — said on the row itself, not only in
+     the summary warning far above it. */
+  .item-row .meta.nocost{color:var(--warn)}
+  .item-row .scaled{font-size:12.5px;color:var(--accent);font-weight:600;margin:2px 0 0}
   .row-actions{display:flex;gap:2px;flex:none}
   .totals-card{padding:14px}
   .totals-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px}
@@ -127,6 +148,11 @@ const PAGE_LOGIN = {
 const CURRENT_PAGE = "receitas";
 const YIELD_UNITS = ["g", "ml", "un"];
 
+// Same header shape as every other detail page here (eventos/produtos/
+// clientes/fornecedores): the h1 names the module, the back link and the
+// record's own name share the row below it. Deliberately NOT special-cased
+// for receitas — the user tuned this shape on eventos across several
+// passes, and one page departing from it reads as a bug, not a refinement.
 function navHeader(title, backAction){
   const topRow = '<header><div class="hleft">' +
     '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
@@ -135,7 +161,9 @@ function navHeader(title, backAction){
   if(!backAction) return topRow;
   return topRow + '<div class="subheader">' +
     '<button class="link" id="back">← Receitas</button>' +
-    (title ? '<h2 class="rec-title" id="rec-name">' + esc(title) + '</h2>' : '') +
+    (title
+      ? '<h2 class="rec-title" id="rec-name" title="Editar receita">' + esc(title) + '</h2>'
+      : '') +
   '</div>';
 }
 function wireNav(backAction){
@@ -144,6 +172,22 @@ function wireNav(backAction){
 }
 
 function pct(v){ return (Number(v) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 }); }
+
+// A per-gram or per-ml unit cost is usually a fraction of a cent, and
+// fmtMoney's fixed two decimals renders every one of them as "R$ 0,00" —
+// which reads as free, the exact failure this app's standing "unknown is
+// never zero" rule exists to avoid. Small values get however many digits
+// they need to say something true; a LINE total still uses fmtMoney, since
+// that one really is a number of centavos.
+function fmtUnitMoney(v){
+  const n = Number(v);
+  if(!Number.isFinite(n)) return "";
+  const digits = (n === 0 || n >= 1) ? 2 : (n >= 0.01 ? 3 : (n >= 0.001 ? 4 : 5));
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency", currency: "BRL",
+    minimumFractionDigits: digits, maximumFractionDigits: digits,
+  }).format(n);
+}
 
 // ---- list screen ----
 
@@ -374,11 +418,16 @@ async function receitaItemPickerModal(currentReceitaId){
           '</button>';
         }).join("");
         if(!html){
-          html = '<p class="msg small">' +
-            (kind === "ingrediente"
-              ? "Nenhum ingrediente ainda. Vincule um insumo a um ingrediente em Insumos primeiro."
-              : "Nenhuma outra receita ainda.") +
-            '</p>';
+          // A dead end here is almost always "no insumo has been linked to
+          // an ingredient yet", which is fixed on another page — so the
+          // empty state points at that page instead of just reporting it.
+          html = kind === "ingrediente"
+            ? '<p class="msg small">Nenhum ingrediente ainda.<br>' +
+              'Um ingrediente nasce ao vincular um insumo do catálogo a ele.<br>' +
+              '<a class="link" href="insumos.html">Abrir Insumos →</a></p>'
+            : '<p class="msg small">Nenhuma outra receita ainda.<br>' +
+              'Crie uma segunda receita (uma massa ou calda, por exemplo) ' +
+              'para poder usá-la dentro desta.</p>';
         }
         listEl.innerHTML = html;
         listEl.querySelectorAll("[data-id]").forEach(btn => {
@@ -453,27 +502,31 @@ function itemRowHtml(it, scale, itemCosts){
   const isIng = it.kind === "ingrediente";
   const target = isIng ? it.ingredient : it.sub_receita;
   const unit = isIng ? (target && target.base_unit) || "" : (target && target.yield_unit) || "";
-  const scaledHtml = (scale && scale !== 1)
-    ? '<p class="scaled">Para o rendimento desejado: ' + fmtStockQty(it.quantity * scale) + ' ' + unit + '</p>'
+  const scaled = !!(scale && scale !== 1);
+  const scaledHtml = scaled
+    ? '<p class="scaled">Nesta fornada: ' + fmtStockQty(it.quantity * scale) + ' ' + esc(unit) + '</p>'
     : '';
   // "Custo por unidade" / "custo do ingrediente" — the spreadsheet's own
   // per-row columns, resolved server-side in receitaCostFor's item_costs.
+  // A row with no entry there is an ingredient with no purchase history:
+  // it is called out ON THE ROW, not left blank with only a summary
+  // warning further up the page to explain the gap.
   const ic = (itemCosts || {})[it.id];
   const costHtml = ic
-    ? '<p class="meta">' + fmtMoney(ic.unit_cost) + '/' + esc(unit || "un") +
-        ' · ' + fmtMoney(scale && scale !== 1 ? ic.line_cost * scale : ic.line_cost) + '</p>'
-    : '';
+    ? '<p class="meta">' + fmtUnitMoney(ic.unit_cost) + '/' + esc(unit || "un") + ' · ' +
+        fmtMoney(scaled ? ic.line_cost * scale : ic.line_cost) + '</p>'
+    : '<p class="meta nocost">⚠️ sem custo — nunca foi comprado</p>';
   return '<div class="item-row" data-item="' + esc(it.id) + '">' +
     '<span class="badge">' + (isIng ? "🧂" : "📖") + '</span>' +
     '<span class="body">' +
       '<p class="txt">' + esc(target ? target.name : "?") + '</p>' +
-      '<p class="meta">' + fmtStockQty(it.quantity) + ' ' + esc(unit) + '</p>' +
+      '<p class="qty">' + fmtStockQty(it.quantity) + ' ' + esc(unit) + '</p>' +
       scaledHtml +
       costHtml +
     '</span>' +
     '<span class="row-actions">' +
-      '<button class="icon-btn" data-edit-item title="Editar quantidade">✎</button>' +
-      '<button class="icon-btn danger" data-del-item title="Remover">🗑</button>' +
+      '<button class="icon-btn" data-edit-item title="Editar quantidade" aria-label="Editar quantidade">✎</button>' +
+      '<button class="icon-btn danger" data-del-item title="Remover item" aria-label="Remover item">🗑</button>' +
     '</span>' +
   '</div>';
 }
@@ -485,8 +538,15 @@ function renderReceita(data){
   const incomplete = data.incomplete || [];
   const itemCosts = cost && cost.item_costs;
 
+  // The page reads top-down as cause then effect: what goes in (the
+  // ingredient lines, and the batch you want to make) comes FIRST, and the
+  // money it adds up to comes after. The previous order opened on the cost
+  // totals, with the lines that produce them further down the page — which
+  // is why the screen read as a report rather than as something editable.
   const itensHtml = itens.length === 0
-    ? '<p class="msg small">Nenhum item ainda.</p>'
+    ? '<div class="card"><p class="msg small">Nenhum ingrediente ainda.<br>' +
+        'Toque em "+ Adicionar item" para incluir um ingrediente do catálogo — ' +
+        'ou outra receita, quando esta usa uma massa ou calda pronta.</p></div>'
     : '<div class="card" id="itens-card">' +
         itens.map(it => itemRowHtml(it, currentScale(), itemCosts)).join("") +
       '</div>';
@@ -500,32 +560,45 @@ function renderReceita(data){
             ? '<div><p class="lbl">Mão de obra (preparo)</p><p class="val">' + fmtMoney(cost.prep_labor_cost) + '</p></div>'
             : '') +
           '<div class="t"><p class="lbl">Custo por ' + esc(r.yield_unit) + '</p><p class="val">' +
-            fmtMoney(cost.cost_per_yield_unit) + '</p></div>' +
+            fmtUnitMoney(cost.cost_per_yield_unit) + '</p></div>' +
         '</div>' +
       '</div>'
     : '';
   const warnHtml = incomplete.length > 0
-    ? '<div class="warn-card"><p>⚠️ Custo incompleto — sem histórico de compra: ' + esc(incomplete.join(", ")) + '</p></div>'
+    ? '<div class="warn-card"><p>⚠️ Custo incompleto — os itens marcados acima nunca foram ' +
+        'comprados, então não entram na conta: ' + esc(incomplete.join(", ")) + '. ' +
+        'Registre uma compra em Estoque para completar o custo.</p></div>'
     : '';
 
   root.innerHTML = navHeader(r.name, loadReceitas) +
-    '<p class="meta" style="text-align:right;color:var(--muted);font-size:13px;margin:-4px 0 8px">' +
-      'Rendimento: ' + fmtStockQty(r.yield_qty) + ' ' + esc(r.yield_unit) +
+    '<p class="rec-sub">Rende ' + fmtStockQty(r.yield_qty) + ' ' + esc(r.yield_unit) +
       (r.safety_margin_pct ? ' · margem de segurança ' + pct(r.safety_margin_pct) + '%' : '') +
+      (r.prep_minutes ? ' · ' + fmtStockQty(r.prep_minutes) + ' min de preparo' : '') +
     '</p>' +
     '<div class="detail-actions">' +
-      '<button class="primary small alt" id="edit-receita">✎ Editar</button>' +
+      '<button class="primary small alt" id="edit-receita">✎ Editar receita</button>' +
       '<button class="primary small alt danger" id="del-receita">🗑 Remover</button>' +
     '</div>' +
-    costHtml + warnHtml +
+    '<div class="sec-head"><h3>Ingredientes</h3>' +
+      '<span class="cnt">' + itens.length + (itens.length === 1 ? ' item' : ' itens') + '</span></div>' +
     '<div class="card scale-card">' +
-      '<label for="scale-yield">Rendimento desejado (para calcular quantidades de uma fornada maior — não é salvo)</label>' +
-      '<span class="field"><input class="num-input" type="text" inputmode="decimal" id="scale-yield" placeholder="' +
-        fmtStockQty(r.yield_qty) + '"></span>' +
+      '<div class="scale-top">' +
+        '<label for="scale-yield">Calcular para outra fornada</label>' +
+        '<span class="field">' +
+          '<input class="num-input" type="text" inputmode="decimal" id="scale-yield" placeholder="' +
+            fmtStockQty(r.yield_qty) + '">' +
+          '<span class="suffix">' + esc(r.yield_unit) + '</span>' +
+        '</span>' +
+      '</div>' +
+      '<p class="scale-hint" id="scale-hint">' + scaleHintHtml(r, 1) + '</p>' +
     '</div>' +
-    '<h3>Itens</h3>' + itensHtml +
-    '<button class="primary small alt addrow-btn" id="add-item">+ Item</button>' +
-    '<h3>Categoria</h3>' +
+    itensHtml +
+    '<button class="primary small alt addrow-btn" id="add-item">+ Adicionar item</button>' +
+    '<div class="sec-head"><h3>Custo</h3>' +
+      '<span class="cnt" id="cost-note">' + costNoteText(r, 1) + '</span></div>' +
+    (costHtml || '<div class="card"><p class="msg small">Adicione ingredientes para ver o custo.</p></div>') +
+    warnHtml +
+    '<div class="sec-head"><h3>Categoria</h3></div>' +
     '<div id="rec-categoria"></div>';
 
   wireNav(loadReceitas);
@@ -591,8 +664,9 @@ function renderCategoria(data){
         '<button class="kind-tab active" disabled>🧂 Ingrediente</button>' +
         '<button class="kind-tab" id="cat-produto-final">🏷️ Produto Final</button>' +
       '</div>' +
-      '<p class="msg small">Esta receita só é usada como ingrediente de outras receitas. ' +
-      'Marque "Produto Final" para vendê-la, com embalagem, margens e preço sugerido.</p>';
+      '<p class="msg small">Hoje esta receita só serve de ingrediente para outras receitas.<br>' +
+      'Toque em "Produto Final" para vendê-la: ela ganha embalagem, margens e ' +
+      'preço sugerido aqui mesmo.</p>';
     el.querySelector("#cat-produto-final").addEventListener("click", async () => {
       try{
         await api("produto_create", {
@@ -613,8 +687,9 @@ function renderCategoria(data){
       '<button class="kind-tab" id="cat-ingrediente">🧂 Ingrediente</button>' +
       '<button class="kind-tab active" disabled>🏷️ Produto Final</button>' +
     '</div>' +
-    '<p class="meta" style="margin:0 0 10px">' +
-      '<a class="link" href="produtos.html?id=' + esc(lp.id) + '">Editar embalagem, mão de obra e margens em Produtos →</a>' +
+    '<p class="meta" style="margin:0 0 10px;font-size:12.5px;color:var(--muted)">' +
+      'Esta receita é vendida como <strong>' + esc(lp.name) + '</strong>. ' +
+      '<a class="link" href="produtos.html?id=' + esc(lp.id) + '">Ver em Produtos →</a>' +
     '</p>' +
     '<div id="rec-produto-panel"><p class="msg small">Carregando…</p></div>';
 
@@ -663,10 +738,55 @@ function currentScale(){
   return desired ? desired : 1;
 }
 
+// The batch-scaling control used to be a bare input under a long
+// parenthetical label, with nothing on screen confirming it had taken
+// effect except quantities changing further down. It now always says what
+// state it is in — and offers the way back out of it.
+function scaleHintHtml(r, scale){
+  if(!scale || scale === 1){
+    return 'A receita rende ' + fmtStockQty(r.yield_qty) + ' ' + esc(r.yield_unit) +
+      '. Digite outro rendimento para ver as quantidades ajustadas — nada é salvo.';
+  }
+  return '×' + scale.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) +
+    ' — quantidades e custos abaixo ajustados para esta fornada.' +
+    '<button class="link" id="scale-clear">Voltar ao original</button>';
+}
+
+// The cost card is what the server computed for the recipe AS SAVED, and
+// batch scaling never re-asks for it — safety margin and prep labour do not
+// scale linearly with the batch, so multiplying it here would invent a
+// number. The ingredient LINES do scale (what you would actually spend on
+// ingredients for the bigger batch is a true statement), so while a scale
+// is active the card says which batch its own totals belong to, rather than
+// silently disagreeing with the lines above it.
+function costNoteText(r, scale){
+  return (!scale || scale === 1)
+    ? "calculado agora, nunca salvo"
+    : "valores da receita original (" + fmtStockQty(r.yield_qty) + " " + r.yield_unit + ")";
+}
+
+function applyScaleHint(data, scale){
+  const note = document.getElementById("cost-note");
+  if(note) note.textContent = costNoteText(data.receita, scale);
+  const hint = document.getElementById("scale-hint");
+  if(!hint) return;
+  hint.innerHTML = scaleHintHtml(data.receita, scale);
+  hint.classList.toggle("on", scale !== 1);
+  const clear = document.getElementById("scale-clear");
+  if(clear){
+    clear.addEventListener("click", () => {
+      const el = document.getElementById("scale-yield");
+      el.value = "";
+      redrawItems(data);
+    });
+  }
+}
+
 function redrawItems(data){
   const scaleRaw = document.getElementById("scale-yield").value;
   const desired = parseQtyInput(scaleRaw);
   const scale = desired ? desired / Number(data.receita.yield_qty) : 1;
+  applyScaleHint(data, scale);
   const itens = data.itens || [];
   const itemCosts = data.cost && data.cost.item_costs;
   const card = document.getElementById("itens-card");

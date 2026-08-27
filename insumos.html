@@ -59,19 +59,28 @@
      missing-barcode marker on the shopping list, because an uncategorised
      insumo is normal today. Seeing which rows are blank is what makes a
      categorising pass down the list possible at all. */
+  /* The two pills sit in a flex row, NOT as bare inline-blocks: as
+     inline-blocks they aligned on the shared text baseline, and since the
+     kind badge carries an emoji (taller line box) and a different font
+     size, the two pills' boxes ended up ~6px apart vertically. Sharing one
+     type scale and centering them in a flex row is what actually keeps
+     them level — matching font-size alone would not, because the emoji
+     still lifts its own line box. */
+  .tagrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 0;min-width:0}
+  .ing-tag,.kind-badge{
+    display:inline-flex;align-items:center;font-size:11.5px;line-height:1.45;
+    padding:3px 9px;border-radius:999px;margin:0;
+  }
   .ing-tag{
-    display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;
-    background:rgba(37,99,235,.12);color:var(--accent);margin:5px 0 0;
-    max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    background:rgba(37,99,235,.12);color:var(--accent);
+    flex:0 1 auto;max-width:100%;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;
   }
   .ing-tag.none{background:rgba(127,127,127,.12);color:var(--muted)}
   /* kind (ingrediente/embalagem) — the load-bearing flag the recipe
      module's line pickers filter on, so it needs its own badge distinct
      from the ing-tag (which is about WHAT the insumo is, not its kind). */
-  .kind-badge{
-    display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;
-    margin:5px 6px 0 0;
-  }
+  .kind-badge{flex:none;white-space:nowrap}
   .kind-badge.ing{background:rgba(180,83,9,.12);color:var(--warn)}
   .kind-badge.emb{background:rgba(127,127,127,.12);color:var(--muted)}
   .searchrow{display:flex;gap:8px;margin:0 0 14px}
@@ -314,7 +323,7 @@ function insumoRowHtml(p){
     '<span class="body">' +
       '<p class="txt">' + flag + esc(p.name) + '</p>' +
       (sub ? '<p class="meta">' + esc(sub) + '</p>' : '') +
-      kindBadgeHtml(p) + ingredientTagHtml(p) +
+      '<span class="tagrow">' + kindBadgeHtml(p) + ingredientTagHtml(p) + '</span>' +
     '</span>' +
     '<span class="stock-badge' + (Number(p.qty) > 0 ? ' has' : '') + '">' +
       fmtStockQty(p.qty) + ' un' +

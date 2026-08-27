@@ -153,10 +153,17 @@ function clienteOf(id) { return state.clientes.find(c => c.id === id); }
 
   // --- WhatsApp compose: a Brazilian 11-digit local number gets 55 prepended ---
   await page.waitForSelector('#wa-text', { timeout: 6000 });
-  check('send link starts disabled with no message typed',
-    (await page.getAttribute('#wa-send', 'class') || '').includes('disabled'));
+  // With no message typed the link is NOT disabled — it opens the contact
+  // directly (the user's own call, commit d2df750); typing a message
+  // switches it to the send-with-text form.
+  check('with no message the link opens the contact directly',
+    (await page.getAttribute('#wa-send', 'href') || '') === 'https://wa.me/5511994452426');
+  check('and says so', (await page.textContent('#wa-send')).includes('Abrir contato'));
   await page.fill('#wa-text', 'Olá Maria, seu bolo está pronto!');
-  await page.waitForFunction(() => !document.getElementById('wa-send').classList.contains('disabled'));
+  await page.waitForFunction(() =>
+    /\?text=/.test(document.getElementById('wa-send').getAttribute('href') || ''));
+  check('typing a message switches the label to sending',
+    (await page.textContent('#wa-send')).includes('Enviar'));
   const waHref = await page.getAttribute('#wa-send', 'href');
   check('wa.me href carries the 55-prefixed number, got: ' + waHref,
     waHref.startsWith('https://wa.me/5511994452426?text='));
@@ -176,8 +183,6 @@ function clienteOf(id) { return state.clientes.find(c => c.id === id); }
   await page.waitForSelector('.wa-hint', { timeout: 6000 });
   check('no phone means no WhatsApp compose box', (await page.$('#wa-text')) === null);
   check('a hint explains why', (await page.textContent('#root')).includes('Adicione um telefone'));
-  check('the history note is always shown',
-    (await page.textContent('#root')).includes('Histórico de mensagens'));
 
   // Put the phone back (already-prefixed number should NOT be double-prefixed).
   await page.click('#edit-cliente');

@@ -36,7 +36,11 @@
     flex:1 0 auto;max-width:640px;margin:0 auto;width:100%;
     padding:max(16px,env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
   }
-  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 20px}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 8px}
+  .group-head{margin:22px 0 10px}
+  .group-head:first-of-type{margin-top:14px}
+  .group-head h2{font-size:15px;font-weight:700;margin:0;color:var(--text)}
+  .group-head p{font-size:12.5px;color:var(--muted);line-height:1.4;margin:3px 0 0}
   .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
   h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
   .sub{font-size:13px;color:var(--muted);margin:2px 0 24px}
@@ -76,38 +80,60 @@ const PAGE_LOGIN = {
 
 const CURRENT_PAGE = "home";
 
-// One tile per module, in the same order as the hamburger menu — the
-// dashboard and the in-page menu are two ways to reach the same list, not
-// competing navigations. `home` itself is excluded: this page IS home.
-const TILES = [
-  { href: "hoje.html", emoji: "☀️", label: "Hoje", desc: "Resumo da manhã" },
-  { href: "tarefas.html", emoji: "✓", label: "Tarefas", desc: "Ações pendentes" },
-  { href: "compras.html", emoji: "🛒", label: "Compras", desc: "Listas de compras" },
-  { href: "estoque.html", emoji: "📦", label: "Estoque", desc: "O que tem no armário" },
-  { href: "insumos.html", emoji: "🥖", label: "Insumos", desc: "Catálogo de códigos" },
-  { href: "receitas.html", emoji: "📖", label: "Receitas", desc: "Fichas técnicas e custos" },
-  { href: "produtos.html", emoji: "🏷️", label: "Produtos", desc: "Itens à venda e preços" },
-  { href: "fornecedores.html", emoji: "🚚", label: "Fornecedores", desc: "Quem fornece o quê" },
-  { href: "clientes.html", emoji: "👤", label: "Clientes", desc: "Gerenciamento de clientes" },
-  { href: "eventos.html", emoji: "🥂", label: "Eventos", desc: "Vendas e pedidos" },
-  { href: "financeiro.html", emoji: "💰", label: "Financeiro", desc: "Custos e receitas" },
-];
+// The dashboard shows the same destinations as the hamburger menu, in the
+// same order and under the same three group headings (MENU_ITEMS/
+// MENU_GROUPS in shared-menu.js are the single source for both) — they are
+// two ways to reach one list, not competing navigations. `home` is
+// excluded: this page IS home. Only the one-line description is dashboard-
+// specific, so that is all this table holds.
+const TILE_DESC = {
+  hoje: "Resumo da manhã",
+  tarefas: "Ações pendentes",
+  compras: "Listas de compras",
+  estoque: "O que tem no armário",
+  insumos: "Catálogo de códigos de barras",
+  receitas: "Fichas técnicas e custos",
+  produtos: "Itens à venda e preços",
+  eventos: "Encomendas e vendas",
+  clientes: "Quem compra",
+  fornecedores: "Quem fornece",
+  financeiro: "Custos e receitas",
+};
+
+// One short line per group saying what the group is FOR. The production
+// chain in particular only makes sense read in order, and nothing on this
+// page said so before.
+const GROUP_HINT = {
+  dia: "O que precisa de atenção hoje.",
+  producao: "Insumos viram receitas, receitas viram produtos com preço.",
+  negocio: "O que sai daqui: encomendas, contatos e dinheiro.",
+};
 
 function render(){
+  let lastGroup = null;
+  let body = "";
+  MENU_ITEMS.forEach(item => {
+    if(item.page === "home") return;
+    if(item.group !== lastGroup){
+      if(lastGroup !== null) body += '</div>';
+      body += '<div class="group-head"><h2>' + esc(MENU_GROUPS[item.group]) + '</h2>' +
+        (GROUP_HINT[item.group] ? '<p>' + esc(GROUP_HINT[item.group]) + '</p>' : '') +
+      '</div><div class="tiles">';
+      lastGroup = item.group;
+    }
+    body += '<a class="tile" href="' + item.href + '">' +
+      '<span class="emoji">' + item.emoji + '</span>' +
+      '<span class="label">' + esc(item.label) + '</span>' +
+      '<p class="desc">' + esc(TILE_DESC[item.page] || "") + '</p>' +
+    '</a>';
+  });
+  if(lastGroup !== null) body += '</div>';
+
   root.innerHTML =
     '<header><div class="hleft">' +
       '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
       '<h1>Início</h1>' +
-    '</div></header>' +
-    '<div class="tiles">' +
-      TILES.map(t =>
-        '<a class="tile" href="' + t.href + '">' +
-          '<span class="emoji">' + t.emoji + '</span>' +
-          '<span class="label">' + esc(t.label) + '</span>' +
-          '<p class="desc">' + esc(t.desc) + '</p>' +
-        '</a>'
-      ).join("") +
-    '</div>';
+    '</div></header>' + body;
   wireMenuButton();
 }
 
