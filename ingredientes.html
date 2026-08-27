@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ingredientes">
+<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<title>Ingredientes</title>
+<!--
+  Data-free shell for the Ingredientes module — the layer BETWEEN a barcode
+  and a recipe. An insumo answers "which SKU is this code"; an ingredient
+  answers "what is it", which is the question a Receita asks. Three brands
+  of leite condensado are three insumos and ONE ingredient.
+
+  This page exists because that concept had no home. `ingredient_rename`
+  and `ingredient_delete` have been in checklist-api since 2026-08-13 and
+  NOTHING in the front end ever called them — an ingredient created by a
+  typo in the insumo picker was permanent, with no screen anywhere that
+  even listed what existed. Reported by the user as "how can I delete an
+  ingrediente. Example, leite condensado."
+
+  Deliberately NO create button, and that is the design rather than a gap:
+  an ingredient exists because some insumo IS it. One minted here with
+  nothing linked would have no purchase history, so every recipe using it
+  would price at "sem custo" — the app would be inviting you to build the
+  broken state it otherwise works hard to report. Creation stays where the
+  knowledge is, in the Insumos picker; this page says so and links there.
+
+  Reads only actions that already exist: `ingredients` for the list, and
+  `insumos` (which embeds each insumo's ingredient) to resolve what is
+  linked and what is in the cupboard. No new backend work, so it works the
+  moment it is deployed to Pages.
+
+  Same pattern as every other page here: hosted on public GitHub Pages,
+  holds NO keys and NO data, asks for the shared passphrase, then talks
+  only to the gated Supabase Edge Function (checklist-api).
+-->
+<link rel="stylesheet" href="shared-base.css">
+<link rel="stylesheet" href="shared-menu.css">
+<link rel="stylesheet" href="shared-modal.css">
+<link rel="stylesheet" href="shared-toast.css">
+<link rel="stylesheet" href="shared-inputs.css">
+<link rel="stylesheet" href="shared-catalog.css">
+<style>
+  body{
+    padding:max(16px,env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom));
+  }
+  .wrap{max-width:640px;margin:0 auto}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 8px}
+  .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
+  .subheader{display:flex;align-items:baseline;justify-content:space-between;gap:10px;min-width:0;margin:0 0 16px}
+  h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
+  h3{font-size:14px;font-weight:650;margin:22px 0 8px;color:var(--muted)}
+  .searchrow{display:flex;gap:8px;margin:0 0 14px}
+  .searchrow input[type=search]{
+    flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+    -webkit-appearance:none;
+  }
+  .chiprow{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+  .chip{
+    font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:999px;cursor:pointer;
+    background:rgba(127,127,127,.1);color:var(--muted);border:1px solid transparent;
+    transition:background-color .15s ease,color .15s ease;
+  }
+  .chip.active{background:var(--accent);color:var(--accent-text)}
+  .row{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background-color .15s ease}
+  .row:hover{background:rgba(127,127,127,.06)}
+  .row:last-child{border-bottom:none}
+  .row .body{flex:1;min-width:0}
+  .row .nm{font-size:15px;font-weight:600;margin:0;word-wrap:break-word}
+  .row .meta{font-size:12.5px;color:var(--muted);margin:3px 0 0}
+  /* Same two pills, same flex row and one type scale as insumos.html — the
+     baseline-aligned inline-block version drifted ~6px apart because the
+     kind badge carries an emoji. */
+  .tagrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0 0;min-width:0}
+  .kind-badge{
+    display:inline-flex;align-items:center;font-size:11.5px;line-height:1.45;
+    padding:3px 9px;border-radius:999px;margin:0;flex:none;white-space:nowrap;
+  }
+  .kind-badge.ing{background:rgba(180,83,9,.12);color:var(--warn)}
+  .kind-badge.emb{background:rgba(127,127,127,.12);color:var(--muted)}
+  /* An ingredient nothing points at yet: harmless, but it is exactly what a
+     typo in the picker leaves behind, so it is worth being able to spot
+     down the list. Muted, not alarming — same treatment as insumos.html's
+     "sem ingrediente". */
+  .kind-badge.orphan{background:rgba(180,83,9,.12);color:var(--warn)}
+  .stock-badge{
+    flex:none;font-size:12px;font-weight:650;padding:5px 9px;border-radius:999px;
+    background:rgba(127,127,127,.12);color:var(--muted);white-space:nowrap;
+  }
+  .stock-badge.has{background:rgba(37,99,235,.14);color:var(--accent)}
+  /* ---- detail ---- */
+  .ing-title{font-size:16px;font-weight:650;margin:0;text-align:right;word-wrap:break-word;cursor:pointer}
+  .ing-title:hover{opacity:.75}
+  .detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 18px}
+  .infofield{
+    display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+    padding:10px 0;border-top:1px solid var(--border);
+  }
+  .infofield .lbl{font-size:12px;color:var(--muted);margin:0;flex:none}
+  .infofield .val{font-size:14px;text-align:right;word-break:break-word}
+  .infofield .val.empty{color:var(--muted);font-style:italic}
+  /* The payoff of the whole two-level model, stated in one card: how much
+     of this THING is in the cupboard, summed across every brand of it. */
+  .have-card{padding:16px;text-align:center}
+  .have-card .big{font-size:24px;font-weight:700;margin:0}
+  .have-card .sub{font-size:13px;color:var(--muted);margin:4px 0 0}
+  .have-card .big.none{color:var(--muted);font-weight:650;font-size:18px}
+  .ins-row{
+    display:flex;align-items:center;gap:10px;padding:12px 14px;
+    border-bottom:1px solid var(--border);cursor:pointer;transition:background-color .15s ease;
+  }
+  .ins-row:hover{background:rgba(127,127,127,.06)}
+  .ins-row:last-child{border-bottom:none}
+  .ins-row .body{flex:1;min-width:0}
+  .ins-row .body .txt{font-size:14.5px;margin:0;word-wrap:break-word}
+  .ins-row .body .meta{font-size:12.5px;color:var(--muted);margin:3px 0 0}
+  .note-card{padding:12px 14px;background:rgba(127,127,127,.08);border:1px solid var(--border);border-radius:12px;margin-top:10px}
+  .note-card p{font-size:13px;color:var(--muted);line-height:1.45;margin:0}
+  /* `.link` is a display:inline-block button style with its own padding,
+     which shows up as stray gaps when one sits mid-sentence rather than on
+     its own. Inline prose links opt back into inline flow. */
+  .note-card .link,.msg .link{display:inline;padding:0;font-size:inherit;color:var(--accent)}
+  .note-card .link:hover,.msg .link:hover{color:var(--accent)}
+</style>
+</head>
+<body>
+<div id="root" class="wrap"><p class="msg">Carregando…</p></div>
+
+<script>
+const root = document.getElementById("root");
+let ingredientes = [];
+let insumos = [];
+let searchTerm = "";
+let kindFilter = "";
+
+const PAGE_LOGIN = {
+  title: "Ingredientes",
+  subtitle: "Digite a senha para acessar.",
+  onSuccess: () => loadIngredientes(),
+};
+</script>
+<script src="shared-api.js"></script>
+<script src="shared-menu.js"></script>
+<script src="shared-ui.js"></script>
+<script src="shared-format.js"></script>
+<script src="shared-catalog.js"></script>
+<script>
+
+const CURRENT_PAGE = "ingredientes";
+
+function navHeader(title, backAction){
+  const topRow = '<header><div class="hleft">' +
+    '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
+    '<h1 style="flex:1">' + (backAction ? 'Ingredientes' : esc(title)) + '</h1>' +
+    '</div></header>';
+  if(!backAction) return topRow;
+  return topRow + '<div class="subheader">' +
+    '<button class="link" id="back">← Ingredientes</button>' +
+    (title ? '<h2 class="ing-title" id="ing-name" title="Renomear">' + esc(title) + '</h2>' : '') +
+  '</div>';
+}
+function wireNav(backAction){
+  wireMenuButton();
+  if(backAction) document.getElementById("back").addEventListener("click", backAction);
+}
+
+// Every insumo pointing at this ingredient. The `ingredients` action only
+// carries a COUNT, so the list itself is resolved from the catalogue the
+// page already loaded — one fetch, no per-ingredient round trip.
+function insumosFor(id){
+  return insumos.filter(p => p.ingredient && p.ingredient.id === id);
+}
+
+// "Tenho leite condensado?" — the question the two-level model exists to
+// answer, and the one thing neither Insumos nor Estoque can show, because
+// both are organised by barcode. Packages are summed across brands
+// unconditionally; the NET total only when every linked insumo agrees on a
+// unit AND actually has a size recorded, since 3 × unknown is not a number
+// and adding grams to millilitres is not one either.
+function haveFor(id){
+  const linked = insumosFor(id);
+  let packages = 0;
+  let net = 0;
+  let unit = null;
+  let netKnown = linked.length > 0;
+  linked.forEach(p => {
+    packages += Number(p.qty) || 0;
+    if(p.net_qty == null || !p.net_unit){ netKnown = false; return; }
+    if(unit === null) unit = p.net_unit;
+    else if(unit !== p.net_unit) netKnown = false;
+    net += (Number(p.qty) || 0) * Number(p.net_qty);
+  });
+  return { linked, packages, net: netKnown ? net : null, unit: netKnown ? unit : null };
+}
+
+function kindBadgeHtml(i){
+  return i.kind === "embalagem"
+    ? '<span class="kind-badge emb">📦 embalagem</span>'
+    : '<span class="kind-badge ing">🧂 ingrediente</span>';
+}
+
+// ---- list screen ----
+
+async function loadIngredientes(){
+  root.innerHTML = '<p class="msg">Carregando…</p>';
+  if(!getPass()){ showLogin(); return; }
+  try{
+    // Both in one round trip's worth of wall time: the catalogue is what
+    // turns a bare count into "3 insumos · 1.185 g no total".
+    const [ingRes, insRes] = await Promise.all([api("ingredients"), api("insumos")]);
+    ingredientes = ingRes.ingredients || [];
+    insumos = insRes.insumos || [];
+    const wanted = new URLSearchParams(location.search).get("id");
+    if(wanted){
+      history.replaceState(null, "", location.pathname);
+      openIngrediente(wanted);
+      return;
+    }
+    renderList();
+  }catch(e){ handleAuthError(e, loadIngredientes); }
+}
+
+// The ingredient's own name, plus the names of the insumos under it — so
+// typing a brand finds the ingredient it belongs to, which is how someone
+// holding a box actually looks for this.
+function matchesFilters(i, term, kind){
+  if(kind && (i.kind || "ingrediente") !== kind) return false;
+  if(!term) return true;
+  const t = term.toLowerCase();
+  if(String(i.name).toLowerCase().indexOf(t) >= 0) return true;
+  return insumosFor(i.id).some(p =>
+    String(p.name || "").toLowerCase().indexOf(t) >= 0 ||
+    String(p.brand || "").toLowerCase().indexOf(t) >= 0);
+}
+
+function ingredienteRowHtml(i){
+  const have = haveFor(i.id);
+  const count = have.linked.length;
+  const bits = [count + (count === 1 ? " insumo" : " insumos")];
+  if(i.base_unit) bits.push("medido em " + i.base_unit);
+  return '<div class="row" data-id="' + esc(i.id) + '">' +
+    '<span class="body">' +
+      '<p class="nm">' + esc(i.name) + '</p>' +
+      '<p class="meta">' + esc(bits.join(" · ")) + '</p>' +
+      '<span class="tagrow">' + kindBadgeHtml(i) +
+        (count === 0 ? '<span class="kind-badge orphan">⚠️ sem insumo</span>' : '') +
+      '</span>' +
+    '</span>' +
+    '<span class="stock-badge' + (have.packages > 0 ? ' has' : '') + '">' +
+      fmtStockQty(have.packages) + ' un' +
+    '</span>' +
+  '</div>';
+}
+
+function renderList(){
+  const shown = ingredientes.filter(i => matchesFilters(i, searchTerm, kindFilter));
+  const rowsHtml = ingredientes.length === 0
+    ? '<div class="card"><p class="msg">Nenhum ingrediente ainda.<br>' +
+      'Eles nascem em Insumos, ao dizer o que um código de barras É.</p></div>'
+    : (shown.length === 0
+        ? '<p class="msg" id="no-match">Nenhum ingrediente encontrado.</p>'
+        : '<div class="card" id="ing-card">' + shown.map(ingredienteRowHtml).join("") + '</div>');
+
+  root.innerHTML = navHeader("Ingredientes", null) +
+    '<div class="searchrow">' +
+      '<input type="search" id="search" placeholder="Buscar por ingrediente ou marca" ' +
+        'value="' + esc(searchTerm) + '">' +
+    '</div>' +
+    '<div class="chiprow">' +
+      '<span class="chip' + (kindFilter === "" ? " active" : "") + '" data-kind="">Todos</span>' +
+      '<span class="chip' + (kindFilter === "ingrediente" ? " active" : "") + '" data-kind="ingrediente">🧂 Ingredientes</span>' +
+      '<span class="chip' + (kindFilter === "embalagem" ? " active" : "") + '" data-kind="embalagem">📦 Embalagens</span>' +
+    '</div>' +
+    rowsHtml +
+    // There is no "+ Novo ingrediente" and that is deliberate — see the
+    // file comment. Saying where they come from beats a button that would
+    // mint a costless one.
+    '<div class="note-card"><p>Um ingrediente é o que um insumo <strong>É</strong>: ' +
+      'marcas diferentes da mesma coisa compartilham um. Eles são criados em ' +
+      '<a class="link" href="insumos.html">Insumos</a>, ao vincular um código de barras — ' +
+      'aqui você renomeia, remove e vê o que está ligado a cada um.</p></div>';
+
+  wireNav(null);
+  const search = document.getElementById("search");
+  search.addEventListener("input", () => { searchTerm = search.value.trim(); redrawList(); });
+  root.querySelectorAll(".chip[data-kind]").forEach(chip => {
+    chip.addEventListener("click", () => { kindFilter = chip.dataset.kind; renderList(); });
+  });
+  wireListRows();
+}
+
+function redrawList(){
+  const shown = ingredientes.filter(i => matchesFilters(i, searchTerm, kindFilter));
+  const card = document.getElementById("ing-card") || document.getElementById("no-match");
+  const html = shown.length === 0
+    ? '<p class="msg" id="no-match">Nenhum ingrediente encontrado.</p>'
+    : '<div class="card" id="ing-card">' + shown.map(ingredienteRowHtml).join("") + '</div>';
+  if(card){ card.outerHTML = html; wireListRows(); }
+}
+
+function wireListRows(){
+  root.querySelectorAll(".row[data-id]").forEach(row => {
+    row.addEventListener("click", () => openIngrediente(row.dataset.id));
+  });
+}
+
+// ---- detail screen ----
+
+function openIngrediente(id){
+  const i = ingredientes.find(x => x.id === id);
+  if(!i){
+    root.innerHTML = navHeader("", loadIngredientes) + '<p class="msg">Ingrediente não encontrado.</p>';
+    wireNav(loadIngredientes);
+    return;
+  }
+  renderIngrediente(i);
+}
+
+function insumoRowHtml(p){
+  const bits = [];
+  if(p.brand) bits.push(tidyShouted(p.brand));
+  const size = fmtNetQty(p.net_qty, p.net_unit);
+  if(size) bits.push(size);
+  if(p.last_price != null) bits.push(fmtMoney(p.last_price));
+  return '<div class="ins-row" data-gtin="' + esc(p.gtin) + '">' +
+    thumbHtml(p) +
+    '<span class="body">' +
+      '<p class="txt">' + esc(p.name) + '</p>' +
+      (bits.length ? '<p class="meta">' + esc(bits.join(" · ")) + '</p>' : '') +
+    '</span>' +
+    '<span class="stock-badge' + (Number(p.qty) > 0 ? ' has' : '') + '">' +
+      fmtStockQty(p.qty) + ' un' +
+    '</span>' +
+  '</div>';
+}
+
+function renderIngrediente(i){
+  const have = haveFor(i.id);
+  const count = have.linked.length;
+
+  const haveHtml = '<div class="card have-card">' +
+    (count === 0
+      ? '<p class="big none">Nenhum insumo vinculado</p>' +
+        '<p class="sub">Nada aponta para este ingrediente ainda, então ele não ' +
+          'tem custo nem estoque.</p>'
+      : '<p class="big">' + fmtStockQty(have.packages) + ' ' +
+          (have.packages === 1 ? 'pacote' : 'pacotes') + '</p>' +
+        '<p class="sub">' +
+          (have.net != null && have.net > 0
+            ? esc(fmtNetQty(have.net, have.unit)) + ' no total · '
+            : '') +
+          'somando ' + count + (count === 1 ? ' insumo' : ' insumos') + '</p>') +
+  '</div>';
+
+  const insumosHtml = count === 0
+    ? '<div class="card"><p class="msg small">Nenhum insumo aponta para este ingrediente.<br>' +
+      'Abra um insumo em <a class="link" href="insumos.html">Insumos</a> e defina o ' +
+      'ingrediente dele.</p></div>'
+    : '<div class="card" id="ins-card">' + have.linked.map(insumoRowHtml).join("") + '</div>';
+
+  root.innerHTML = navHeader(i.name, loadIngredientes) +
+    '<div class="card pad">' +
+      '<div class="tagrow" style="margin:0 0 4px">' + kindBadgeHtml(i) + '</div>' +
+      '<div class="infofield">' +
+        '<span class="lbl">Medido em</span>' +
+        '<span class="val' + (i.base_unit ? '' : ' empty') + '">' +
+          esc(i.base_unit || "definido pelo primeiro insumo vinculado") + '</span>' +
+      '</div>' +
+      '<div class="infofield">' +
+        '<span class="lbl">Insumos vinculados</span>' +
+        '<span class="val">' + count + '</span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="detail-actions">' +
+      '<button class="primary small alt" id="rename-ing">✎ Renomear</button>' +
+      '<button class="primary small alt danger" id="del-ing">🗑 Remover</button>' +
+    '</div>' +
+    haveHtml +
+    '<h3>Insumos</h3>' + insumosHtml;
+
+  wireNav(loadIngredientes);
+
+  document.getElementById("ing-name").addEventListener("click", () => renameIngrediente(i));
+  document.getElementById("rename-ing").addEventListener("click", () => renameIngrediente(i));
+  document.getElementById("del-ing").addEventListener("click", () => deleteIngrediente(i));
+
+  root.querySelectorAll(".ins-row[data-gtin]").forEach(row => {
+    row.addEventListener("click", () => {
+      location.href = "insumos.html?gtin=" + encodeURIComponent(row.dataset.gtin);
+    });
+  });
+}
+
+// Renaming is safe by construction — insumos, receita lines and packaging
+// lines all point at the id, so every one of them follows the new name.
+async function renameIngrediente(i){
+  const val = await promptModal("Renomear ingrediente", "Nome", i.name);
+  if(val === null) return;
+  const name = val.trim();
+  if(!name){ listToast("O nome não pode ficar vazio", true); return; }
+  if(name === i.name) return;
+  try{
+    const res = await api("ingredient_rename", { id: i.id, name });
+    i.name = res.ingredient ? res.ingredient.name : name;
+    // The catalogue carries its own copy of the embedded name, so refresh
+    // it too rather than re-fetching the whole list for one string.
+    insumos.forEach(p => { if(p.ingredient && p.ingredient.id === i.id) p.ingredient.name = i.name; });
+    listToast("Ingrediente renomeado");
+    renderIngrediente(i);
+  }catch(e){
+    if(e.unauthorized) return handleAuthError(e, loadIngredientes);
+    // The unique index on lower(name) is what answers "that one already
+    // exists" — merging two ingredients is a different act and isn't this.
+    listToast(e.badRequest ? "Já existe um ingrediente com esse nome" : "Não foi possível renomear", true);
+  }
+}
+
+// Two different outcomes, and the difference matters: deleting UNLINKS the
+// insumos under it (their barcode, price history and pantry balance are
+// untouched — being categorised is not part of what an insumo IS), but a
+// receita line or a packaging line referencing it is a live formula, so the
+// API refuses outright rather than offering a force.
+async function deleteIngrediente(i){
+  const count = insumosFor(i.id).length;
+  const warning = count === 0
+    ? 'Remover o ingrediente "' + i.name + '"?'
+    : 'Remover o ingrediente "' + i.name + '"? ' + count +
+      (count === 1 ? ' insumo será desvinculado' : ' insumos serão desvinculados') +
+      ' — nenhum insumo é apagado, eles só ficam sem ingrediente.';
+  if(!(await confirmModal(warning, "Remover"))) return;
+
+  try{
+    const res = await api("ingredient_delete", { id: i.id });
+    const n = res.insumos_unlinked || 0;
+    listToast(n > 0
+      ? "Ingrediente removido · " + n + (n === 1 ? " insumo desvinculado" : " insumos desvinculados")
+      : "Ingrediente removido");
+    loadIngredientes();
+  }catch(e){
+    if(e.unauthorized) return handleAuthError(e, loadIngredientes);
+    if(e.badRequest && e.body && (e.body.receita_itens || e.body.produto_embalagens)){
+      const parts = [];
+      if(e.body.receita_itens){
+        parts.push(e.body.receita_itens +
+          (e.body.receita_itens === 1 ? " linha de receita" : " linhas de receita"));
+      }
+      if(e.body.produto_embalagens){
+        parts.push(e.body.produto_embalagens +
+          (e.body.produto_embalagens === 1 ? " linha de embalagem" : " linhas de embalagem"));
+      }
+      await confirmModal(
+        '"' + i.name + '" está em uso por ' + parts.join(" e ") + '. ' +
+        'Remova essas linhas primeiro — apagar o ingrediente agora deixaria ' +
+        'a receita sem saber o que custear.',
+        "Entendi",
+      );
+      return;
+    }
+    listToast("Não foi possível remover", true);
+  }
+}
+
+loadIngredientes();
+</script>
+</body>
+</html>

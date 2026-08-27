@@ -26,6 +26,14 @@ async function api(action, extra){
     // connection failure.
     const e = new Error("http " + r.status);
     e.badRequest = r.status === 400;
+    // Several refusals carry STRUCTURED detail, not just a message —
+    // ingredient_delete reports how many receita/embalagem lines still
+    // reference it, receita_delete which recipes and produtos use it. That
+    // detail was being thrown away here, so every page could only say
+    // "não foi possível". Parsed best-effort: a body that isn't JSON (a
+    // proxy error page, say) must not turn a clean 400 into a thrown
+    // SyntaxError, so `e.body` is simply absent then.
+    try{ e.body = await r.json(); }catch(_){ /* no structured detail */ }
     throw e;
   }
   return await r.json();

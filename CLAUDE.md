@@ -2,6 +2,74 @@
 
 Context file for Claude Code / Claude sessions working on this repo.
 
+## Status (2026-08-27, later): new `ingredientes.html` — the ingredient concept finally has a screen
+
+Asked by the user: "how can I delete a ingrediente. Example, leite
+condensado. It feels like we need a ingredientes.html page." They were
+right, and it was worse than a missing page: **`ingredient_rename` and
+`ingredient_delete` have been in `checklist-api` since 2026-08-13 and
+NOTHING in this front end ever called either one.** An ingredient created
+by a typo in the insumo picker ("Leit Condesado") was permanent, and no
+screen anywhere even listed what existed. The only ingredient UI was the
+picker, which can create and link but never rename or remove.
+
+- **The page reads only actions that already exist** — `ingredients` for
+  the list and `insumos` (whose rows embed their ingredient) to resolve
+  what is linked and what is in the cupboard. **No backend change, so it
+  works the moment Pages serves it**, with no dependency on the Edge
+  Function redeploy the backend repo is still waiting on.
+- **The detail view is the payoff of the whole two-level model**, and the
+  one thing neither Insumos nor Estoque can show, because both are
+  organised by barcode: **"5 pacotes · 1,975 kg no total · somando 2
+  insumos"** — how much of the THING is in the house, summed across every
+  brand of it. That is literally the question ("tenho leite condensado?")
+  the ingredient layer was built to answer, and until now nothing asked it.
+  - The net total is shown **only when every linked insumo agrees on a unit
+    and actually has a size recorded** — 3 × unknown is not a number, and
+    adding grams to millilitres is not one either (the g-vs-ml problem the
+    backend repo's 2026-08-11 audit documented). Packages always sum;
+    the net line simply disappears when it would be a lie.
+- **Search matches the BRAND, not just the ingredient's own name**, since
+  someone holding a box looks for what is written on it.
+- **An ingredient nothing points at is flagged "⚠️ sem insumo"** — that is
+  exactly what a picker typo leaves behind, and being able to spot it down
+  the list is what makes a cleanup pass possible at all.
+- **Delete distinguishes its two outcomes, because they are genuinely
+  different.** Deleting UNLINKS the insumos under it (their barcode, price
+  history and pantry balance are untouched — being categorised is not part
+  of what an insumo IS), and the confirm says how many will be unlinked
+  before you commit. But a `receita_itens` or `produto_embalagens` row is a
+  **live formula**, so the API refuses outright with no force option; the
+  page turns that 400 into a dialog naming how many lines still reference
+  it.
+- **There is deliberately NO "+ Novo ingrediente", and that is the design,
+  not a gap.** An ingredient exists because some insumo IS it. One minted
+  here with nothing linked would have no purchase history, so every recipe
+  using it would price at "sem custo" — the app would be inviting you to
+  build the broken state it otherwise works hard to report. Creation stays
+  in the Insumos picker, where the knowledge is; the page says so and links
+  there rather than leaving a silent absence.
+- `insumos.html`'s "Ingrediente" line now **links through** to it, and the
+  page sits in the menu/dashboard's **Produção** group between Insumos and
+  Receitas — which is the pipeline order (barcode → what it is → recipe →
+  product).
+- `test/ingredientes.test.js` covers the list, brand search, the kind
+  filter, the orphan marker, the rollup math, the duplicate-name rename
+  refusal, the blocked delete and the unlink count. Its fake keeps insumos
+  pointing at ingredients by id, so the rollup and the unlink count are
+  computed from that graph rather than canned.
+
+**Shared change riding along: `api()` now exposes the parsed error body as
+`e.body`.** Several refusals carry STRUCTURED detail that every page was
+throwing away — `ingredient_delete` reports how many receita/embalagem
+lines block it, `receita_delete` NAMES the recipes and produtos using it.
+Pages could previously only say "não foi possível". Parsed best-effort, so
+a non-JSON body (a proxy error page) leaves `e.body` absent rather than
+turning a clean 400 into a thrown `SyntaxError`. `receitas.html`'s delete
+refusal now uses it too, listing what blocks it instead of a generic toast
+— and its test assertion, which used to check only that `#root` had *some*
+text (an assertion nothing could fail), now checks the blocker is named.
+
 ## Status (2026-08-27): UI/usability pass — the three reported bugs, a reordered Receitas detail, grouped navigation, and the FULL test suite green for the first time
 
 Reported by the user against the live pages: "the recipe page [is]
@@ -347,6 +415,11 @@ build step, no framework:
 - `insumos.html` — the insumo catalogue: what a barcode means, its price
   history as a graph, the editor that corrects its metadata, and removal
   from the catalogue.
+- `ingredientes.html` — what an insumo IS, as opposed to which SKU it is:
+  the list of ingredients, which insumos are linked to each, the combined
+  pantry total across every brand of the same thing, and rename/remove.
+  Deliberately has no create button — ingredients are born in the Insumos
+  picker, where the knowledge is.
 - `clientes.html` — the contact record behind an evento: full-field create/
   edit/delete, the eventos + pagamentos rollup for that cliente, and a
   `wa.me`-based "Enviar WhatsApp" composer.
@@ -447,7 +520,9 @@ bundler, no build step, still fully data-free. This replaced the old
 what that changes and what stays the same).
 
 - `shared-api.js` — `API`, `PASS_KEY`, `getPass()`, `api()`, `showLogin()`,
-  `handleAuthError()`. Every page declares `const PAGE_LOGIN = {title,
+  `handleAuthError()`. A thrown `api()` error carries `unauthorized`,
+  `badRequest`, and `body` (the parsed error JSON, when there is one) —
+  `body` is how a refusal's structured detail reaches the page. Every page declares `const PAGE_LOGIN = {title,
   subtitle, onSuccess, beforeShow?}` *before* this script tag loads, so
   `showLogin()` can render the right copy without every call site passing
   it in.
@@ -482,7 +557,7 @@ per-page differences), each page's own row rendering and search-matching
 (different data shapes), and — unchanged since before this refactor — the
 barcode scanner, which lives only in `compras.html`.
 
-Ten headless Chromium tests, each next to the pages it guards. All serve
+Eleven headless Chromium tests, each next to the pages it guards. All serve
 the repo root on an ephemeral port and answer `checklist-api` from an
 in-memory fake, so none touches Supabase nor holds a passphrase.
 **There is no CI — run them by hand before pushing.**
@@ -531,6 +606,11 @@ in-memory fake, so none touches Supabase nor holds a passphrase.
   and its reverse retail calculator, and a fornecedor's purchase history.
   Their fakes reimplement `receitaCostFor`/`produtoCostFor` line for line,
   same "don't fake away the interesting half" rule as the others.
+- `test/ingredientes.test.js` — the list, search across brand names, the
+  kind filter, the "sem insumo" orphan marker, the combined pantry rollup
+  across brands, the duplicate-name rename refusal, the blocked delete
+  while a receita line still references the ingredient, and the unlink
+  count on a successful one.
 
 ## Conventions
 
@@ -544,7 +624,7 @@ in-memory fake, so none touches Supabase nor holds a passphrase.
   through a PR meant the user had to merge before seeing it and then do
   branch surgery whenever it needed another pass. Push the work, let
   them look at the live page, iterate with another commit.
-  - Run ALL TEN test files BEFORE pushing, every time — `for t in
+  - Run ALL ELEVEN test files BEFORE pushing, every time — `for t in
     test/*.test.js; do node "$t"; done` (with
     `NODE_PATH=/opt/node22/lib/node_modules` if playwright is only
     installed globally). They all pass as of 2026-08-27; a single FAIL line

@@ -26,6 +26,7 @@ const MENU_ITEMS = [
   { page: "compras", href: "compras.html", emoji: "🛒", label: "Compras", group: "dia" },
   { page: "estoque", href: "estoque.html", emoji: "📦", label: "Estoque", group: "producao" },
   { page: "insumos", href: "insumos.html", emoji: "🥖", label: "Insumos", group: "producao" },
+  { page: "ingredientes", href: "ingredientes.html", emoji: "🧂", label: "Ingredientes", group: "producao" },
   { page: "receitas", href: "receitas.html", emoji: "📖", label: "Receitas", group: "producao" },
   { page: "produtos", href: "produtos.html", emoji: "🏷️", label: "Produtos", group: "producao" },
   { page: "eventos", href: "eventos.html", emoji: "🥂", label: "Eventos", group: "negocio" },

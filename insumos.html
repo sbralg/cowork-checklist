@@ -147,6 +147,10 @@
   .ing-line .lbl{font-size:12px;color:var(--muted);margin:0}
   .ing-line .val{font-size:16px;font-weight:650;margin:2px 0 0}
   .ing-line .val.none{font-weight:400;color:var(--muted)}
+  /* Reads as the value it is, not as a nav link — the arrow carries the
+     "there is more behind this" signal. */
+  .ing-line .val .ing-link{font-size:16px;font-weight:650;color:var(--text);padding:0}
+  .ing-line .val .ing-link:hover{color:var(--accent)}
   /* ---- price history ----
      One series, so no legend: the section heading names it. The line wears
      the accent; every number and label stays in text ink, so identity never
@@ -626,8 +630,13 @@ function renderInsumo(data){
       '<div class="ing-line">' +
         '<span>' +
           '<p class="lbl">Ingrediente</p>' +
-          '<p class="val' + (ingredientName(p) ? '' : ' none') + '">' +
-            esc(ingredientName(p) || "não definido") + '</p>' +
+          // Linked through to Ingredientes when one is set: that page is
+          // where the other brands of the same thing, the combined pantry
+          // total, and rename/remove live.
+          (ingredientName(p)
+            ? '<p class="val"><a class="link ing-link" href="ingredientes.html?id=' +
+                esc(p.ingredient.id) + '">' + esc(ingredientName(p)) + ' →</a></p>'
+            : '<p class="val none">não definido</p>') +
         '</span>' +
         '<button class="link" id="set-ing">' +
           (ingredientName(p) ? 'Alterar' : 'Definir') + '</button>' +

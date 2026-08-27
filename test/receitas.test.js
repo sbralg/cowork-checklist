@@ -359,9 +359,17 @@ function computeProdutoCost(id) {
   await page.click('#del-receita');
   await page.waitForSelector('#confirm-ok', { timeout: 6000 });
   await page.click('#confirm-ok');
-  await page.waitForTimeout(400);
+  // The refusal opens its own dialog (the confirm is replaced by it), so
+  // wait for THAT rather than a fixed pause.
+  await page.waitForFunction(
+    () => /est\u00e1 em uso por/.test(document.body.textContent || ''), null, { timeout: 6000 });
   check('the receita still exists — delete was refused', receitaOf(receitaId) !== undefined);
-  check('a toast explains why', (await page.textContent('#root')).length > 0);
+  // Used to assert only that #root had SOME text, which nothing could fail.
+  // The API names what blocks the delete, so the page must too — that name
+  // is the only thing telling you where to go next.
+  check('the refusal NAMES what still uses it',
+    (await page.textContent('.modal-card')).includes('Bolo Decorado'));
+  await page.click('#confirm-ok');
 
   // --- Categoria: no linked Produto yet -> only "Ingrediente" active ---
   await page.goto(PAGE + '?id=' + outerId);

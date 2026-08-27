@@ -641,10 +641,17 @@ function handleMove(body) {
   // brand, so the search assertion below can only pass via the ingredient.
   await page.fill('#ing-q', 'Biscoito');
   await page.click('#ing-list [data-create]');
-  await page.waitForSelector('.ing-line', { timeout: 6000 });
+  // `.ing-line` is present BEFORE the ingredient is set too, so waiting on
+  // it resolves against the stale render — wait for the link that only
+  // exists once one is actually assigned.
+  await page.waitForSelector('.ing-line .ing-link', { timeout: 6000 });
   check('and shows the ingredient once it is set, got: ' +
       await page.textContent('.ing-line .val'),
-    (await page.textContent('.ing-line .val')) === 'Biscoito');
+    (await page.textContent('.ing-line .val')).trim().replace(/\s*→$/, '') === 'Biscoito');
+  // …and links through to Ingredientes, which owns rename/remove and the
+  // combined pantry total across every brand of the same thing.
+  check('the ingredient links through to the Ingredientes page',
+    /^ingredientes\.html\?id=/.test(await page.getAttribute('.ing-line .ing-link', 'href') || ''));
 
   // Searching by ingredient is the payoff: what a thing IS, not what the
   // package happens to be called.
