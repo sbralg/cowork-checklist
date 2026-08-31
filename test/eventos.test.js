@@ -6,7 +6,7 @@
 //   KEEP_SHOTS=1 node test/...           # also prints where screenshots went
 //
 // Same shape as compras.test.js/stock.test.js: serves the repo root over
-// http and answers checklist-api from an in-memory fake, so it never
+// http and answers maga-api from an in-memory fake, so it never
 // touches Supabase and never needs a real passphrase. The fake keeps REAL
 // relational state (clientes/eventos/evento_itens/evento_pagamentos/
 // financeiro_lancamentos) and computes totals/profit/margin and the
@@ -92,7 +92,7 @@ function clienteEmbed(id) {
   const errors = [];
   ctx.on('weberror', e => errors.push('pageerror: ' + e.error().message));
 
-  await ctx.route('**/functions/v1/checklist-api', async route => {
+  await ctx.route('**/functions/v1/maga-api', async route => {
     const body = route.request().postDataJSON();
     let resp;
     if (body.action === 'clientes') {

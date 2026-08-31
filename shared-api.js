@@ -1,4 +1,4 @@
-// shared-api.js — talking to checklist-api, and the passphrase gate in
+// shared-api.js — talking to maga-api, and the passphrase gate in
 // front of it. Zero data, zero keys: API is a public endpoint URL, and the
 // passphrase itself lives only in the user's own localStorage.
 //
@@ -8,7 +8,7 @@
 // showLogin()/handleAuthError() can render the right copy and resume the
 // right loader without every call site needing to pass that in.
 
-const API = "https://opehbckfmfschpvbhxvo.supabase.co/functions/v1/checklist-api";
+const API = "https://opehbckfmfschpvbhxvo.supabase.co/functions/v1/maga-api";
 const PASS_KEY = "checklist_pass";
 
 function getPass(){ return localStorage.getItem(PASS_KEY) || ""; }

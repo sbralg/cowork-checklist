@@ -8,7 +8,7 @@
 //
 // Same shape as shopping.test.js: it serves the repo root over http (which
 // is what GitHub Pages does, and localStorage behaves differently on a
-// file: origin) and answers checklist-api from an in-memory fake, so it
+// file: origin) and answers maga-api from an in-memory fake, so it
 // never touches Supabase and holds no passphrase.
 //
 // The fake keeps a REAL LEDGER rather than a balance number, and enforces
@@ -135,7 +135,7 @@ function insumosResponse() {
   };
 }
 
-// Mirrors checklist-api's stock_move, including the two things that matter:
+// Mirrors maga-api's stock_move, including the two things that matter:
 // the zero floor answering 200 + ok:false (a business outcome, not a
 // transport error), and an inbound movement with no unit_cost falling back
 // to the last price paid.
@@ -181,7 +181,7 @@ function handleMove(body) {
   const page = await ctx.newPage();
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 
-  await page.route('**/functions/v1/checklist-api', async route => {
+  await page.route('**/functions/v1/maga-api', async route => {
     const body = route.request().postDataJSON();
     state.calls.push({ ...body });
     let resp;

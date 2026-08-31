@@ -105,7 +105,7 @@ function wireQtyInput(el){
 
 // The units a package-size field offers, and what each one means in the
 // g/ml/un pair the catalogue stores. Deliberately shorter than the list
-// checklist-api's parseNetQuantity accepts (it also takes mg and cl): those
+// maga-api's parseNetQuantity accepts (it also takes mg and cl): those
 // two never appear on a supermarket package here.
 const PACK_UNITS = [
   { value: "kg", label: "kg", mult: 1000, unit: "g"  },

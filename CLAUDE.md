@@ -1,13 +1,37 @@
-# CLAUDE.md — cowork-checklist
+# CLAUDE.md — maga-web
 
 Context file for Claude Code / Claude sessions working on this repo.
+
+> **Repo not yet renamed on GitHub.** This is step 3 of the `cowork-*` →
+> `maga-*` big-bang (umbrella name **Magá Assistant** — Magá is the wife's
+> confectionery business, the personal-triage half is "the assistant"). The
+> local folder and GitHub repo are still `cowork-checklist` until step 4;
+> `RENAME.md` in the `maga-api` repo (`cowork-personal-daily-summary`) has the
+> full plan. **In the dated `## Status` entries below, `maga-api` /
+> `maga-web` / `maga-infra` were swept in by that rename — at the time those
+> entries were written the names were `checklist-api` / `cowork-checklist` /
+> `cowork-assistant-backend`.**
+
+## Status (2026-08-31): step 3 — front end points at `maga-api`
+
+- **`shared-api.js`**: the `API` const now hits
+  `…/functions/v1/maga-api` (deployed and verified 2026-08-31; `checklist-api`
+  still live in parallel until this ships + `mcp-server` cuts over).
+- All 11 `test/*.test.js` route interceptors updated
+  `**/functions/v1/checklist-api` → `…/maga-api` to match.
+- Repo/function names swept through every page, comment, README and this
+  file. **Kept:** `x-checklist-pass` header + `checklist_pass` localStorage
+  key (wire contract — renaming them touches every page for no gain; the
+  passphrase value the user types is unchanged).
+- `hoje.html`'s report URL and any `sbralg.github.io/…` link now say
+  `maga-web` — these resolve only once the GitHub repo is renamed (step 4).
 
 ## Status (2026-08-27, later): new `ingredientes.html` — the ingredient concept finally has a screen
 
 Asked by the user: "how can I delete a ingrediente. Example, leite
 condensado. It feels like we need a ingredientes.html page." They were
 right, and it was worse than a missing page: **`ingredient_rename` and
-`ingredient_delete` have been in `checklist-api` since 2026-08-13 and
+`ingredient_delete` have been in `maga-api` since 2026-08-13 and
 NOTHING in this front end ever called either one.** An ingredient created
 by a typo in the insumo picker ("Leit Condesado") was permanent, and no
 screen anywhere even listed what existed. The only ingredient UI was the
@@ -77,7 +101,7 @@ picker, which can create and link but never rename or remove.
     before the redeploy the two new actions need. Only a unit/kind change
     calls `ingredient_update`.
   - **The page degrades in words, not generically, when the Edge Function
-    is behind**: `checklist-api` answers an unknown action with a 400
+    is behind**: `maga-api` answers an unknown action with a 400
     `{error:"bad action"}`, which — now that `api()` surfaces the parsed
     body — is told apart from a real validation failure and reported as
     "republish the Edge Function".
@@ -255,7 +279,7 @@ in this sandbox" reflect earlier sandboxes, not this one.
 
 ## Status (2026-08-24): Receitas + Produtos + Fornecedores modules shipped — the (Shopping List >) Insumos → Receita → Produto reshape is now complete end to end
 
-Full plan and reasoning in `sbralg/cowork-personal-daily-summary`'s
+Full plan and reasoning in `sbralg/maga-api`'s
 `ROADMAP.md` and `CLAUDE.md` (the "Receita + Produto + Fornecedor" Status
 entry has the full ported pricing formula) — this entry is the short,
 front-end-focused version.
@@ -342,7 +366,7 @@ front-end-focused version.
   the earlier `index.html`/`shopping.html` renames below), `test/
   vendas.test.js`→`test/eventos.test.js`, the `MENU_ITEMS` entry, the
   dashboard tile, and every cross-link/label on `clientes.html`/
-  `financeiro.html` updated to match. The underlying `checklist-api`
+  `financeiro.html` updated to match. The underlying `maga-api`
   actions/tables were renamed too (`venda_*`→`evento_*`) — see the backend
   repo's `CLAUDE.md` for the full DB migration. **The live Edge Function
   had not been redeployed as of this rename** (the user redeploys it
@@ -380,7 +404,7 @@ front-end-focused version.
   confirmed payments into. Full schema + Edge Function action list are in
   the backend repo's `CLAUDE.md`; see "What this is" below for what each
   page covers.
-- Deployed `checklist-api` v26 and **live-verified** the whole Eventos/
+- Deployed `maga-api` v26 and **live-verified** the whole Eventos/
   Financeiro action set against the real project via the `http`-extension
   trick (see the backend repo's `CLAUDE.md` for the full sequence) before
   building either page against it.
@@ -388,7 +412,7 @@ front-end-focused version.
   behind an evento — full-field create/edit/delete (not just the by-name-
   only inline picker `eventos.html` already had), the eventos + pagamentos
   rollup for that cliente read through the new `cliente_detail` action
-  (`checklist-api` now v27, live-verified the same way as v26) and a
+  (`maga-api` now v27, live-verified the same way as v26) and a
   "Enviar WhatsApp" composer that builds a `wa.me` deep link client-side —
   no backend, because this household's WhatsApp bridge is LAN-only and
   unreachable from the Edge Function (see the backend repo's `CLAUDE.md`
@@ -418,7 +442,7 @@ front-end-focused version.
     `productEditModal`→`insumoEditModal`, `.prod-head`/`.prod-title`→
     `.ins-head`/`.ins-title`, `#edit-product`/`#del-product`→
     `#edit-insumo`/`#del-insumo`), not just the Portuguese UI labels.
-  - The underlying `checklist-api` actions/tables were renamed too
+  - The underlying `maga-api` actions/tables were renamed too
     (`product_*`→`insumo_*` action names, `products`→`insumos` table,
     `product_prices`→`insumo_prices` table) — see the backend repo's
     `CLAUDE.md` for the full DB migration, applied live the same session.
@@ -446,7 +470,7 @@ front-end-focused version.
 ## What this is
 
 The public GitHub Pages front end deployed from this repo's `main` branch,
-served at https://sbralg.github.io/cowork-checklist/. Twelve pages sharing a
+served at https://sbralg.github.io/maga-web/. Twelve pages sharing a
 set of `shared-*.js`/`shared-*.css` files (see "Shared files" below), no
 build step, no framework:
 
@@ -531,10 +555,10 @@ the reasoning is in the other repo's `CLAUDE.md`.
 
 All eight are data-free shells: no Supabase keys, no data baked in. Each
 asks for a shared passphrase (stored in `localStorage`, prompted once per
-device) and talks only to one Supabase Edge Function, `checklist-api`
+device) and talks only to one Supabase Edge Function, `maga-api`
 (deployed in project `opehbckfmfschpvbhxvo`), which holds the
 service-role key and checks the passphrase server-side. See
-`sbralg/cowork-personal-daily-summary`'s `CLAUDE.md` for the Edge
+`sbralg/maga-api`'s `CLAUDE.md` for the Edge
 Function's source, the Supabase schema, the scheduled task that
 populates `tarefas.html`/`hoje.html`'s data every morning, and this whole project's
 full change history — that repo is the source of truth for the backend,
@@ -548,7 +572,7 @@ repo. Edit them directly; there is nothing to sync and no master copy to
 update first.
 
 This is a deliberate reversal, not an accident of history. The pages
-used to be mastered in `sbralg/cowork-personal-daily-summary` under
+used to be mastered in `sbralg/maga-api` under
 `web/` and copied here, and that arrangement failed exactly the way
 duplication does: `shopping.html` was mirrored there on 2026-08-01, this
 file went stale about it, and a change made by following the stale note
@@ -558,8 +582,8 @@ days. **Do not recreate a mirror in the other repo** — that repo is the
 backend (Edge Function, scheduled task, `release/`); this one is the
 front end; no file exists in both.
 
-What still lives in `sbralg/cowork-personal-daily-summary`, and is worth
-reading before changing anything here: the `checklist-api` Edge Function
+What still lives in `sbralg/maga-api`, and is worth
+reading before changing anything here: the `maga-api` Edge Function
 source, the Supabase schema, the scheduled task, and the project's full
 dated change history in its `CLAUDE.md`.
 
@@ -610,7 +634,7 @@ per-page differences), each page's own row rendering and search-matching
 barcode scanner, which lives only in `compras.html`.
 
 Eleven headless Chromium tests, each next to the pages it guards. All serve
-the repo root on an ephemeral port and answer `checklist-api` from an
+the repo root on an ephemeral port and answer `maga-api` from an
 in-memory fake, so none touches Supabase nor holds a passphrase.
 **There is no CI — run them by hand before pushing.**
 
@@ -686,7 +710,7 @@ in-memory fake, so none touches Supabase nor holds a passphrase.
     Any change to a `shared-*.js`/`shared-*.css` file can touch every
     page that loads it, so run the FULL suite (not just the one page you
     edited) whenever a shared file changes.
-  - `sbralg/cowork-personal-daily-summary` is the opposite — it keeps
+  - `sbralg/maga-api` is the opposite — it keeps
     PRs. Nothing there is served straight from `main` to a browser, and
     its `CLAUDE.md` is the project's history, which reads better as
     reviewed changes.

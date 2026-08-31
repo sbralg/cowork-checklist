@@ -5,13 +5,13 @@
 //   node test/shopping.test.js          # exits non-zero on any failure
 //   KEEP_SHOTS=1 node test/...          # also prints where screenshots went
 //
-// It lives in this repo rather than in cowork-personal-daily-summary because
+// It lives in this repo rather than in maga-api because
 // compras.html does too: the page has exactly one copy, and the test that
 // guards it sits next to it.
 //
 // It serves the repo root over http rather than using file://, because that
 // is what GitHub Pages does and localStorage/permissions behave differently
-// on a file: origin. checklist-api is intercepted and answered from an
+// on a file: origin. maga-api is intercepted and answered from an
 // in-memory fake, so the test never touches Supabase and never needs the
 // passphrase.
 //
@@ -211,7 +211,7 @@ function handleScan(body) {
   const page = await ctx.newPage();
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 
-  await page.route('**/functions/v1/checklist-api', async route => {
+  await page.route('**/functions/v1/maga-api', async route => {
     const body = route.request().postDataJSON();
     if (body.action === 'shopping_item_update') state.itemUpdates.push({ ...body });
     let resp;

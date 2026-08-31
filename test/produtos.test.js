@@ -3,7 +3,7 @@
 // an optional Fornecedor attached purely as reference metadata — NOT
 // routed through the ingredient/stock pipeline, since real usage showed
 // fornecedor-sourced items are almost never consumed by a recipe and are
-// bought on demand per event, not stocked; see checklist-api's module
+// bought on demand per event, not stocked; see maga-api's module
 // comment above produtoCostFor). Covers: a manufaturado produto's full
 // pricing breakdown (custo -> atacado -> distribuidor -> varejo), a
 // comprado produto priced directly with a fornecedor attached, an
@@ -124,7 +124,7 @@ function computeProdutoCost(id) {
   const errors = [];
   ctx.on('weberror', e => errors.push('pageerror: ' + e.error().message));
 
-  await ctx.route('**/functions/v1/checklist-api', async route => {
+  await ctx.route('**/functions/v1/maga-api', async route => {
     const body = route.request().postDataJSON();
     let resp;
     if (body.action === 'ingredients') {

@@ -59,7 +59,7 @@ function fmtDateTime(iso){
     : d.toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
 }
 
-// Same SHOUTED-name rule checklist-api applies to product names, used here
+// Same SHOUTED-name rule maga-api applies to product names, used here
 // for the BRAND ("LEITE PO NINHO" -> "Leite Po Ninho"). Brands are tidied at
 // render rather than on the way in because, unlike the name, a brand is
 // never copied onto an editable row and never typed by the user — so the

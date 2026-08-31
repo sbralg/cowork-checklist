@@ -12,7 +12,7 @@
   Data-free shell for the Fornecedores module — who the household buys
   from. Same pattern as every other page here: hosted on public GitHub
   Pages, holds NO keys and NO data, asks for the shared passphrase, then
-  talks only to the gated Supabase Edge Function (checklist-api).
+  talks only to the gated Supabase Edge Function (maga-api).
 
   Deliberately minimal fields (name/phone/email/notes). Two SEPARATE
   fornecedor relationships show on the detail page: "Produtos"
@@ -323,7 +323,7 @@ function buyRowHtml(m){
 // A comprado Produto sourced from this fornecedor — directly answers
 // "what do I buy from this supplier", separate from the pantry purchase
 // history below (that's about recipe ingredients, this is about sellable
-// items — see checklist-api's module comment above produtoCostFor).
+// items — see maga-api's module comment above produtoCostFor).
 function produtoRowHtml(p){
   return '<div class="row" data-produto="' + esc(p.id) + '">' +
     '<p class="nm">' + esc(p.name) + '</p>' +

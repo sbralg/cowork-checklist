@@ -1,7 +1,7 @@
 // Headless UI test for fornecedores.html — who the household buys from:
 // create/edit/delete, the wa.me WhatsApp compose link, the "Produtos"
 // list (comprado items sourced from here, produtos.fornecedor_id — pure
-// reference metadata, see checklist-api's module comment above
+// reference metadata, see maga-api's module comment above
 // produtoCostFor), the "+ Novo Produto" hand-off to produtos.html, and the
 // separate pantry purchase history read through `fornecedor_detail`
 // (every inbound stock_movements row tagged with this fornecedor_id,
@@ -11,7 +11,7 @@
 //   KEEP_SHOTS=1 node test/...          # also prints where screenshots went
 //
 // Same shape as clientes.test.js: serves the repo root over http and
-// answers checklist-api from an in-memory fake, so it never touches
+// answers maga-api from an in-memory fake, so it never touches
 // Supabase and never needs a real passphrase.
 const http = require('http');
 const fs = require('fs');
@@ -63,7 +63,7 @@ function fornecedorOf(id) { return state.fornecedores.find(f => f.id === id); }
   const errors = [];
   ctx.on('weberror', e => errors.push('pageerror: ' + e.error().message));
 
-  await ctx.route('**/functions/v1/checklist-api', async route => {
+  await ctx.route('**/functions/v1/maga-api', async route => {
     const body = route.request().postDataJSON();
     let resp;
     if (body.action === 'fornecedores') {

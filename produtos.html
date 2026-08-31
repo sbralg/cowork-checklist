@@ -15,7 +15,7 @@
   comprado deliberately does NOT go through the Insumo/ingredient/stock
   pipeline a recipe line uses: fornecedor-sourced items are bought on
   demand per event, not stocked or consumed by a recipe — see
-  checklist-api's module comment above produtoCostFor. Every Produto
+  maga-api's module comment above produtoCostFor. Every Produto
   carries its own packaging lines and three margin tiers (atacado/
   distribuidor/varejo), ported from the household's real pricing
   spreadsheet; the packaging/cost/margins panel is shared with
@@ -27,7 +27,7 @@
 
   Same pattern as every other page here: hosted on public GitHub Pages,
   holds NO keys and NO data, asks for the shared passphrase, then talks
-  only to the gated Supabase Edge Function (checklist-api).
+  only to the gated Supabase Edge Function (maga-api).
 -->
 <link rel="stylesheet" href="shared-base.css">
 <link rel="stylesheet" href="shared-menu.css">
