@@ -2,14 +2,11 @@
 
 Context file for Claude Code / Claude sessions working on this repo.
 
-> **Repo not yet renamed on GitHub.** This is step 3 of the `cowork-*` →
-> `maga-*` big-bang (umbrella name **Magá Assistant** — Magá is the wife's
-> confectionery business, the personal-triage half is "the assistant"). The
-> local folder and GitHub repo are still `cowork-checklist` until step 4;
-> `RENAME.md` in the `maga-api` repo (`cowork-personal-daily-summary`) has the
-> full plan. **In the dated `## Status` entries below, `maga-api` /
-> `maga-web` / `maga-infra` were swept in by that rename — at the time those
-> entries were written the names were `checklist-api` / `cowork-checklist` /
+> Renamed 2026-08-31 in the `cowork-*` → `maga-*` big-bang (umbrella:
+> **Magá Assistant**; `RENAME.md` in the `maga-api` repo has the full plan).
+> **In the dated `## Status` entries below, `maga-api` / `maga-web` /
+> `maga-infra` were swept in by that rename — when those entries were written
+> the names were `checklist-api` / `cowork-checklist` /
 > `cowork-assistant-backend`.**
 
 ## Status (2026-08-31): step 3 — front end points at `maga-api`
