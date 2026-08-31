@@ -15,7 +15,7 @@
   of leite condensado are three insumos and ONE ingredient.
 
   This page exists because that concept had no home. `ingredient_rename`
-  and `ingredient_delete` have been in checklist-api since 2026-08-13 and
+  and `ingredient_delete` have been in maga-api since 2026-08-13 and
   NOTHING in the front end ever called them — an ingredient created by a
   typo in the insumo picker was permanent, with no screen anywhere that
   even listed what existed. Reported by the user as "how can I delete an
@@ -42,7 +42,7 @@
 
   Same pattern as every other page here: hosted on public GitHub Pages,
   holds NO keys and NO data, asks for the shared passphrase, then talks
-  only to the gated Supabase Edge Function (checklist-api).
+  only to the gated Supabase Edge Function (maga-api).
 -->
 <link rel="stylesheet" href="shared-base.css">
 <link rel="stylesheet" href="shared-menu.css">
@@ -246,7 +246,7 @@ function costStateFor(i){
 }
 
 // ingredient_create/ingredient_update are newer than the deployed Edge
-// Function may be. checklist-api answers an unrecognised action with a 400
+// Function may be. maga-api answers an unrecognised action with a 400
 // {error:"bad action"}, which — now that api() surfaces the parsed body —
 // can be told apart from a real validation failure and explained in words
 // instead of a generic "não foi possível".
@@ -424,7 +424,7 @@ function ingredienteModal(existing){
       if(e.unauthorized) return handleAuthError(e, loadIngredientes);
       if(notDeployed(e)){
         alert("Esta função ainda não está publicada no servidor. " +
-          "Republique a Edge Function checklist-api e tente de novo.");
+          "Republique a Edge Function maga-api e tente de novo.");
         return;
       }
       const already = e.body && String(e.body.error || "").indexOf("already exists") >= 0;

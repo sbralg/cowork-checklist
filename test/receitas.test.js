@@ -141,7 +141,7 @@ function computeProdutoCost(id) {
   const errors = [];
   ctx.on('weberror', e => errors.push('pageerror: ' + e.error().message));
 
-  await ctx.route('**/functions/v1/checklist-api', async route => {
+  await ctx.route('**/functions/v1/maga-api', async route => {
     const body = route.request().postDataJSON();
     let resp;
     if (body.action === 'ingredients') {

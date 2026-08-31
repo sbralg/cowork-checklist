@@ -12,7 +12,7 @@
   Data-free shell for the shopping-list module. Same pattern as tarefas.html
   (the daily-summary checklist): hosted on public GitHub Pages, holds NO
   keys and NO data, asks for the shared passphrase, then talks only to the
-  gated Supabase Edge Function (checklist-api) via its shopping_* actions.
+  gated Supabase Edge Function (maga-api) via its shopping_* actions.
 -->
 <link rel="stylesheet" href="shared-base.css">
 <link rel="stylesheet" href="shared-menu.css">
@@ -246,7 +246,7 @@ function scanningSupported(){
 }
 
 // Standard GS1 mod-10 check digit — the same algorithm normalizeGtin() runs
-// in checklist-api. The server stays the authority; this copy exists so a
+// in maga-api. The server stays the authority; this copy exists so a
 // misread is thrown away before it costs a closed camera and a bogus
 // "insumo novo" prompt. Keep the two in step.
 function gtinCheckDigitOk(code){

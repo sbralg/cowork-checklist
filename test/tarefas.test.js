@@ -12,7 +12,7 @@
 // delete/done/undo flows and the done-tasks section.
 //
 // Same shape as compras.test.js/hoje.test.js: serves the repo root over
-// http and answers checklist-api from an in-memory fake, so it never
+// http and answers maga-api from an in-memory fake, so it never
 // touches Supabase and never needs a real passphrase.
 const http = require('http');
 const fs = require('fs');
@@ -70,7 +70,7 @@ const state = {
   const errors = [];
   ctx.on('weberror', e => errors.push('pageerror: ' + e.error().message));
 
-  await ctx.route('**/functions/v1/checklist-api', async route => {
+  await ctx.route('**/functions/v1/maga-api', async route => {
     const body = route.request().postDataJSON();
     let resp;
     if (body.action === 'list') {
