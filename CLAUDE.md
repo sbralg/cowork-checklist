@@ -9,6 +9,41 @@ Context file for Claude Code / Claude sessions working on this repo.
 > the names were `checklist-api` / `cowork-checklist` /
 > `cowork-assistant-backend`.**
 
+## Status (2026-09-01, even later): the add-row calendar icon never actually grayed out — 📅 is a color emoji, and `color:` cannot touch one
+
+Reported directly: "the calendar icon that allows users to set a date...
+was supposed to be greyed out when no date is set." True in both states —
+the icon looked identically (dark, saturated) colored whether or not a
+date was picked, screenshot-confirmed before touching anything.
+
+- **Root cause: `📅` renders as a full-color emoji glyph, and CSS `color`
+  has no effect on a color emoji at all** — unlike the ☆/★ star (plain
+  Unicode symbols that DO inherit `color`), a color-emoji font (Noto Color
+  Emoji on Android/most Linux, Segoe UI Emoji on Windows, Apple Color Emoji
+  on iOS) bakes its own palette into the glyph and ignores the text color
+  entirely. `.date-btn{color:var(--muted)}` / `.date-btn.set{color:var(--accent)}` were both silently doing nothing to the glyph's appearance —
+  only affecting properties that never mattered visually here.
+- **Fix: `filter`, not `color`, is the CSS lever that actually reaches a
+  color emoji.** `.date-btn` now carries `filter:grayscale(1) opacity(.55)`
+  for the unset state (visibly muted/gray), and `.date-btn.set` clears it
+  (`filter:none`) for the full-color icon once a date is picked. `color`
+  is left in place too, harmless, in case a platform ever falls back to a
+  monochrome text-style glyph for this character.
+- **`test/tarefas.test.js` gained two assertions checking the actual
+  computed `filter`, not just the `.set` class** — the class-only
+  assertions already in the suite passed both before and after the fix,
+  which is exactly the "check values could not have caught this" class of
+  gap this repo's CLAUDE.md already flags for CSS-only bugs (the icon-btn
+  hit-target entry, the scan-dialog price-field entry). Confirmed the new
+  assertion actually fails against the pre-fix CSS (`git stash` the file,
+  re-run) before trusting it. One timing wrinkle: reading `filter`
+  synchronously right after the `.set` class is applied catches a
+  mid-transition interpolated value (e.g. `grayscale(0.15) opacity(0.93)`)
+  since the change is CSS-transitioned — fixed by `waitForFunction`-ing
+  until the filter settles to `"none"` before asserting, rather than
+  reading it immediately.
+- Full 11-suite regression run green.
+
 ## Status (2026-09-01, later still): star glyph weight fix + a real horizontal-overflow bug on page load
 
 Two more rounds of direct feedback against the redesign below, both against

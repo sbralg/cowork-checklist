@@ -79,11 +79,19 @@
     background:none;border:none;color:var(--muted);font-size:19px;line-height:1;padding:0;cursor:pointer;
     flex:none;min-width:40px;min-height:40px;border-radius:10px;
     display:inline-flex;align-items:center;justify-content:center;
-    transition:color .15s ease,background-color .15s ease,transform .1s ease;
+    transition:filter .15s ease,background-color .15s ease,transform .1s ease;
+    /* 📅 is a full-color emoji glyph -- CSS `color` (kept above for any
+       platform that happens to fall back to a text-style glyph) has NO
+       effect on a color emoji, so the button looked identically colored
+       whether or not a date was set. `filter` is the one CSS lever that
+       actually reaches a color emoji: grayscale+dim it here for "muted/
+       unset", then clear the filter in .set below for the full-color icon
+       once a date is picked. */
+    filter:grayscale(1) opacity(.55);
   }
   .date-btn:hover{background:rgba(127,127,127,.15)}
   .date-btn:active{transform:scale(.9)}
-  .date-btn.set{color:var(--accent)}
+  .date-btn.set{color:var(--accent);filter:none}
   /* Kept in the DOM (not display:none) so .showPicker()/.click() can still
      open the native date picker from the visible calendar icon button. */
   .visually-hidden-date{position:absolute;width:0;height:0;padding:0;border:0;opacity:0;pointer-events:none}

@@ -186,6 +186,16 @@ const state = {
   // --- create, with a due date set via the add-row calendar icon ---
   check('the add-row calendar icon starts gray (unset)',
     !(await page.$eval('#new-due-btn', el => el.classList.contains('set'))));
+  // 📅 is a full-color emoji glyph, so CSS `color` alone (what the .set
+  // class toggle used to rely on) never actually recolors it -- a real bug
+  // reported live, where the icon looked identically colored regardless of
+  // state. `filter` is what actually reaches a color emoji, so assert on
+  // that computed style directly rather than only the class, the same
+  // "check values could not have caught this" discipline this repo already
+  // applies to other CSS-only bugs (see CLAUDE.md's icon-btn hit-target and
+  // scan-dialog price-field entries).
+  check('the unset calendar icon is desaturated via filter, not just colored',
+    (await page.$eval('#new-due-btn', el => getComputedStyle(el).filter)).includes('grayscale'));
   await page.fill('#new-text', 'Comprar pilhas');
   // The native date picker itself isn't drivable headlessly (same class of
   // limitation as compras.html's camera/barcode tests) -- setting the
@@ -197,6 +207,12 @@ const state = {
   }, isoDateOffset(1));
   check('the calendar icon turns colored once a date is chosen',
     await page.$eval('#new-due-btn', el => el.classList.contains('set')));
+  // The grayscale->none filter change is CSS-transitioned, so read it after
+  // the transition settles rather than mid-interpolation.
+  await page.waitForFunction(
+    () => getComputedStyle(document.getElementById('new-due-btn')).filter === 'none', null, { timeout: 6000 });
+  check('the filter is cleared once set, so the emoji shows full color',
+    (await page.$eval('#new-due-btn', el => getComputedStyle(el).filter)) === 'none');
   await page.click('#add-btn');
   await page.waitForFunction(() => document.querySelectorAll('.row').length === 3, null, { timeout: 6000 });
   check('a manually-created task appears', (await page.$$('.row')).length === 3);
