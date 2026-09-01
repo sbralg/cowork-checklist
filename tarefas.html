@@ -53,19 +53,18 @@
     background:none;border:none;font-size:21px;line-height:1;padding:0;cursor:pointer;
     flex:none;color:var(--muted);min-width:40px;min-height:40px;border-radius:10px;
     display:inline-flex;align-items:center;justify-content:center;
-    /* The ★/☆ glyph reads as spindly at this size on its own -- a thin
-       stroke in the same color thickens the star's arms without needing a
-       bitmap/SVG icon, same "build for Chrome/Android first" tradeoff
-       already made elsewhere on this page. font-weight is a harmless no-op
-       on platforms whose star glyph ignores it. */
-    font-weight:900;-webkit-text-stroke:0.7px currentColor;
     transition:color .15s ease,background-color .15s ease,transform .1s ease;
   }
   .star-btn:hover{background:rgba(127,127,127,.15)}
   .star-btn:active{transform:scale(.9)}
-  /* Gold on purpose, not var(--accent) -- "starred" reads as a universal
+  /* A stroke affects the two glyphs very differently, so they're NOT given
+     the same weight: ☆'s outline is already thin lines, so any stroke at
+     all reads as heavy-handed and was reported too thick -- left at the
+     browser default. ★'s filled body barely shows a stroke at the same
+     width, so it keeps a small one to look a touch bolder, per the same
+     feedback. Gold, not var(--accent) -- "starred" reads as a universal
      gold star regardless of this app's own (red) brand accent. */
-  .star-btn.important{color:#eab308}
+  .star-btn.important{color:#eab308;font-weight:900;-webkit-text-stroke:0.8px currentColor}
   .date-btn{
     background:none;border:none;color:var(--muted);font-size:19px;line-height:1;padding:0;cursor:pointer;
     flex:none;min-width:40px;min-height:40px;border-radius:10px;
