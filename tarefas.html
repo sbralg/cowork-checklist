@@ -30,7 +30,17 @@
      collapses/expands during scroll and resizes that viewport. */
   .page{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
   .wrap{
-    flex:1 0 auto;max-width:640px;margin:0 auto;
+    /* .page is a column-direction flex container, so width is .wrap's CROSS
+       axis -- and .wrap's own left/right auto margins (the "margin:0 auto"
+       below, there to center it once it hits max-width) disable
+       align-items:stretch on that axis per the flexbox spec. Without an
+       explicit width, .wrap fell back to shrink-to-fit/content-based sizing
+       instead of stretching to .page's width, so an unshrinkable descendant
+       (the add-row's fixed 40px date icon button) pushed it wider than the
+       viewport -- a horizontal scrollbar and a slightly zoomed-out page on
+       first load. width:100% (capped by max-width, same as before) restores
+       "stretch to container, then center beyond 640px" explicitly. */
+    flex:1 0 auto;width:100%;min-width:0;max-width:640px;margin:0 auto;
     padding:max(16px,env(safe-area-inset-top)) 16px 16px;
   }
   header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 16px}

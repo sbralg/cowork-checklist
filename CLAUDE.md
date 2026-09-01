@@ -9,6 +9,53 @@ Context file for Claude Code / Claude sessions working on this repo.
 > the names were `checklist-api` / `cowork-checklist` /
 > `cowork-assistant-backend`.**
 
+## Status (2026-09-01, later still): star glyph weight fix + a real horizontal-overflow bug on page load
+
+Two more rounds of direct feedback against the redesign below, both against
+real screenshots.
+
+- **The outline star's stroke was too heavy; the filled star could take a
+  touch more.** The entry below applied the SAME
+  `-webkit-text-stroke:0.7px currentColor` + `font-weight:900` to both `☆`
+  and `★` — wrong, because a stroke affects the two very differently. `☆`
+  is already thin outline strokes, so any added stroke reads as
+  heavy-handed; `★`'s filled body barely shows the same stroke width at
+  all. Fixed by splitting the rule: `.star-btn` (the unstarred/`☆` state)
+  now carries no stroke/weight override at all — just the browser default —
+  and only `.star-btn.important` (the starred/`★` state) keeps a stroke,
+  nudged to `0.8px` for a bit more boldness. Verified against a Microsoft
+  To Do reference screenshot the user provided, side by side with a
+  rendered screenshot of this page, before and after.
+- **Real bug: the page loaded with a ~50px horizontal scrollbar and looked
+  slightly zoomed out — reported as "it looks like it's opening with the
+  same width as the 'Concluir selecionados' button."** That specific
+  suspicion turned out to be a red herring (`#done-btn` measured a correct
+  358px, fully inside the 390px viewport) — the actual overflow was on
+  `.wrap` itself (`#root`), measuring 440.578px wide against a 390px
+  viewport. **First theory tried and DISPROVEN by re-measuring: the classic
+  flex `min-width:auto` trap.** Adding `min-width:0` to `.wrap` had zero
+  effect on the measured overflow — proving `.wrap`'s width wasn't being
+  floored by min-content at all.
+  - **Real cause: `.wrap{margin:0 auto}`'s own auto left/right margins
+    disable `align-items:stretch`.** `.page` is a column-direction flex
+    container, which makes width `.wrap`'s CROSS axis — and per the
+    flexbox spec, auto margins on a flex item's cross axis take that item
+    out of stretch alignment entirely, falling back to shrink-to-fit/
+    content-based sizing instead. `.wrap` had no explicit `width`, so once
+    stretch was disabled it sized itself to its own content instead of
+    `.page`'s width; an unshrinkable descendant (the add-row's fixed 40px
+    date-icon button) was wide enough to push that content-based size past
+    the viewport.
+  - **Fix confirmed by runtime style injection before touching the file**:
+    adding `width:100%` to `.wrap` (alongside the pre-existing
+    `max-width:640px` and `margin:0 auto`) took the measured overflow from
+    `scrollWidth:441` down to exactly `390` (matching the viewport), with
+    `.wrap`'s own computed width also landing exactly on `390px`. Applied
+    to `.wrap`'s real CSS rule in `tarefas.html` with the corrected
+    reasoning in its comment (the old comment, from before this bug was
+    properly diagnosed, wrongly blamed `min-width:auto`).
+  - Full 11-suite regression run green after both fixes.
+
 ## Status (2026-09-01, later): follow-up round on the due date/star redesign — no more big badge, a gold ★/☆ star, async in-place star toggle
 
 Direct feedback against the shipped redesign, from a real screenshot:
