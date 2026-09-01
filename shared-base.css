@@ -12,7 +12,7 @@
   --bg:#faf8f4; --card:#ffffff; --text:#1a1a1a; --muted:#6b7280;
   --border:#e8e2d6; --border-strong:#d9d1c1; --accent:#9b1c1c; --accent-rgb:155,28,28;
   --accent-text:#fdf3e7; --danger:#dc2626;
-  --gold:#c8860b;
+  --gold:#c8860b; --gold-rgb:200,134,11;
   /* hoje.html-only tints (urgent/lead/incident row highlighting) — harmless
      and unused on every other page, so they live here rather than in a
      seventh file only one page would load. */
@@ -24,7 +24,7 @@
     --bg:#17120f; --card:#221b16; --text:#f3ede3; --muted:#a99f92;
     --border:#372c24; --border-strong:#4a3c31; --accent:#c0392f; --accent-rgb:192,57,47;
     --accent-text:#fdf3e7; --danger:#f87171;
-    --gold:#eab308;
+    --gold:#eab308; --gold-rgb:234,179,8;
     --warn:#fbbf24; --lead:#60a5fa; --incident:#f472b6;
     --tint:rgba(255,255,255,.05);
   }
