@@ -98,10 +98,12 @@ const state = {
   const errors = [];
   ctx.on('weberror', e => errors.push('pageerror: ' + e.error().message));
 
+  let listCalls = 0;
   await ctx.route('**/functions/v1/maga-api', async route => {
     const body = route.request().postDataJSON();
     let resp;
     if (body.action === 'list') {
+      listCalls++;
       resp = { actions: sortActions(state.actions.filter(a => a.status === 'pending')) };
     } else if (body.action === 'action_create') {
       const a = { id: 'A' + (++state.seq), text: body.text, source: 'manual', status: 'pending',
@@ -204,8 +206,15 @@ const state = {
   check('the add-row calendar icon resets to gray after adding',
     !(await page.$eval('#new-due-btn', el => el.classList.contains('set'))));
 
-  // --- star toggle bumps a task to the top, without opening the edit modal ---
+  // --- no big per-row badge icon; only the small source icon in the meta line ---
+  check('no .badge element on pending rows', (await page.$$('#pending-card .badge')).length === 0);
+
+  // --- star toggle bumps a task to the top, without opening the edit modal,
+  // and WITHOUT a full reload (no extra 'list' fetch -- the card is
+  // redrawn in place from the already-loaded rows) ---
+  const listCallsBeforeStar = listCalls;
   const igorStar = await page.$('.row:has-text("Ligar para o Igor") [data-star-id]');
+  check('the star starts as the outline glyph', (await igorStar.textContent()) === '☆');
   await igorStar.click();
   await page.waitForFunction(() => {
     const first = document.querySelector('#root > .card > .row');
@@ -215,6 +224,10 @@ const state = {
     (await page.textContent('#root > .card > .row:first-child')).includes('Ligar para o Igor'));
   check('the star button shows as important', await page.$eval(
     '.row:has-text("Ligar para o Igor") [data-star-id]', el => el.classList.contains('important')));
+  check('the star glyph switches to filled once important', (await page.textContent(
+    '.row:has-text("Ligar para o Igor") [data-star-id]')) === '★');
+  check('toggling the star did not trigger a full reload (no extra list fetch)',
+    listCalls === listCallsBeforeStar);
   check('clicking the star did not open the edit modal', (await page.$$('.modal-backdrop')).length === 0);
   check('clicking the checkbox does not open the edit modal either', await (async () => {
     // Checking a box only enables the bulk "Concluir" bar -- it fires no

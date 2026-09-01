@@ -9,6 +9,50 @@ Context file for Claude Code / Claude sessions working on this repo.
 > the names were `checklist-api` / `cowork-checklist` /
 > `cowork-assistant-backend`.**
 
+## Status (2026-09-01, later): follow-up round on the due date/star redesign — no more big badge, a gold ★/☆ star, async in-place star toggle
+
+Direct feedback against the shipped redesign, from a real screenshot:
+
+- **The big per-row badge emoji is gone from pending rows** — only the
+  small `[emoji] [categoria]` in the meta line remains (the done-tasks
+  section still shows its own `.badge`, untouched, since that section
+  wasn't part of this feedback). `.badge`'s CSS rule stays (still used
+  there); the pending-row markup (`pendingRowsHtml()`) just no longer
+  emits the element.
+- **Star styling reworked**: unstarred is now the outline glyph `☆` in
+  muted gray; starred is the filled glyph `★` in gold (`#eab308` —
+  deliberately not `var(--accent)`, since a starred/important marker reads
+  as a universal gold star regardless of this app's own red brand color).
+  Swapping the actual glyph (not just a color class on one fixed glyph) is
+  what gives the two states distinct outline-vs-filled shapes, not just
+  different colors. Both glyphs also carry
+  `-webkit-text-stroke:0.7px currentColor` + `font-weight:900` — the bare
+  character read as thin/spindly at 21px; a same-color stroke thickens the
+  star's arms without needing a bitmap or inline-SVG icon.
+- **The star toggle is now async/in-place, matching the rest of the app's
+  convention, instead of triggering a full `load()` reload.** New
+  `currentRows` (the pending list currently on screen) +
+  `sortPendingRows()` (mirrors `maga-api`'s own `important desc, due_date
+  asc nulls last, first_seen asc` order) + `redrawPendingCard()`
+  (re-renders just `#pending-card`'s innerHTML from the re-sorted
+  in-memory rows, no network re-fetch). The star click handler now:
+  optimistically flips the glyph/color, calls `action_edit` in the
+  background, and on success mutates `it.important` + re-sorts +
+  redraws — no `"Carregando…"` flash, no `list` round trip. On failure it
+  reverts the glyph/class/title exactly as before. Text/category/due-date/
+  delete edits (via the modal) still go through the full `load()` reload —
+  unchanged, since that wasn't part of this complaint and matches this
+  page's existing done/undo/delete convention.
+  - **Checked checkboxes survive the redraw.** A naive
+    `innerHTML` replace of the whole card would silently un-check any
+    other rows already ticked for the bulk "Concluir" bar; `redrawPendingCard()` captures the checked ids first and re-applies them
+    after rebuilding the markup.
+- `test/tarefas.test.js`: a `listCalls` counter on the fake's `list`
+  action proves the star toggle does NOT trigger another fetch (the
+  concrete regression test for "no more full reload"), plus assertions for
+  the outline→filled glyph swap and the absence of `.badge` on pending
+  rows. Full 11-suite run green.
+
 ## Status (2026-09-01): `tarefas.html` gains a due date + a star (important), replacing the row's ✎/🗑 icons
 
 Backend half (schema + `maga-api` actions + the scheduled-task prompt) is

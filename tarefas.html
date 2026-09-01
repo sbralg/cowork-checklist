@@ -50,14 +50,22 @@
   .body .meta{font-size:12px;color:var(--muted);margin:3px 0 0}
   .body .meta .due.overdue{color:var(--danger)}
   .star-btn{
-    background:none;border:none;font-size:20px;line-height:1;padding:0;cursor:pointer;
+    background:none;border:none;font-size:21px;line-height:1;padding:0;cursor:pointer;
     flex:none;color:var(--muted);min-width:40px;min-height:40px;border-radius:10px;
     display:inline-flex;align-items:center;justify-content:center;
+    /* The ★/☆ glyph reads as spindly at this size on its own -- a thin
+       stroke in the same color thickens the star's arms without needing a
+       bitmap/SVG icon, same "build for Chrome/Android first" tradeoff
+       already made elsewhere on this page. font-weight is a harmless no-op
+       on platforms whose star glyph ignores it. */
+    font-weight:900;-webkit-text-stroke:0.7px currentColor;
     transition:color .15s ease,background-color .15s ease,transform .1s ease;
   }
   .star-btn:hover{background:rgba(127,127,127,.15)}
   .star-btn:active{transform:scale(.9)}
-  .star-btn.important{color:var(--accent)}
+  /* Gold on purpose, not var(--accent) -- "starred" reads as a universal
+     gold star regardless of this app's own (red) brand accent. */
+  .star-btn.important{color:#eab308}
   .date-btn{
     background:none;border:none;color:var(--muted);font-size:19px;line-height:1;padding:0;cursor:pointer;
     flex:none;min-width:40px;min-height:40px;border-radius:10px;
@@ -198,6 +206,48 @@ function updateBar(){
     : (n === 1 ? "Concluir 1 item" : "Concluir " + n + " itens");
 }
 
+// The pending list currently on screen, kept around so the star toggle can
+// re-sort and redraw just that card in place (see redrawPendingCard())
+// instead of a full load() round trip.
+let currentRows = [];
+
+// Same important-desc/due-date-asc-nulls-last/first_seen-asc order
+// maga-api's own `list` action already returns rows in -- re-applied
+// client-side after a star toggle so the redraw doesn't need a network
+// round trip to know the new order.
+function sortPendingRows(rows){
+  return rows.slice().sort((a, b) => {
+    const ai = a.important ? 1 : 0, bi = b.important ? 1 : 0;
+    if(ai !== bi) return bi - ai;
+    if(a.due_date !== b.due_date){
+      if(a.due_date == null) return 1;
+      if(b.due_date == null) return -1;
+      return a.due_date < b.due_date ? -1 : 1;
+    }
+    return (a.first_seen || "").localeCompare(b.first_seen || "");
+  });
+}
+
+function pendingRowsHtml(rows){
+  return rows.map(it => {
+    const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
+    const overdue = it.due_date ? isOverdue(it.due_date) : false;
+    const dueHtml = it.due_date
+      ? ' · <span class="due' + (overdue ? " overdue" : "") + '">📅 ' + esc(fmtDueLabel(it.due_date)) + '</span>'
+      : '';
+    return '<div class="row">' +
+      '<input type="checkbox" data-id="' + esc(it.id) + '" aria-label="Concluir">' +
+      '<div class="rowbody" data-open-id="' + esc(it.id) + '">' +
+      '<span class="body"><p class="txt">' + esc(it.text) + '</p>' +
+      '<p class="meta"><span class="src">' + m.emoji + ' ' + esc(m.label) + '</span>' + dueHtml + '</p></span>' +
+      '</div>' +
+      '<button class="star-btn' + (it.important ? " important" : "") + '" data-star-id="' + esc(it.id) + '" ' +
+        'title="' + (it.important ? "Remover importância" : "Marcar como importante") + '" ' +
+        'aria-label="Marcar como importante">' + (it.important ? "★" : "☆") + '</button>' +
+      '</div>';
+  }).join("");
+}
+
 function render(rows){
   // The done-tasks section always starts collapsed on a fresh render
   // (login, initial load, or after any create/edit/delete/done action).
@@ -206,6 +256,7 @@ function render(rows){
   doneOffset = 0;
   doneHasMore = false;
   doneExpanded = false;
+  currentRows = rows;
 
   const header = '<header><div class="hleft">' +
     '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
@@ -232,31 +283,35 @@ function render(rows){
     return;
   }
   root.innerHTML = header + addForm +
-    '<div class="card">' + rows.map(it => {
-      const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
-      const overdue = it.due_date ? isOverdue(it.due_date) : false;
-      const dueHtml = it.due_date
-        ? ' · <span class="due' + (overdue ? " overdue" : "") + '">📅 ' + esc(fmtDueLabel(it.due_date)) + '</span>'
-        : '';
-      return '<div class="row">' +
-        '<input type="checkbox" data-id="' + esc(it.id) + '" aria-label="Concluir">' +
-        '<div class="rowbody" data-open-id="' + esc(it.id) + '">' +
-        '<span class="badge">' + m.emoji + '</span>' +
-        '<span class="body"><p class="txt">' + esc(it.text) + '</p>' +
-        '<p class="meta"><span class="src">' + m.emoji + ' ' + esc(m.label) + '</span>' + dueHtml + '</p></span>' +
-        '</div>' +
-        '<button class="star-btn' + (it.important ? " important" : "") + '" data-star-id="' + esc(it.id) + '" ' +
-          'title="' + (it.important ? "Remover importância" : "Marcar como importante") + '" ' +
-          'aria-label="Marcar como importante">★</button>' +
-        '</div>';
-    }).join("") + '</div>' + doneWrap;
+    '<div class="card" id="pending-card">' + pendingRowsHtml(rows) + '</div>' + doneWrap;
   bar.style.display = "flex";
   root.querySelectorAll("input[data-id]").forEach(cb => cb.addEventListener("change", updateBar));
   wireHeader();
   wireAddForm();
-  wireRowOpen(rows);
-  wireStarButtons(rows);
+  wireRowOpen();
+  wireStarButtons();
   wireDoneToggle();
+  updateBar();
+}
+
+// Redraws only the pending-task card from currentRows -- used after a star
+// toggle so importance changes (which reorder the list) don't need the
+// full-page load()/"Carregando…" round trip every other mutating action on
+// this page still uses. Preserves any checkboxes already ticked for the
+// bulk-complete bar, since a full innerHTML replace would otherwise
+// silently uncheck them.
+function redrawPendingCard(){
+  const card = document.getElementById("pending-card");
+  if(!card) return;
+  const checkedIds = new Set(
+    Array.from(card.querySelectorAll("input[data-id]:checked")).map(cb => cb.dataset.id));
+  card.innerHTML = pendingRowsHtml(currentRows);
+  card.querySelectorAll("input[data-id]").forEach(cb => {
+    cb.checked = checkedIds.has(cb.dataset.id);
+    cb.addEventListener("change", updateBar);
+  });
+  wireRowOpen();
+  wireStarButtons();
   updateBar();
 }
 
@@ -392,32 +447,39 @@ function openEditModal(it){
   });
 }
 
-function wireRowOpen(rows){
+function wireRowOpen(){
   root.querySelectorAll("[data-open-id]").forEach(el => {
     el.addEventListener("click", () => {
-      const it = rows.find(r => r.id === el.dataset.openId);
+      const it = currentRows.find(r => r.id === el.dataset.openId);
       if(it) openEditModal(it);
     });
   });
 }
 
-function wireStarButtons(rows){
+function wireStarButtons(){
   root.querySelectorAll("[data-star-id]").forEach(btn => {
     btn.addEventListener("click", async () => {
-      const it = rows.find(r => r.id === btn.dataset.starId);
+      const it = currentRows.find(r => r.id === btn.dataset.starId);
       if(!it) return;
       const next = !it.important;
+      const prevGlyph = btn.textContent;
       btn.disabled = true;
+      btn.textContent = next ? "★" : "☆";
       btn.classList.toggle("important", next);
       btn.title = next ? "Remover importância" : "Marcar como importante";
       try{
         await api("action_edit", { id: it.id, important: next });
-        // Toggling importance changes sort order (important bumps to the
-        // top), so a full reload -- same as done/undo/delete/edit already
-        // do on this page -- is what keeps the list correctly ordered.
-        await load();
+        // Importance changes sort order, so the in-memory list is re-sorted
+        // the same way maga-api's own `list` already orders it, and only
+        // the pending card is redrawn -- no full load()/page flash, unlike
+        // the modal-driven edits (text/category/due date/delete) which
+        // still reload since that's this page's existing convention there.
+        it.important = next;
+        currentRows = sortPendingRows(currentRows);
+        redrawPendingCard();
       }catch(e){
         if(e.unauthorized){ handleAuthError(e, load); return; }
+        btn.textContent = prevGlyph;
         btn.classList.toggle("important", it.important);
         btn.title = it.important ? "Remover importância" : "Marcar como importante";
         btn.disabled = false;
