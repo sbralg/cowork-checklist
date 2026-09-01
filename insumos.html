@@ -52,7 +52,7 @@
     flex:none;font-size:12px;font-weight:650;padding:5px 9px;border-radius:999px;
     background:rgba(127,127,127,.12);color:var(--muted);white-space:nowrap;
   }
-  .stock-badge.has{background:rgba(37,99,235,.14);color:var(--accent)}
+  .stock-badge.has{background:rgba(var(--accent-rgb),.14);color:var(--accent)}
   /* What an insumo IS, as opposed to which SKU it is — the link a recipe
      reads. Shown on every catalogue row, including when it is missing:
      "sem ingrediente" is muted rather than alarming, exactly like the
@@ -72,7 +72,7 @@
     padding:3px 9px;border-radius:999px;margin:0;
   }
   .ing-tag{
-    background:rgba(37,99,235,.12);color:var(--accent);
+    background:rgba(var(--accent-rgb),.12);color:var(--accent);
     flex:0 1 auto;max-width:100%;min-width:0;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;
   }

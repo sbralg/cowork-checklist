@@ -29,7 +29,7 @@
    the same thing?" than any external category tree. */
 .ing-opt .hintbadge{
   font-size:11px;padding:2px 7px;border-radius:999px;flex:none;
-  background:rgba(37,99,235,.14);color:var(--accent);
+  background:rgba(var(--accent-rgb),.14);color:var(--accent);
 }
 /* Which insumo is being categorised — only rendered when ingredientModal()
    is called with showName !== false (estoque.html's chip opens the picker
