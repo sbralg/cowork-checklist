@@ -39,12 +39,44 @@
   .row{display:flex;align-items:flex-start;gap:12px;padding:16px 14px;border-bottom:1px solid var(--border);transition:background-color .15s ease}
   .row:hover{background:rgba(127,127,127,.06)}
   .row:last-child{border-bottom:none}
-  .row label{flex:1;min-width:0;display:flex;align-items:flex-start;gap:12px;cursor:pointer}
-  input[type=checkbox]{width:24px;height:24px;margin:1px 0 0;flex:none;accent-color:var(--accent)}
+  /* The checkbox is its own sibling now, not wrapped in a <label> around the
+     whole row -- tapping the row body opens the edit modal (see .rowbody),
+     so the two tap targets must be structurally separate, not nested. */
+  input[type=checkbox]{width:24px;height:24px;margin:1px 0 0;flex:none;accent-color:var(--accent);cursor:pointer}
+  .rowbody{flex:1;min-width:0;display:flex;align-items:flex-start;gap:12px;cursor:pointer}
   .badge{font-size:20px;line-height:1.2;flex:none;width:26px;text-align:center}
   .body{min-width:0;flex:1}
   .body .txt{font-size:15px;line-height:1.35;margin:0;word-wrap:break-word}
   .body .meta{font-size:12px;color:var(--muted);margin:3px 0 0}
+  .body .meta .due.overdue{color:var(--danger)}
+  .star-btn{
+    background:none;border:none;font-size:20px;line-height:1;padding:0;cursor:pointer;
+    flex:none;color:var(--muted);min-width:40px;min-height:40px;border-radius:10px;
+    display:inline-flex;align-items:center;justify-content:center;
+    transition:color .15s ease,background-color .15s ease,transform .1s ease;
+  }
+  .star-btn:hover{background:rgba(127,127,127,.15)}
+  .star-btn:active{transform:scale(.9)}
+  .star-btn.important{color:var(--accent)}
+  .date-btn{
+    background:none;border:none;color:var(--muted);font-size:19px;line-height:1;padding:0;cursor:pointer;
+    flex:none;min-width:40px;min-height:40px;border-radius:10px;
+    display:inline-flex;align-items:center;justify-content:center;
+    transition:color .15s ease,background-color .15s ease,transform .1s ease;
+  }
+  .date-btn:hover{background:rgba(127,127,127,.15)}
+  .date-btn:active{transform:scale(.9)}
+  .date-btn.set{color:var(--accent)}
+  /* Kept in the DOM (not display:none) so .showPicker()/.click() can still
+     open the native date picker from the visible calendar icon button. */
+  .visually-hidden-date{position:absolute;width:0;height:0;padding:0;border:0;opacity:0;pointer-events:none}
+  .due-row{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .due-row input[type=date]{
+    flex:1;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+    border:1px solid var(--border-strong);background:var(--card);color:var(--text);
+  }
+  .modal-actions .remove{margin-right:auto;background:none;color:var(--danger)}
+  .modal-actions .remove:hover{background:rgba(220,38,38,.12)}
   .bar{
     position:sticky;bottom:0;
     padding:12px 16px calc(12px + env(safe-area-inset-bottom));
@@ -52,7 +84,7 @@
     display:flex;justify-content:center;
   }
   .addrow{display:flex;gap:8px;padding:14px}
-  .addrow input{
+  .addrow input[type=text]{
     flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
     border:1px solid var(--border-strong);background:var(--card);color:var(--text);
   }
@@ -119,6 +151,38 @@ const SOURCE_META = {
 
 const CURRENT_PAGE = "tarefas";
 
+// Due-date display: "Hoje"/"Amanhã"/"Qua, 02 Set 26". Page-local -- no
+// other page needs the today/tomorrow special-casing, so this doesn't
+// belong in shared-format.js's fmtDate()/fmtDateTime() (see that file's own
+// comment on why look-alike date formatters stay separate).
+//
+// due_date arrives as a bare "YYYY-MM-DD" (a Postgres `date`, no time/zone).
+// `new Date("YYYY-MM-DD")` parses that as UTC midnight, which renders as the
+// PREVIOUS day in any negative UTC offset (Brazil included) -- so this
+// parses the parts by hand into a local-midnight Date instead.
+function parseDateOnly(dateStr){
+  const parts = String(dateStr).split("-").map(Number);
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+function startOfToday(){
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+function isOverdue(dateStr){
+  return parseDateOnly(dateStr) < startOfToday();
+}
+const WEEKDAY_ABBR_PT = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+const MONTH_ABBR_PT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+function fmtDueLabel(dateStr){
+  const due = parseDateOnly(dateStr);
+  const diffDays = Math.round((due - startOfToday()) / 86400000);
+  if(diffDays === 0) return "Hoje";
+  if(diffDays === 1) return "Amanhã";
+  const dd = String(due.getDate()).padStart(2, "0");
+  return WEEKDAY_ABBR_PT[due.getDay()] + ", " + dd + " " + MONTH_ABBR_PT[due.getMonth()] + " " +
+    String(due.getFullYear()).slice(-2);
+}
+
 const DONE_PAGE_SIZE = 5;
 let doneItems = [];
 let doneOffset = 0;
@@ -149,6 +213,9 @@ function render(rows){
     '</div><img class="brand-mark" src="assets/logo-badge.svg" alt="Magá"></header>';
   const addForm = '<div class="card addcard"><div class="addrow">' +
     '<input type="text" id="new-text" placeholder="Nova ação..." />' +
+    '<button type="button" class="date-btn" id="new-due-btn" ' +
+      'title="Definir data de vencimento" aria-label="Definir data de vencimento">📅</button>' +
+    '<input type="date" id="new-due-input" class="visually-hidden-date" tabindex="-1" aria-hidden="true">' +
     '<button id="add-btn">Adicionar</button>' +
     '</div></div>';
   const doneWrap = '<div id="done-wrap">' +
@@ -167,23 +234,28 @@ function render(rows){
   root.innerHTML = header + addForm +
     '<div class="card">' + rows.map(it => {
       const m = SOURCE_META[it.source] || { emoji:"•", label: it.source || "" };
+      const overdue = it.due_date ? isOverdue(it.due_date) : false;
+      const dueHtml = it.due_date
+        ? ' · <span class="due' + (overdue ? " overdue" : "") + '">📅 ' + esc(fmtDueLabel(it.due_date)) + '</span>'
+        : '';
       return '<div class="row">' +
-        '<label>' +
-        '<input type="checkbox" data-id="' + esc(it.id) + '">' +
+        '<input type="checkbox" data-id="' + esc(it.id) + '" aria-label="Concluir">' +
+        '<div class="rowbody" data-open-id="' + esc(it.id) + '">' +
         '<span class="badge">' + m.emoji + '</span>' +
         '<span class="body"><p class="txt">' + esc(it.text) + '</p>' +
-        '<p class="meta">' + m.label + ' · desde ' + fmtDateTime(it.first_seen) + '</p></span>' +
-        '</label>' +
-        '<button class="icon-btn" data-edit-id="' + esc(it.id) + '" title="Editar">✎</button>' +
-        '<button class="icon-btn danger" data-del-id="' + esc(it.id) + '" title="Excluir" aria-label="Excluir">🗑</button>' +
+        '<p class="meta"><span class="src">' + m.emoji + ' ' + esc(m.label) + '</span>' + dueHtml + '</p></span>' +
+        '</div>' +
+        '<button class="star-btn' + (it.important ? " important" : "") + '" data-star-id="' + esc(it.id) + '" ' +
+          'title="' + (it.important ? "Remover importância" : "Marcar como importante") + '" ' +
+          'aria-label="Marcar como importante">★</button>' +
         '</div>';
     }).join("") + '</div>' + doneWrap;
   bar.style.display = "flex";
   root.querySelectorAll("input[data-id]").forEach(cb => cb.addEventListener("change", updateBar));
   wireHeader();
   wireAddForm();
-  wireDeleteButtons();
-  wireEditControls(rows);
+  wireRowOpen(rows);
+  wireStarButtons(rows);
   wireDoneToggle();
   updateBar();
 }
@@ -195,14 +267,35 @@ function wireHeader(){
 function wireAddForm(){
   const btn = document.getElementById("add-btn");
   const input = document.getElementById("new-text");
+  const dateBtn = document.getElementById("new-due-btn");
+  const dateInput = document.getElementById("new-due-input");
   if(!btn || !input) return;
+
+  // Held in this closure only -- render() rebuilds the whole add form (and
+  // this function re-runs) after every add, so the gray/colored icon
+  // naturally resets for the next task with no manual clearing needed.
+  let dueDate = null;
+
+  if(dateBtn && dateInput){
+    dateBtn.addEventListener("click", () => {
+      if(dateInput.showPicker) dateInput.showPicker(); else dateInput.click();
+    });
+    dateInput.addEventListener("change", () => {
+      dueDate = dateInput.value || null;
+      dateBtn.classList.toggle("set", !!dueDate);
+      dateBtn.title = dueDate ? ("Vencimento: " + fmtDueLabel(dueDate)) : "Definir data de vencimento";
+    });
+  }
+
   const submit = async () => {
     const text = input.value.trim();
     if(!text) return;
     btn.disabled = true;
     btn.textContent = "Salvando…";
     try{
-      await api("action_create", { text });
+      const body = { text };
+      if(dueDate) body.due_date = dueDate;
+      await api("action_create", body);
       await load();
     }catch(e){
       if(e.unauthorized){ handleAuthError(e, load); return; }
@@ -211,23 +304,6 @@ function wireAddForm(){
   };
   btn.addEventListener("click", submit);
   input.addEventListener("keydown", e => { if(e.key === "Enter") submit(); });
-}
-
-function wireDeleteButtons(){
-  root.querySelectorAll("[data-del-id]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      if(!(await confirmModal("Excluir esta ação?"))) return;
-      const id = btn.dataset.delId;
-      btn.disabled = true;
-      try{
-        await api("action_delete", { ids: [id] });
-        await load();
-      }catch(e){
-        if(e.unauthorized){ handleAuthError(e, load); return; }
-        btn.disabled = false;
-      }
-    });
-  });
 }
 
 async function saveEdit(id, patch){
@@ -256,7 +332,13 @@ function openEditModal(it){
       '<input type="text" id="edit-text-input" value="' + esc(it.text) + '">' +
       '<label for="edit-cat-select">Categoria</label>' +
       '<select id="edit-cat-select">' + optionsHtml + '</select>' +
+      '<label for="edit-due-input">Data de vencimento</label>' +
+      '<div class="due-row">' +
+        '<input type="date" id="edit-due-input" value="' + esc(it.due_date || "") + '">' +
+        '<button type="button" class="link" id="edit-due-clear">Limpar</button>' +
+      '</div>' +
       '<div class="modal-actions">' +
+        '<button class="remove" id="edit-delete">Remover</button>' +
         '<button class="cancel" id="edit-cancel">Cancelar</button>' +
         '<button class="save" id="edit-save">Salvar</button>' +
       '</div>' +
@@ -273,27 +355,74 @@ function openEditModal(it){
   document.getElementById("edit-cancel").addEventListener("click", close);
 
   const textInput = document.getElementById("edit-text-input");
+  const dueInput = document.getElementById("edit-due-input");
   textInput.focus();
   textInput.select();
+
+  document.getElementById("edit-due-clear").addEventListener("click", () => {
+    dueInput.value = "";
+  });
+
+  // The delete confirm/API call stays here rather than a per-row button,
+  // per the redesign: the row itself has no delete affordance anymore.
+  document.getElementById("edit-delete").addEventListener("click", async () => {
+    if(!(await confirmModal("Excluir esta ação?"))) return;
+    close();
+    try{
+      await api("action_delete", { ids: [it.id] });
+      await load();
+    }catch(e){
+      if(e.unauthorized){ handleAuthError(e, load); return; }
+      alert("Não foi possível excluir.");
+    }
+  });
 
   document.getElementById("edit-save").addEventListener("click", async () => {
     const text = textInput.value.trim();
     const source = document.getElementById("edit-cat-select").value;
+    const dueDate = dueInput.value || null;
     if(!text){ alert("O texto não pode ficar vazio."); return; }
     const patch = {};
     if(text !== it.text) patch.text = text;
     if(source !== it.source) patch.source = source;
+    if(dueDate !== (it.due_date || null)) patch.due_date = dueDate;
     close();
     if(Object.keys(patch).length === 0) return;
     await saveEdit(it.id, patch);
   });
 }
 
-function wireEditControls(rows){
-  root.querySelectorAll("[data-edit-id]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const it = rows.find(r => r.id === btn.dataset.editId);
+function wireRowOpen(rows){
+  root.querySelectorAll("[data-open-id]").forEach(el => {
+    el.addEventListener("click", () => {
+      const it = rows.find(r => r.id === el.dataset.openId);
       if(it) openEditModal(it);
+    });
+  });
+}
+
+function wireStarButtons(rows){
+  root.querySelectorAll("[data-star-id]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const it = rows.find(r => r.id === btn.dataset.starId);
+      if(!it) return;
+      const next = !it.important;
+      btn.disabled = true;
+      btn.classList.toggle("important", next);
+      btn.title = next ? "Remover importância" : "Marcar como importante";
+      try{
+        await api("action_edit", { id: it.id, important: next });
+        // Toggling importance changes sort order (important bumps to the
+        // top), so a full reload -- same as done/undo/delete/edit already
+        // do on this page -- is what keeps the list correctly ordered.
+        await load();
+      }catch(e){
+        if(e.unauthorized){ handleAuthError(e, load); return; }
+        btn.classList.toggle("important", it.important);
+        btn.title = it.important ? "Remover importância" : "Marcar como importante";
+        btn.disabled = false;
+        alert("Não foi possível salvar.");
+      }
     });
   });
 }

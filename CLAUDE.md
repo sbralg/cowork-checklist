@@ -9,6 +9,74 @@ Context file for Claude Code / Claude sessions working on this repo.
 > the names were `checklist-api` / `cowork-checklist` /
 > `cowork-assistant-backend`.**
 
+## Status (2026-09-01): `tarefas.html` gains a due date + a star (important), replacing the row's ✎/🗑 icons
+
+Backend half (schema + `maga-api` actions + the scheduled-task prompt) is
+in `sbralg/maga-api`'s own CLAUDE.md entry — this one is the front-end
+redesign, done against a mockup screenshot the user provided.
+
+- **Row restructure.** The checkbox is now its own sibling element instead
+  of wrapping the whole row in a `<label>` — the row body (badge + text +
+  meta) is a separate `.rowbody` element that opens the edit modal on tap,
+  so the two gestures ("mark done" vs. "edit") needed to be structurally
+  separate elements, not nested one inside the other. The ✎ and 🗑 buttons
+  are both gone from the row: tapping anywhere on the row body opens the
+  edit modal (✎'s old job), and a ⭐ sits where 🗑 used to be.
+- **⭐ star toggles `important` immediately**, no confirm dialog — cheap,
+  reversible household data, same reasoning `mcp-server`'s
+  `maga_add_task` already uses for its own no-confirm writes. Filled/
+  accent-colored when important, muted gray otherwise. Toggling it triggers
+  a full reload rather than an in-place DOM patch — the one deliberate
+  exception to this repo's usual "patch in place" convention, because
+  toggling importance changes SORT ORDER (important bumps to the top), and
+  this page already reloads for done/undo/delete/edit, so it's consistent
+  with itself rather than with the rest of the app.
+- **The meta line now shows `[emoji] [categoria]` and, when set,
+  `· 📅 [Hoje/Amanhã/"Qua, 02 Set 26"]`** — replacing the old "· desde
+  DD/MM" text entirely (a deliberate drop, per the mockup's minimalism, not
+  an oversight). Overdue (due date in the past, task still pending) turns
+  the icon+text red — and **keeps showing**, every day, until the task is
+  marked done: the user's explicit call over the more literal "hide once
+  the date passes" reading of the original ask.
+  - New page-local `parseDateOnly()`/`fmtDueLabel()`/`isOverdue()` in
+    `tarefas.html` (not `shared-format.js` — single consumer, and the
+    Hoje/Amanhã special-casing doesn't resemble anything `fmtDate()`/
+    `fmtDateTime()` already do, per that file's own "look-alike but
+    genuinely different" rule). **`parseDateOnly()` hand-parses the
+    `YYYY-MM-DD` string instead of `new Date(str)`** — the latter reads a
+    bare date as UTC midnight, which renders as the PREVIOUS day in
+    Brazil's UTC-3 offset. Worth remembering if a due-date-off-by-one bug
+    ever shows up here again.
+- **The add row gained a 📅 icon button between the text field and
+  "Adicionar"** — muted while no date is chosen for the task being typed,
+  accent-colored the moment one is picked, resetting to muted after the
+  task is added (free, since `render()` fully rebuilds the add form on
+  every reload anyway). It drives a hidden native `<input type="date">` via
+  `.showPicker()` (falling back to `.click()`), so setting a due date at
+  creation time needs no custom picker UI — same "build for Chrome/Android
+  first" tradeoff this app already made for the barcode scanner;
+  `showPicker()` needs a fairly modern Chromium.
+- **The edit modal gained a native date field ("Data de vencimento") with
+  a "Limpar" link to null it out**, and a "Remover" button in the footer
+  (danger-colored, left-aligned via `margin-right:auto` against
+  `.modal-actions`' `justify-content:flex-end`) replacing the row's old 🗑
+  — delete now always goes through the edit modal, with the same
+  `confirmModal()` confirmation as before.
+- **`test/tarefas.test.js`** extended for all of the above: the add-row
+  icon's gray→colored transition and its reset after adding, a starred
+  task landing first in the list, clicking the star/checkbox NOT opening
+  the edit modal (the row restructure's whole point), the overdue red
+  class after setting a past due date, "Limpar" clearing it, and delete
+  now happening via the modal's Remover button rather than a per-row
+  icon. The native date picker itself isn't drivable headlessly (same
+  limitation as the camera/barcode tests) — the hidden `<input
+  type="date">` is set directly via `page.evaluate` + a dispatched
+  `change` event, exercising the exact same handler a real picker
+  selection would. Due-date assertions use offsets from "today" computed
+  with LOCAL date parts (not `toISOString()`, which is UTC) so the test
+  can't drift a day off the page's own local-date math depending on
+  timezone. **Full 11-suite run green.**
+
 ## Status (2026-08-31): step 3 — front end points at `maga-api`
 
 - **`shared-api.js`**: the `API` const now hits
@@ -474,8 +542,10 @@ build step, no framework:
 - `index.html` — the **dashboard**: module tiles, no live data. The
   landing page since the 2026-08-20 refactor (see the dated entry below);
   it used to be the daily-task checklist, which moved to `tarefas.html`.
-- `tarefas.html` — the daily-task checklist (pending actions, done-tasks
-  history with undo, manual task creation, edit/delete). Renamed from
+- `tarefas.html` — the daily-task checklist (pending actions sorted
+  important-first then soonest due date, done-tasks history with undo,
+  manual task creation with an optional due date, a ⭐ star for importance,
+  and an edit modal for text/category/due date/delete). Renamed from
   `index.html` when the dashboard took over that filename.
 - `compras.html` — the shopping-list manager (multiple named lists,
   per-item price + quantity, purchased toggle, running totals, barcode

@@ -9,7 +9,9 @@
 // coverage, so a real behavior change (api()/handleAuthError()
 // unification, the fmtDateTime reconciliation) could have shipped
 // unnoticed. Covers the passphrase gate, the menu, the core create/edit/
-// delete/done/undo flows and the done-tasks section.
+// delete/done/undo flows, the done-tasks section, and (2026-09-01) the
+// due-date + important redesign: the star toggle, the add-row calendar
+// icon, the edit modal's date field + Remover button, and overdue styling.
 //
 // Same shape as compras.test.js/hoje.test.js: serves the repo root over
 // http and answers maga-api from an in-memory fake, so it never
@@ -49,12 +51,38 @@ function serve() {
   });
 }
 
+// LOCAL date parts, matching tarefas.html's own parseDateOnly()/startOfToday()
+// — using toISOString() (UTC) here would drift a day off theirs near midnight
+// in any non-UTC timezone, which is exactly the bug those functions exist to
+// avoid on the page side.
+function isoDateOffset(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return d.getFullYear() + '-' + mm + '-' + dd;
+}
+
+function sortActions(list) {
+  return list.slice().sort((a, b) => {
+    const ai = a.important ? 1 : 0, bi = b.important ? 1 : 0;
+    if (ai !== bi) return bi - ai;
+    const ad = a.due_date, bd = b.due_date;
+    if (ad !== bd) {
+      if (ad == null) return 1;
+      if (bd == null) return -1;
+      return ad < bd ? -1 : 1;
+    }
+    return (a.first_seen || '').localeCompare(b.first_seen || '');
+  });
+}
+
 const state = {
   actions: [
     { id: 'A1', text: 'Responder e-mail do banco', source: 'email',
-      status: 'pending', first_seen: '2026-08-19T10:00:00Z' },
+      status: 'pending', due_date: null, important: false, first_seen: '2026-08-19T10:00:00Z' },
     { id: 'A2', text: 'Ligar para o Igor', source: 'whatsapp',
-      status: 'pending', first_seen: '2026-08-19T11:00:00Z' },
+      status: 'pending', due_date: null, important: false, first_seen: '2026-08-19T11:00:00Z' },
   ],
   seq: 2,
 };
@@ -74,17 +102,20 @@ const state = {
     const body = route.request().postDataJSON();
     let resp;
     if (body.action === 'list') {
-      resp = { actions: state.actions.filter(a => a.status === 'pending') };
+      resp = { actions: sortActions(state.actions.filter(a => a.status === 'pending')) };
     } else if (body.action === 'action_create') {
-      const a = { id: 'A' + (++state.seq), text: body.text, source: 'manual',
-        status: 'pending', first_seen: new Date().toISOString() };
+      const a = { id: 'A' + (++state.seq), text: body.text, source: 'manual', status: 'pending',
+        due_date: 'due_date' in body ? body.due_date : null, important: !!body.important,
+        first_seen: new Date().toISOString() };
       state.actions.push(a);
-      resp = { ok: true, action: a };
+      resp = { action: a };
     } else if (body.action === 'action_edit') {
       const a = state.actions.find(x => x.id === body.id);
       if (a) {
         if ('text' in body) a.text = body.text;
         if ('source' in body) a.source = body.source;
+        if ('due_date' in body) a.due_date = body.due_date;
+        if ('important' in body) a.important = body.important;
       }
       resp = { ok: true, action: a };
     } else if (body.action === 'action_delete') {
@@ -116,6 +147,7 @@ const state = {
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
 
   const check = (label, cond) => { if (!cond) failures.push('FAIL: ' + label); };
+  const rowByText = (text) => page.$('.row:has-text("' + text + '")');
 
   // --- passphrase gate ---
   await page.goto(PAGE);
@@ -129,6 +161,7 @@ const state = {
   check('both seeded tasks render', (await page.$$('.row')).length === 2);
   check('the source badge/meta line renders, got: ' + await page.textContent('.row .meta'),
     (await page.textContent('.row .meta')).includes('E-mail'));
+  check('no due-date badge on an undated task', !(await page.textContent('.row .meta')).includes('📅'));
 
   // --- the hamburger menu lists every module, current page inert ---
   await page.click('#menu-btn');
@@ -148,17 +181,54 @@ const state = {
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('.menu-backdrop'), null, { timeout: 6000 });
 
-  // --- create ---
+  // --- create, with a due date set via the add-row calendar icon ---
+  check('the add-row calendar icon starts gray (unset)',
+    !(await page.$eval('#new-due-btn', el => el.classList.contains('set'))));
   await page.fill('#new-text', 'Comprar pilhas');
+  // The native date picker itself isn't drivable headlessly (same class of
+  // limitation as compras.html's camera/barcode tests) -- setting the
+  // underlying hidden input and firing 'change' exercises the exact same
+  // page-side handler a real picker selection would.
+  await page.evaluate((v) => {
+    const el = document.getElementById('new-due-input');
+    el.value = v; el.dispatchEvent(new Event('change'));
+  }, isoDateOffset(1));
+  check('the calendar icon turns colored once a date is chosen',
+    await page.$eval('#new-due-btn', el => el.classList.contains('set')));
   await page.click('#add-btn');
   await page.waitForFunction(() => document.querySelectorAll('.row').length === 3, null, { timeout: 6000 });
   check('a manually-created task appears', (await page.$$('.row')).length === 3);
   check('it carries the manual badge', (await page.textContent('#root')).includes('Manual'));
+  const newRow = await rowByText('Comprar pilhas');
+  check('its due date renders as "Amanhã"', (await newRow.textContent()).includes('📅 Amanhã'));
+  check('the add-row calendar icon resets to gray after adding',
+    !(await page.$eval('#new-due-btn', el => el.classList.contains('set'))));
 
-  // --- edit (text + category) ---
-  const rows = await page.$$('.row');
-  const lastRow = rows[rows.length - 1];
-  await lastRow.$eval('[data-edit-id]', el => el.click());
+  // --- star toggle bumps a task to the top, without opening the edit modal ---
+  const igorStar = await page.$('.row:has-text("Ligar para o Igor") [data-star-id]');
+  await igorStar.click();
+  await page.waitForFunction(() => {
+    const first = document.querySelector('#root > .card > .row');
+    return first && first.textContent.includes('Ligar para o Igor');
+  }, null, { timeout: 6000 });
+  check('the starred task is now first in the list',
+    (await page.textContent('#root > .card > .row:first-child')).includes('Ligar para o Igor'));
+  check('the star button shows as important', await page.$eval(
+    '.row:has-text("Ligar para o Igor") [data-star-id]', el => el.classList.contains('important')));
+  check('clicking the star did not open the edit modal', (await page.$$('.modal-backdrop')).length === 0);
+  check('clicking the checkbox does not open the edit modal either', await (async () => {
+    // Checking a box only enables the bulk "Concluir" bar -- it fires no
+    // API call by itself -- but re-unchecking it keeps this row's selection
+    // state clean for the steps that follow.
+    await page.click('.row:has-text("Comprar pilhas") input[type=checkbox]');
+    const opened = (await page.$$('.modal-backdrop')).length > 0;
+    await page.click('.row:has-text("Comprar pilhas") input[type=checkbox]');
+    return !opened;
+  })());
+
+  // --- edit modal: text + category (row body click opens it now, not a
+  // dedicated ✎ button) ---
+  await page.click('.row:has-text("Comprar pilhas") .rowbody');
   await page.waitForSelector('#edit-text-input', { timeout: 6000 });
   await page.fill('#edit-text-input', 'Comprar pilhas AA');
   await page.selectOption('#edit-cat-select', 'work');
@@ -169,14 +239,44 @@ const state = {
   check('the edited category is reflected in the meta line',
     (await page.textContent('#root')).includes('Trabalho'));
 
-  // --- delete ---
+  // --- edit modal: setting a past due date renders the overdue (red) badge ---
+  await page.click('.row:has-text("Comprar pilhas AA") .rowbody');
+  await page.waitForSelector('#edit-due-input', { timeout: 6000 });
+  await page.fill('#edit-due-input', isoDateOffset(-1));
+  await page.click('#edit-save');
+  await page.waitForFunction(
+    () => { const r = [...document.querySelectorAll('.row')].find(r => r.textContent.includes('Comprar pilhas AA'));
+      return r && r.querySelector('.due.overdue'); }, null, { timeout: 6000 });
+  const overdueRow = await rowByText('Comprar pilhas AA');
+  check('the overdue task keeps its 📅 badge (not hidden)', (await overdueRow.textContent()).includes('📅'));
+  check('the overdue badge carries the overdue class',
+    await overdueRow.$eval('.due', el => el.classList.contains('overdue')));
+
+  // --- edit modal: "Limpar" clears the due date ---
+  await page.click('.row:has-text("Comprar pilhas AA") .rowbody');
+  await page.waitForSelector('#edit-due-clear', { timeout: 6000 });
+  check('the due input is prefilled from the stored value',
+    (await page.inputValue('#edit-due-input')) === isoDateOffset(-1));
+  await page.click('#edit-due-clear');
+  check('Limpar empties the date field', (await page.inputValue('#edit-due-input')) === '');
+  await page.click('#edit-save');
+  await page.waitForFunction(
+    () => { const r = [...document.querySelectorAll('.row')].find(r => r.textContent.includes('Comprar pilhas AA'));
+      return r && !r.textContent.includes('📅'); }, null, { timeout: 6000 });
+  check('clearing the due date removes the badge',
+    !(await (await rowByText('Comprar pilhas AA')).textContent()).includes('📅'));
+
+  // --- delete now happens from inside the edit modal (Remover), not a
+  // per-row 🗑 button ---
   const beforeDelete = (await page.$$('.row')).length;
-  await page.click('.row:has-text("Ligar para o Igor") [data-del-id]');
+  await page.click('.row:has-text("Comprar pilhas AA") .rowbody');
+  await page.waitForSelector('#edit-delete', { timeout: 6000 });
+  await page.click('#edit-delete');
   await page.waitForSelector('#confirm-ok', { timeout: 6000 });
   await page.click('#confirm-ok');
   await page.waitForFunction(
     (n) => document.querySelectorAll('.row').length === n, beforeDelete - 1, { timeout: 6000 });
-  check('the deleted task is gone', !(await page.textContent('#root')).includes('Ligar para o Igor'));
+  check('the deleted task is gone', !(await page.textContent('#root')).includes('Comprar pilhas AA'));
 
   // --- done + the collapsible done-tasks section + undo ---
   const remainingRows = await page.$$('.row');
