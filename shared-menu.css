@@ -8,6 +8,15 @@
 }
 .menu-btn:hover{opacity:.7}
 .menu-btn:active{transform:scale(.9)}
+
+/* The small brand badge that sits at the right end of every page's header
+   row, opposite the hamburger. `align-self:center` because the header aligns
+   its <h1> on the baseline; `flex:none` so a long title never squashes it.
+   index.html uses the same asset large and centred, not this class. */
+.brand-mark{
+  width:30px;height:30px;flex:none;align-self:center;display:block;
+  margin-left:auto;
+}
 .menu-backdrop{
   position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;
   animation:modalFadeIn .15s ease;
@@ -33,6 +42,11 @@
   color:var(--muted);margin:14px 0 2px;padding:0 20px;
 }
 .menu-panel > .menu-group:first-child{margin-top:6px}
+
+/* The brand badge, centred at the top of the drawer above the first
+   destination. Same asset as the header mark and index hero. */
+.menu-brand{display:flex;justify-content:center;padding:2px 20px 10px;margin-bottom:4px;border-bottom:1px solid var(--border)}
+.menu-brand img{width:92px;height:92px;display:block}
 .menu-item:hover{background:rgba(127,127,127,.08)}
 .menu-item.active{color:var(--accent);font-weight:600}
 .menu-spacer{flex:1}

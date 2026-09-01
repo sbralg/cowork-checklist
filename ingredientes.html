@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Ingredientes">
-<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17120f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#faf8f4" media="(prefers-color-scheme: light)">
 <title>Ingredientes</title>
 <!--
   Data-free shell for the Ingredientes module — the layer BETWEEN a barcode
@@ -184,7 +184,7 @@ function navHeader(title, backAction){
   const topRow = '<header><div class="hleft">' +
     '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
     '<h1 style="flex:1">' + (backAction ? 'Ingredientes' : esc(title)) + '</h1>' +
-    '</div></header>';
+    '</div><img class="brand-mark" src="assets/logo-badge.svg" alt="Magá"></header>';
   if(!backAction) return topRow;
   return topRow + '<div class="subheader">' +
     '<button class="link" id="back">← Ingredientes</button>' +

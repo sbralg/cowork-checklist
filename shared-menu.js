@@ -61,6 +61,7 @@ function openMenu(){
   backdrop.className = "menu-backdrop";
   backdrop.innerHTML =
     '<div class="menu-panel" id="menu-panel">' +
+      '<div class="menu-brand"><img src="assets/logo-badge.svg" alt="Magá"></div>' +
       itemsHtml +
       '<div class="menu-spacer"></div>' +
       '<button class="menu-item logout" id="menu-logout">🚪 Sair</button>' +

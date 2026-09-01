@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Hoje">
-<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17120f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#faf8f4" media="(prefers-color-scheme: light)">
 <title>Hoje — resumo do dia</title>
 <!--
   Data-free shell for the daily summary ("Hoje"). Hosted on public GitHub
@@ -39,6 +39,24 @@
   header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 0 16px}
   .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
   h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
+
+  /* ---- greeting ---- the assistant "lives" on this page: her avatar plus
+     a short, day-aware line. The text is payload.saudacao, written by the
+     morning report generator; a static line stands in when the field is
+     absent (old reports, or a partial payload).
+     assets/avatar-maga.png is the full-size portrait (~2.4 MB) framed to
+     the face here with object-fit/position — a pre-cropped square headshot
+     dropped in at that path will just work too, only faster to load. */
+  .greeting{display:flex;align-items:center;gap:12px;margin:2px 0 16px}
+  .greeting .av{
+    width:58px;height:58px;border-radius:50%;flex:none;
+    border:2px solid var(--accent);background:var(--card) center/cover no-repeat;
+    /* the source is the full portrait — zoom + offset to frame the face */
+    background-image:url(assets/avatar-maga.png);
+    background-size:230%;
+    background-position:40% 17%;
+  }
+  .greeting p{margin:0;font-size:14px;line-height:1.45;color:var(--text)}
 
   /* ---- report ---- */
   .datebar{
@@ -154,7 +172,22 @@ function headerHtml(){
   return '<header><div class="hleft">' +
     '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
     '<h1>Resumo do dia</h1>' +
-    '</div></header>';
+    '</div><img class="brand-mark" src="assets/logo-badge.svg" alt="Magá"></header>';
+}
+
+// The assistant's daily hello. `saudacao` is free text written by the
+// morning report generator (kept short there); when it is missing we show
+// a fixed, friendly line rather than nothing. `assets/avatar-maga.png` is a
+// plain brand-coloured placeholder for now — drop a real headshot in at
+// that same path and it appears with no code change.
+const SAUDACAO_FALLBACK = "Bom dia! Que o dia renda coisas boas por aqui. 💛";
+function greetingHtml(p){
+  const text = (p && typeof p.saudacao === "string" && p.saudacao.trim())
+    ? p.saudacao.trim() : SAUDACAO_FALLBACK;
+  return '<div class="greeting">' +
+    '<span class="av" role="img" aria-label="Magá"></span>' +
+    '<p>' + esc(text) + '</p>' +
+    '</div>';
 }
 
 // Only ever emit a class we control, never whatever string the payload
@@ -338,6 +371,7 @@ function render(data){
   const report = data.report;
   if(!report){
     root.innerHTML = headerHtml() +
+      greetingHtml(null) +
       '<p class="msg">Nenhum resumo disponível ainda.</p>' +
       '<p class="msg">O resumo é gerado todo dia às 07:00.</p>';
     wireMenuButton();
@@ -346,6 +380,7 @@ function render(data){
   const p = report.payload || {};
   const statuses = data.action_status || {};
   root.innerHTML = headerHtml() +
+    greetingHtml(p) +
     dateBarHtml(report, data.prev_date, data.next_date) +
     summaryCardHtml(p, statuses) +
     acoesHtml(p, statuses) +

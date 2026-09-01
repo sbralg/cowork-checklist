@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Cowork">
-<meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17120f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#faf8f4" media="(prefers-color-scheme: light)">
 <title>Início</title>
 <!--
   Data-free shell for the dashboard — the landing page. Same pattern as
@@ -44,6 +44,13 @@
   .hleft{display:flex;align-items:baseline;gap:10px;min-width:0;flex:1}
   h1{font-size:20px;font-weight:650;margin:0;min-width:0;overflow-wrap:break-word}
   .sub{font-size:13px;color:var(--muted);margin:2px 0 24px}
+
+  /* The landing page carries the brand large and centred — the one place
+     the full badge (rings + "Cozinha Artesanal") is big enough to read.
+     Every other page uses the same asset small, right-aligned in the
+     header (.brand-mark in shared-menu.css). */
+  .brand-hero{display:flex;justify-content:center;margin:14px 0 22px}
+  .brand-hero img{width:min(184px,48vw);height:auto;display:block}
 
   .tiles{
     display:grid;grid-template-columns:repeat(2,1fr);gap:12px;
@@ -134,7 +141,9 @@ function render(){
     '<header><div class="hleft">' +
       '<button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>' +
       '<h1>Início</h1>' +
-    '</div></header>' + body;
+    '</div></header>' +
+    '<div class="brand-hero"><img src="assets/logo-badge.svg" alt="Magá — Cozinha Artesanal"></div>' +
+    body;
   wireMenuButton();
 }
 

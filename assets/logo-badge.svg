@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Magá — Cozinha Artesanal">
+  <title>Magá — Cozinha Artesanal</title>
+  <defs>
+    <!-- brand tokens, kept local so the file works on any background -->
+    <style>
+      .crimson { fill: #b3121b; }
+      .maroon  { fill: #3c1417; }
+      .gold    { fill: none; stroke: #f0a81e; }
+      .goldfill{ fill: #f0a81e; }
+      .word    { fill: none; stroke: #fcfbf6; stroke-width: 11; stroke-linecap: round; stroke-linejoin: round; }
+      .sub     { fill: #f0a81e; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; font-weight: 700; letter-spacing: 3px; }
+    </style>
+  </defs>
+
+  <!-- outer dotted ring -->
+  <circle class="gold" cx="120" cy="120" r="112" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="0.5 5"/>
+  <!-- inner solid ring -->
+  <circle class="gold" cx="120" cy="120" r="96" stroke-width="6"/>
+  <!-- crimson disc -->
+  <circle class="crimson" cx="120" cy="120" r="92.5"/>
+
+  <!-- subtitle on the disc, below the banner -->
+  <text class="sub" x="120" y="173" text-anchor="middle" font-size="13">COZINHA</text>
+  <text class="sub" x="120" y="192" text-anchor="middle" font-size="13">ARTESANAL</text>
+
+  <!-- maroon banner, overhanging the disc left and right -->
+  <rect class="maroon" x="6" y="93" width="228" height="56" rx="3"/>
+
+  <!-- gold flicks off each end of the banner -->
+  <g class="goldfill">
+    <g stroke="#f0a81e" stroke-width="3.4" stroke-linecap="round">
+      <path d="M27,121 L11,109"/><path d="M26,125 L8,125"/><path d="M27,129 L11,141"/>
+      <path d="M213,121 L229,109"/><path d="M214,125 L232,125"/><path d="M213,129 L229,141"/>
+    </g>
+    <circle cx="6" cy="104" r="2"/><circle cx="5" cy="146" r="2"/>
+    <circle cx="234" cy="104" r="2"/><circle cx="235" cy="146" r="2"/>
+  </g>
+
+  <!-- wordmark: MAGÁ, hand-built strokes with a slight forward lean -->
+  <g class="word" stroke-width="10.5">
+    <!-- M -->
+    <path d="M42,136 L52,97 L61,123 L74,97 L79,136"/>
+    <!-- A -->
+    <path d="M86,136 L106,97 L118,136"/>
+    <path d="M92,120 L112,120"/>
+    <!-- G -->
+    <path d="M164,103 A19,20 0 1 0 165,129 L165,118 L154,118"/>
+    <!-- A with acute accent -->
+    <path d="M176,136 L196,97 L208,136"/>
+    <path d="M182,120 L202,120"/>
+    <path d="M189,89 L199,81" stroke-width="8"/>
+  </g>
+</svg>
