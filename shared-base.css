@@ -108,6 +108,11 @@ input[type=password]{
 }
 .loginerr{color:var(--danger);font-size:13px;min-height:18px;margin-bottom:8px}
 .login-adv{max-width:360px;margin:0 auto;text-align:left}
+.login-env{max-width:360px;margin:0 auto 12px;border:1px solid var(--border-strong);border-radius:12px;padding:8px 12px;text-align:left}
+.login-env legend{font-size:12px;color:var(--muted);padding:0 4px}
+.login-env label{display:block;font-size:14px;margin:5px 0;cursor:pointer}
+.login-env input{margin-right:8px}
+.login-adv button{margin-top:10px}
 .login-adv summary{color:var(--muted);font-size:13px;cursor:pointer;margin:4px 0 8px}
 .login-adv input[type=text]{
   width:100%;font:inherit;font-size:13px;padding:12px;border-radius:12px;

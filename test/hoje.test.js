@@ -142,6 +142,7 @@ const REPORTS = {
   await page.goto(PAGE);
   await page.waitForSelector('.login', { timeout: 6000 });
   check('login screen names the page', (await page.textContent('.login h2')) === 'Resumo do dia');
+  await page.click('.login-adv summary'); // reveal the collapsed "Entrar com senha" section
   await page.fill('#pw', 'wrong');
   await page.click('#enter');
   await page.waitForSelector('.loginerr:not(:empty)', { timeout: 6000 });
@@ -152,6 +153,7 @@ const REPORTS = {
   // A second attempt, this time correct — matches what the fake route
   // above treats as authorized.
   passphraseSet = true;
+  await page.click('.login-adv summary'); // login re-rendered after the refusal, details closed again
   await page.fill('#pw', 'x');
   await page.click('#enter');
   await page.waitForSelector('.datebar', { timeout: 6000 });

@@ -155,6 +155,8 @@ const state = {
   await page.goto(PAGE);
   await page.waitForSelector('.login', { timeout: 6000 });
   check('login screen names the page', (await page.textContent('.login h2')) === 'Tarefas pendentes');
+  check('login screen offers OAuth + the env radios', (await page.$('#oauth')) !== null && (await page.$$('input[name="env"]')).length === 3);
+  await page.click('.login-adv summary'); // reveal the collapsed "Entrar com senha" section
   await page.fill('#pw', 'x');
   await page.click('#enter');
   await page.waitForSelector('.row', { timeout: 6000 });

@@ -190,8 +190,9 @@ const ingredientOf = (id) => state.ingredients.find(i => i.id === id);
 
   // --- the passphrase gate, same shell as every other page ---
   await page.goto(PAGE);
-  await page.waitForSelector('#pw', { timeout: 6000 });
+  await page.waitForSelector('.login', { timeout: 6000 });
   check('locked until a passphrase is entered', (await page.$('#pw')) !== null);
+  await page.click('.login-adv summary'); // reveal the collapsed "Entrar com senha" section
   await page.fill('#pw', 'x');
   await page.click('#enter');
   await page.waitForSelector('.row[data-id]', { timeout: 6000 });
