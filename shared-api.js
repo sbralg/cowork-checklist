@@ -8,13 +8,18 @@
 // showLogin()/handleAuthError() can render the right copy and resume the
 // right loader without every call site needing to pass that in.
 
-const API = "https://opehbckfmfschpvbhxvo.supabase.co/functions/v1/maga-api";
+// The maga-api endpoint. A public URL (no secret), but it selects WHICH
+// dataset you reach - e.g. a per-person prod project - so it is overridable
+// per browser in localStorage, next to the passphrase. Unset = the default.
+const DEFAULT_API = "https://opehbckfmfschpvbhxvo.supabase.co/functions/v1/maga-api";
+const API_KEY = "checklist_api";
+function getApi(){ return localStorage.getItem(API_KEY) || DEFAULT_API; }
 const PASS_KEY = "checklist_pass";
 
 function getPass(){ return localStorage.getItem(PASS_KEY) || ""; }
 
 async function api(action, extra){
-  const r = await fetch(API, {
+  const r = await fetch(getApi(), {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-checklist-pass": getPass() },
     body: JSON.stringify(Object.assign({ action }, extra || {}))
@@ -47,6 +52,7 @@ async function api(action, extra){
 //   };
 function showLogin(errText){
   if(PAGE_LOGIN.beforeShow) PAGE_LOGIN.beforeShow();
+  const apiOverride = getApi() === DEFAULT_API ? "" : getApi();
   root.innerHTML =
     '<div class="login">' +
       '<h2>' + esc(PAGE_LOGIN.title) + '</h2>' +
@@ -54,11 +60,23 @@ function showLogin(errText){
       '<div class="loginerr">' + (errText ? esc(errText) : "") + '</div>' +
       '<input type="password" id="pw" autocomplete="current-password" placeholder="Senha" />' +
       '<button class="primary" id="enter">Entrar</button>' +
+      '<details class="login-adv"' + (apiOverride ? " open" : "") + '>' +
+        '<summary>Avançado</summary>' +
+        '<input type="text" id="api" autocomplete="off" spellcheck="false" ' +
+          'placeholder="Endpoint da API (em branco = padrão)" value="' + esc(apiOverride) + '" />' +
+      '</details>' +
     '</div>';
   const pw = document.getElementById("pw");
   const go = () => {
     const v = pw.value.trim();
     if(!v) return;
+    const a = document.getElementById("api").value.trim();
+    if(a && !/^https?:\/\/\S+$/.test(a)){
+      root.querySelector(".loginerr").textContent = "Endpoint inválido.";
+      return;
+    }
+    if(a && a !== DEFAULT_API) localStorage.setItem(API_KEY, a);
+    else localStorage.removeItem(API_KEY);
     localStorage.setItem(PASS_KEY, v);
     PAGE_LOGIN.onSuccess();
   };
