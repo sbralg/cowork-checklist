@@ -155,7 +155,10 @@ const state = {
   await page.goto(PAGE);
   await page.waitForSelector('.login', { timeout: 6000 });
   check('login screen names the page', (await page.textContent('.login h2')) === 'Tarefas pendentes');
-  check('login screen offers OAuth + the env radios', (await page.$('#oauth')) !== null && (await page.$$('input[name="env"]')).length === 3);
+  // Env radios only exist once a device has an actual cached environment
+  // list from a prior login (see shared-api.js's ENV_CACHE_KEY comment) -
+  // this fresh test context has none, so the picker is absent by design.
+  check('login screen offers OAuth, no env picker on a device with no login history', (await page.$('#oauth')) !== null && (await page.$$('input[name="env"]')).length === 0);
   await page.click('.login-adv summary'); // reveal the collapsed "Entrar com senha" section
   await page.fill('#pw', 'x');
   await page.click('#enter');

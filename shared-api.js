@@ -15,8 +15,15 @@ const DEFAULT_API = "https://opehbckfmfschpvbhxvo.supabase.co/functions/v1/maga-
 const API_KEY = "checklist_api";
 function getApi(){ return localStorage.getItem(API_KEY) || DEFAULT_API; }
 const PASS_KEY = "checklist_pass";
-const ENV_CHOICE_KEY = "checklist_env_choice"; // which radio ("padrao"|"dev"|"prod")
+const ENV_CHOICE_KEY = "checklist_env_choice"; // which radio was picked (a real env id, or "padrao" before any account is known)
 const ENV_ID_KEY = "checklist_env";            // resolved env id, informational
+// The account's own environment list ({defaultEnv, environments:[{id,label}]}),
+// cached from GET /web-config right after each OAuth login (see completeOAuth
+// below) - the login screen has no way to know these BEFORE a login, since
+// /web-config needs a bearer token. Different accounts on the same shared
+// device (Alexandre/Bia) can have entirely different lists; this always
+// reflects whichever account most recently completed the OAuth flow here.
+const ENV_CACHE_KEY = "checklist_envs_cache";
 
 // OAuth against the Magá MCP server: the front end runs the auth-code +
 // PKCE flow, then GET /web-config hands back {apiUrl, passphrase} for the
@@ -73,9 +80,21 @@ async function api(action, extra){
 //   };
 function showLogin(errText){
   if(PAGE_LOGIN.beforeShow) PAGE_LOGIN.beforeShow();
-  const choice = localStorage.getItem(ENV_CHOICE_KEY) || "padrao";
+  // The env picker only shows real, known choices - see ENV_CACHE_KEY's
+  // comment. Nothing cached yet (first login on this device) or an
+  // account with just one environment (e.g. Bia's prod-only setup): no
+  // fieldset at all, since there's nothing to choose between.
+  let envCache = null;
+  try { envCache = JSON.parse(localStorage.getItem(ENV_CACHE_KEY) || "null"); } catch(_){ envCache = null; }
+  const envs = (envCache && Array.isArray(envCache.environments)) ? envCache.environments : [];
+  const defaultEnvId = envCache ? envCache.defaultEnv : null;
+  const choice = localStorage.getItem(ENV_CHOICE_KEY) || defaultEnvId || "padrao";
   const radio = (val, label) =>
-    '<label><input type="radio" name="env" value="' + val + '"' + (choice === val ? " checked" : "") + '> ' + label + '</label>';
+    '<label><input type="radio" name="env" value="' + esc(val) + '"' + (choice === val ? " checked" : "") + '> ' + esc(label) +
+    (val === defaultEnvId ? ' <span class="env-default">(padrão)</span>' : '') + '</label>';
+  const envFieldset = envs.length > 1
+    ? '<fieldset class="login-env"><legend>Ambiente</legend>' + envs.map(e => radio(e.id, e.label)).join("") + '</fieldset>'
+    : "";
   root.innerHTML =
     '<div class="login">' +
       '<img class="login-logo" src="assets/logo-badge.svg" alt="Magá">' +
@@ -85,15 +104,13 @@ function showLogin(errText){
       '<button class="primary" id="oauth">Continuar</button>' +
       '<details class="login-adv">' +
         '<summary>Opções avançadas</summary>' +
-        '<fieldset class="login-env"><legend>Ambiente</legend>' +
-          radio("padrao", "Padrão") + radio("dev", "Dev") + radio("prod", "Prod") +
-        '</fieldset>' +
+        envFieldset +
         '<input type="password" id="pw" autocomplete="current-password" placeholder="Senha" />' +
         '<button class="primary" id="enter" disabled>Entrar com senha</button>' +
         '<a class="link" id="reset-mcp-session" href="#">Redefinir sessão salva (trocar de conta)</a>' +
       '</details>' +
     '</div>';
-  const pickedEnv = () => (root.querySelector('input[name="env"]:checked') || {}).value || "padrao";
+  const pickedEnv = () => (root.querySelector('input[name="env"]:checked') || {}).value || defaultEnvId || "padrao";
   document.getElementById("oauth").addEventListener("click", () => {
     localStorage.setItem(ENV_CHOICE_KEY, pickedEnv());
     startOAuth(pickedEnv());
@@ -208,6 +225,15 @@ async function completeOAuth(){
     const cr = await fetch(MCP_BASE + "/web-config", { headers: { Authorization: "Bearer " + access_token } });
     if(!cr.ok) throw new Error("web-config " + cr.status);
     const cfg = await cr.json();
+    // Cached BEFORE resolving `wanted` below, so even a request for an
+    // environment this account doesn't have still leaves the login
+    // screen's picker knowing the real list for next time.
+    try {
+      localStorage.setItem(ENV_CACHE_KEY, JSON.stringify({
+        defaultEnv: cfg.defaultEnv,
+        environments: (cfg.environments || []).map(e => ({ id: e.id, label: e.label }))
+      }));
+    } catch(_){ /* localStorage unavailable - the picker just falls back to nothing cached */ }
     const wanted = st.envChoice === "padrao" ? cfg.defaultEnv : st.envChoice;
     const env = (cfg.environments || []).find(e => e.id === wanted);
     if(!env){

@@ -113,6 +113,7 @@ input[type=password]{
 .login-env legend{font-size:12px;color:var(--muted);padding:0 4px}
 .login-env label{display:block;font-size:14px;margin:5px 0;cursor:pointer}
 .login-env input{margin-right:8px}
+.env-default{color:var(--muted);font-size:12px}
 .login-adv button{margin-top:10px}
 .login-adv summary{color:var(--muted);font-size:13px;cursor:pointer;margin:4px 0 8px}
 .login-adv .link{display:block;text-align:center;margin-top:14px}

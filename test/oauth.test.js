@@ -51,7 +51,13 @@ function serve() {
   const ORIGIN = 'http://127.0.0.1:' + server.address().port;
   const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 
-  async function run(envChoice, environments) {
+  // `seedCache` mimics a device that already completed a login before -
+  // that's the ONLY way the env radios exist at all (see shared-api.js's
+  // ENV_CACHE_KEY comment): the login screen has no way to know an
+  // account's real environment list before a token exists, so a brand
+  // new device's login screen shows no picker, just "Continuar". `envChoice`
+  // omitted means: don't touch the picker at all, just click Continuar.
+  async function run(envChoice, environments, { seedCache } = {}) {
     const ctx = await browser.newContext({ viewport: { width: 414, height: 860 } });
     const seen = { token: null, webConfigAuth: null, apiPass: null };
 
@@ -85,18 +91,27 @@ function serve() {
 
     const page = await ctx.newPage();
     await page.goto(ORIGIN + '/tarefas.html');
+    if (seedCache) {
+      await page.evaluate((cache) => localStorage.setItem('checklist_envs_cache', JSON.stringify(cache)), seedCache);
+      await page.reload();
+    }
     await page.waitForSelector('.login', { timeout: 6000 });
-    await page.click('.login-adv summary'); // reveal the collapsed "Opções avançadas" section (env radios live there now)
-    await page.check('input[name="env"][value="' + envChoice + '"]');
+    if (envChoice !== undefined) {
+      await page.click('.login-adv summary'); // reveal the collapsed "Opções avançadas" section (env radios live there now)
+      await page.check('input[name="env"][value="' + envChoice + '"]');
+    }
     await page.click('#oauth');
     return { ctx, page, seen };
   }
 
-  // --- happy path: pick "prod", account has prod --------------------------
+  // --- a device with a cached 2-environment list: explicitly pick the
+  // non-default one, and the default radio is labelled (padrão) ----------
   {
+    const seedCache = { defaultEnv: 'dev', environments: [{ id: 'dev', label: 'Dev' }, { id: 'prod', label: 'Prod' }] };
     const { ctx, page, seen } = await run('prod', [
+      { id: 'dev', label: 'Dev', apiUrl: 'https://maga-dev-test.example/functions/v1/maga-api', passphrase: 'PP-DEV' },
       { id: 'prod', label: 'Prod', apiUrl: PROD_API, passphrase: 'PP-PROD' },
-    ]);
+    ], { seedCache });
     await page.waitForSelector('.row', { timeout: 8000 });
     const ls = await page.evaluate(() => ({
       api: localStorage.getItem('checklist_api'),
@@ -107,31 +122,62 @@ function serve() {
     check('token exchange sent code_verifier and NO client_secret',
       !!seen.token.code_verifier && seen.token.client_id === 'maga-web' && seen.token.client_secret === undefined && seen.token.grant_type === 'authorization_code');
     check('/web-config called with the bearer token', seen.webConfigAuth === 'Bearer AT-123');
-    check('chosen env apiUrl stored', ls.api === PROD_API);
+    check('the explicitly-picked (non-default) env apiUrl stored', ls.api === PROD_API);
     check('chosen env passphrase stored', ls.pass === 'PP-PROD');
     check('resolved env id stored', ls.env === 'prod');
     check('radio choice remembered', ls.choice === 'prod');
     check('maga-api hit with the env passphrase', seen.apiPass === 'PP-PROD');
     check('the page rendered a row after OAuth login', await page.$('.row') !== null);
+    // The mocked /web-config always answers defaultEnv:"prod" (see run()),
+    // while the SEEDED cache above said "dev" - if the cache still read
+    // "dev" here it would mean the login flow trusted the stale seed
+    // instead of refreshing from this login's own real response.
+    check('the env cache was refreshed from the real /web-config response, not left at the stale seeded value',
+      await page.evaluate(() => JSON.parse(localStorage.getItem('checklist_envs_cache')).defaultEnv) === 'prod');
     await ctx.close();
   }
 
-  // --- "padrao" resolves to defaultEnv ("prod") --------------------------
+  // --- the (padrão) marker renders on the account's actual default, not
+  // on whichever radio happens to be checked --------------------------
   {
-    const { ctx, page } = await run('padrao', [
+    const ctx = await browser.newContext({ viewport: { width: 414, height: 860 } });
+    const page = await ctx.newPage();
+    await page.goto(ORIGIN + '/tarefas.html');
+    await page.evaluate((cache) => localStorage.setItem('checklist_envs_cache', JSON.stringify(cache)), {
+      defaultEnv: 'dev', environments: [{ id: 'dev', label: 'Dev' }, { id: 'prod', label: 'Prod' }],
+    });
+    await page.reload();
+    await page.waitForSelector('.login', { timeout: 6000 });
+    await page.click('.login-adv summary');
+    const labels = await page.$$eval('.login-env label', els => els.map(el => el.textContent.replace(/\s+/g, ' ').trim()));
+    check('exactly two env options rendered (no more "Padrão" meta-option), got: ' + JSON.stringify(labels), labels.length === 2);
+    check('the default env (Dev) is marked (padrão), got: ' + JSON.stringify(labels), labels.some(l => /^Dev.*\(padrão\)$/.test(l)));
+    check('the non-default env (Prod) is NOT marked (padrão), got: ' + JSON.stringify(labels), labels.some(l => l === 'Prod'));
+    check('the default env radio is pre-checked on load',
+      await page.$eval('input[name="env"][value="dev"]', el => el.checked) === true);
+    await ctx.close();
+  }
+
+  // --- a brand new device (nothing cached yet): no picker at all, just
+  // "Continuar" - resolves via the server's own default -------------------
+  {
+    const { ctx, page } = await run(undefined, [
       { id: 'prod', label: 'Prod', apiUrl: PROD_API, passphrase: 'PP-PROD' },
     ]);
+    check('no env fieldset on a device with no login history', await page.$('.login-env') === null);
     await page.waitForSelector('.row', { timeout: 8000 });
     const api = await page.evaluate(() => localStorage.getItem('checklist_api'));
-    check('padrao followed defaultEnv to prod', api === PROD_API);
+    check('with nothing cached, "Continuar" alone followed the server default to prod', api === PROD_API);
     await ctx.close();
   }
 
-  // --- pick an env the account doesn't have -> friendly error on oauth.html
+  // --- a stale cache offering "dev", but the account no longer has it ->
+  // friendly error on oauth.html, not a silent wrong login -----------------
   {
+    const seedCache = { defaultEnv: 'prod', environments: [{ id: 'prod', label: 'Prod' }, { id: 'dev', label: 'Dev' }] };
     const { ctx, page } = await run('dev', [
       { id: 'prod', label: 'Prod', apiUrl: PROD_API, passphrase: 'PP-PROD' },
-    ]);
+    ], { seedCache });
     await page.waitForSelector('#oauth-status.err', { timeout: 8000 });
     const msg = await page.textContent('#oauth-status');
     check('no-access env shows an explanatory error, got: ' + msg, /não tem acesso/.test(msg) && /dev/.test(msg));
