@@ -100,6 +100,7 @@ button.primary.alt.danger{color:var(--danger)}
 button.primary.alt.danger:hover:not(:disabled){background:rgba(220,38,38,.14)}
 
 .login{max-width:360px;margin:12vh auto 0;text-align:center}
+.login-logo{width:min(120px,40vw);height:auto;display:block;margin:0 auto 16px}
 .login h2{font-size:18px;margin:0 0 4px}
 .login p{color:var(--muted);font-size:14px;margin:0 0 20px}
 input[type=password]{
@@ -114,7 +115,3 @@ input[type=password]{
 .login-env input{margin-right:8px}
 .login-adv button{margin-top:10px}
 .login-adv summary{color:var(--muted);font-size:13px;cursor:pointer;margin:4px 0 8px}
-.login-adv input[type=text]{
-  width:100%;font:inherit;font-size:13px;padding:12px;border-radius:12px;
-  border:1px solid var(--border-strong);background:var(--card);color:var(--text);margin-bottom:12px;
-}

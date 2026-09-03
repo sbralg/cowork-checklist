@@ -74,24 +74,22 @@ async function api(action, extra){
 function showLogin(errText){
   if(PAGE_LOGIN.beforeShow) PAGE_LOGIN.beforeShow();
   const choice = localStorage.getItem(ENV_CHOICE_KEY) || "padrao";
-  const apiOverride = getApi() === DEFAULT_API ? "" : getApi();
   const radio = (val, label) =>
     '<label><input type="radio" name="env" value="' + val + '"' + (choice === val ? " checked" : "") + '> ' + label + '</label>';
   root.innerHTML =
     '<div class="login">' +
+      '<img class="login-logo" src="assets/logo-badge.svg" alt="Magá">' +
       '<h2>' + esc(PAGE_LOGIN.title) + '</h2>' +
       '<p>' + esc(PAGE_LOGIN.subtitle) + '</p>' +
       '<div class="loginerr">' + (errText ? esc(errText) : "") + '</div>' +
-      '<fieldset class="login-env"><legend>Ambiente</legend>' +
-        radio("padrao", "Padrão") + radio("dev", "Dev") + radio("prod", "Prod") +
-      '</fieldset>' +
-      '<button class="primary" id="oauth">Entrar com Magá</button>' +
-      '<details class="login-adv"' + (apiOverride ? " open" : "") + '>' +
-        '<summary>Entrar com senha</summary>' +
+      '<button class="primary" id="oauth">Continuar</button>' +
+      '<details class="login-adv">' +
+        '<summary>Opções avançadas</summary>' +
+        '<fieldset class="login-env"><legend>Ambiente</legend>' +
+          radio("padrao", "Padrão") + radio("dev", "Dev") + radio("prod", "Prod") +
+        '</fieldset>' +
         '<input type="password" id="pw" autocomplete="current-password" placeholder="Senha" />' +
-        '<input type="text" id="api" autocomplete="off" spellcheck="false" ' +
-          'placeholder="Endpoint da API (em branco = padrão)" value="' + esc(apiOverride) + '" />' +
-        '<button id="enter">Entrar</button>' +
+        '<button class="primary" id="enter" disabled>Entrar com senha</button>' +
       '</details>' +
     '</div>';
   const pickedEnv = () => (root.querySelector('input[name="env"]:checked') || {}).value || "padrao";
@@ -100,22 +98,17 @@ function showLogin(errText){
     startOAuth(pickedEnv());
   });
   const pw = document.getElementById("pw");
+  const enterBtn = document.getElementById("enter");
+  pw.addEventListener("input", () => { enterBtn.disabled = !pw.value.trim(); });
   const go = () => {
     const v = pw.value.trim();
     if(!v) return;
-    const a = document.getElementById("api").value.trim();
-    if(a && !/^https?:\/\/\S+$/.test(a)){
-      root.querySelector(".loginerr").textContent = "Endpoint inválido.";
-      return;
-    }
-    if(a && a !== DEFAULT_API) localStorage.setItem(API_KEY, a);
-    else localStorage.removeItem(API_KEY);
     localStorage.setItem(PASS_KEY, v);
     localStorage.setItem(ENV_CHOICE_KEY, pickedEnv());
     PAGE_LOGIN.onSuccess();
   };
-  document.getElementById("enter").addEventListener("click", go);
-  pw.addEventListener("keydown", e => { if(e.key === "Enter") go(); });
+  enterBtn.addEventListener("click", go);
+  pw.addEventListener("keydown", e => { if(e.key === "Enter" && !enterBtn.disabled) go(); });
 }
 
 // Standard "something went wrong" split: an expired/wrong passphrase goes

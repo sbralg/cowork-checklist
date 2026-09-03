@@ -86,6 +86,7 @@ function serve() {
     const page = await ctx.newPage();
     await page.goto(ORIGIN + '/tarefas.html');
     await page.waitForSelector('.login', { timeout: 6000 });
+    await page.click('.login-adv summary'); // reveal the collapsed "Opções avançadas" section (env radios live there now)
     await page.check('input[name="env"][value="' + envChoice + '"]');
     await page.click('#oauth');
     return { ctx, page, seen };
