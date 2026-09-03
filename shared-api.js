@@ -134,23 +134,27 @@ function showLogin(errText){
 }
 
 // Clears every cached credential (this device's saved passphrase/API
-// override/chosen environment) AND the MCP server's own short-lived
-// mcp_login bridge cookie (see maga-infra's oauth/sessionCookie.js) - that
-// cookie is what lets "Continuar" silently re-approve for up to 10 minutes
-// after a login, skipping the account/password form. A plain "Sair" only
-// clears the local cache (see shared-menu.js) and leaves that cookie
-// alone, which is the point: it's the FAST path for "close this device's
-// session", and the next OAuth login on it stays a one-tap "Continuar".
-// This is the deliberately slower, explicit reset for switching accounts
-// on a shared device or not trusting whatever just silently re-approved.
-// A real top-level navigation, not fetch() - the cookie is SameSite=Lax,
-// so only a genuine top-level GET carries it; a cross-origin fetch()
-// (even with credentials:"include") would not.
+// override/chosen environment/cached environment list) AND the MCP
+// server's own short-lived mcp_login bridge cookie (see maga-infra's
+// oauth/sessionCookie.js) - that cookie is what lets "Continuar" silently
+// re-approve for up to 10 minutes after a login, skipping the account/
+// password form. A plain "Sair" only clears the local cache (see
+// shared-menu.js) and leaves that cookie alone, which is the point: it's
+// the FAST path for "close this device's session", and the next OAuth
+// login on it stays a one-tap "Continuar". This is the deliberately
+// slower, explicit reset for switching accounts on a shared device or not
+// trusting whatever just silently re-approved - ENV_CACHE_KEY has to go
+// too, or the picker would keep showing the PREVIOUS account's
+// environments/default until a full new login overwrote it. A real
+// top-level navigation, not fetch() - the cookie is SameSite=Lax, so only
+// a genuine top-level GET carries it; a cross-origin fetch() (even with
+// credentials:"include") would not.
 function logoutMcpSession(){
   localStorage.removeItem(PASS_KEY);
   localStorage.removeItem(API_KEY);
   localStorage.removeItem(ENV_CHOICE_KEY);
   localStorage.removeItem(ENV_ID_KEY);
+  localStorage.removeItem(ENV_CACHE_KEY);
   location.href = MCP_BASE + "/logout?return=" + encodeURIComponent(location.href);
 }
 

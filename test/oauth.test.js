@@ -186,6 +186,56 @@ function serve() {
     await ctx.close();
   }
 
+  // --- "Redefinir sessão salva" clears EVERY cached credential, including
+  // the cached environment list - a stale env picker from the previous
+  // account must not survive the reset ------------------------------------
+  {
+    const ctx = await browser.newContext({ viewport: { width: 414, height: 860 } });
+    let logoutReturn = null;
+    await ctx.route(MCP + '/logout*', async route => {
+      const u = new URL(route.request().url());
+      logoutReturn = u.searchParams.get('return');
+      await route.fulfill({ status: 302, headers: { location: logoutReturn } });
+    });
+    const page = await ctx.newPage();
+    await page.goto(ORIGIN + '/tarefas.html');
+    // No checklist_pass here: this reproduces the login screen showing
+    // (e.g. right after "Sair") with stale env-related localStorage still
+    // left over from a PREVIOUS login on this device - exactly the
+    // symptom reported (env picker still showing the old account's
+    // choices after "Redefinir sessão salva").
+    await page.evaluate(() => {
+      localStorage.setItem('checklist_api', 'https://custom.example/functions/v1/maga-api');
+      localStorage.setItem('checklist_env_choice', 'dev');
+      localStorage.setItem('checklist_env', 'dev');
+      localStorage.setItem('checklist_envs_cache', JSON.stringify({
+        defaultEnv: 'dev', environments: [{ id: 'dev', label: 'Dev' }, { id: 'prod', label: 'Prod' }],
+      }));
+    });
+    await page.reload();
+    await page.waitForSelector('.login', { timeout: 6000 });
+    check('the stale env picker (from the PREVIOUS account) is showing before the reset', await page.$('.login-env') !== null);
+    await page.click('.login-adv summary');
+    await page.click('#reset-mcp-session');
+    await page.waitForURL(ORIGIN + '/tarefas.html*', { timeout: 8000 });
+    check('MCP /logout was hit with a return URL back to this page', !!logoutReturn && logoutReturn.startsWith(ORIGIN));
+    const ls = await page.evaluate(() => ({
+      pass: localStorage.getItem('checklist_pass'),
+      api: localStorage.getItem('checklist_api'),
+      choice: localStorage.getItem('checklist_env_choice'),
+      env: localStorage.getItem('checklist_env'),
+      cache: localStorage.getItem('checklist_envs_cache'),
+    }));
+    check('passphrase cleared', ls.pass === null);
+    check('API override cleared', ls.api === null);
+    check('env choice cleared', ls.choice === null);
+    check('resolved env id cleared', ls.env === null);
+    check('cached environment list cleared too - no stale picker after a reset', ls.cache === null);
+    await page.waitForSelector('.login', { timeout: 6000 });
+    check('no env picker left over after the reset', await page.$('.login-env') === null);
+    await ctx.close();
+  }
+
   await browser.close();
   server.close();
 
