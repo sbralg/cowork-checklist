@@ -7,6 +7,8 @@
 <meta name="apple-mobile-web-app-title" content="Estoque">
 <meta name="theme-color" content="#17120f" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#faf8f4" media="(prefers-color-scheme: light)">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
 <title>Estoque</title>
 <!--
   Data-free shell for the pantry. Same pattern as the other pages: hosted on
@@ -133,6 +135,7 @@ const PAGE_LOGIN = {
 <script src="shared-format.js"></script>
 <script src="shared-inputs.js"></script>
 <script src="shared-catalog.js"></script>
+<script src="shared-pwa.js"></script>
 <script>
 // The whole catalogue with its balances, loaded once and filtered in the
 // browser. Movements update the matching entry in place so the numbers on

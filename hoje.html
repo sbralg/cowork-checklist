@@ -7,6 +7,8 @@
 <meta name="apple-mobile-web-app-title" content="Hoje">
 <meta name="theme-color" content="#17120f" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#faf8f4" media="(prefers-color-scheme: light)">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
 <title>Hoje — resumo do dia</title>
 <!--
   Data-free shell for the daily summary ("Hoje"). Hosted on public GitHub
@@ -143,6 +145,7 @@ const PAGE_LOGIN = {
 <script src="shared-menu.js"></script>
 <script src="shared-ui.js"></script>
 <script src="shared-format.js"></script>
+<script src="shared-pwa.js"></script>
 <script>
 const SOURCE_META = {
   email:            { emoji:"📧", label:"E-mail" },
