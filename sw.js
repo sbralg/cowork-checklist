@@ -27,6 +27,7 @@ const SHELL_FILES = [
   "fornecedores.html",
   "financeiro.html",
   "shared-api.js",
+  "shared-push.js",
   "shared-menu.js",
   "shared-ui.js",
   "shared-format.js",
@@ -93,5 +94,44 @@ self.addEventListener("fetch", (event) => {
         return res;
       })
       .catch(() => caches.match(req).then((cached) => cached || Promise.reject("offline, not cached")))
+  );
+});
+
+// A push arrives here as an encrypted, already-decrypted-by-the-browser
+// payload — maga-api's push_notify_daily_summary sends a JSON body of
+// {title, body, url}. A malformed/empty payload (or a future push type
+// that isn't this shape yet) still shows SOMETHING rather than nothing:
+// per the Push API's own contract, a push event that doesn't result in a
+// visible notification can get the browser to revoke the subscription's
+// silent-push allowance.
+self.addEventListener("push", (event) => {
+  let data = { title: "Magá", body: "" };
+  try {
+    if (event.data) data = Object.assign(data, event.data.json());
+  } catch (_) {
+    // non-JSON payload — fall back to the bare default above
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: "assets/icon-192.png",
+      badge: "assets/icon-192.png",
+      data: { url: data.url || "hoje.html" },
+    })
+  );
+});
+
+// Tapping the notification focuses an already-open tab on this origin if
+// one exists, otherwise opens a new one at the URL the push carried.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = new URL(event.notification.data && event.notification.data.url || "hoje.html", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const client of list) {
+        if (client.url === targetUrl && "focus" in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    })
   );
 });

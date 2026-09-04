@@ -98,7 +98,39 @@ const REPORTS = {
   const errors = [];
   ctx.on('weberror', e => errors.push('pageerror: ' + e.error().message));
 
+  // Push notifications need a fake serviceWorker/PushManager/Notification —
+  // headless Chromium can register a real service worker fine (harmless,
+  // matches every other page here), but a real pushManager.subscribe()
+  // would try to reach an actual push service over the network, which has
+  // no place in a hermetic test. Same "stub only what hardware/platform
+  // APIs demand" convention as compras.test.js's camera/BarcodeDetector
+  // stubs. window.__pushCalls records what the opt-in flow actually did,
+  // separate from the network assertions below (which confirm the RIGHT
+  // request shape reached maga-api, not just that some call happened).
+  await ctx.addInitScript(() => {
+    window.__pushCalls = { subscribe: 0, unsubscribe: 0 };
+    let subscribed = null;
+    const fakeSubscription = {
+      endpoint: 'https://fake.push.example/ep1',
+      toJSON(){ return { endpoint: this.endpoint, keys: { p256dh: 'fake-p256dh', auth: 'fake-auth' } }; },
+      unsubscribe: async () => { window.__pushCalls.unsubscribe++; subscribed = null; return true; },
+    };
+    const fakeRegistration = {
+      pushManager: {
+        getSubscription: async () => subscribed,
+        subscribe: async () => { window.__pushCalls.subscribe++; subscribed = fakeSubscription; return fakeSubscription; },
+      },
+    };
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: { ready: Promise.resolve(fakeRegistration), register: async () => fakeRegistration, addEventListener(){} },
+    });
+    window.PushManager = function(){};
+    window.Notification = { permission: 'default', requestPermission: async () => 'granted' };
+  });
+
   let passphraseSet = false;
+  const pushActionCalls = [];
   await ctx.route('**/functions/v1/maga-api', async route => {
     const req = route.request();
     const headerPass = req.headers()['x-checklist-pass'];
@@ -119,6 +151,9 @@ const REPORTS = {
             next_date: i < dates.length - 1 ? dates[i + 1] : null,
             action_status: report.action_status }
         : { report: null, prev_date: null, next_date: null };
+    } else if (body.action === 'push_subscribe' || body.action === 'push_unsubscribe') {
+      pushActionCalls.push(body);
+      resp = { ok: true };
     } else {
       resp = { error: 'bad action' };
     }
@@ -210,6 +245,38 @@ const REPORTS = {
     await page.locator('#next-day').isEnabled());
   check('‹ is disabled — this is the oldest report',
     !(await page.locator('#prev-day').isEnabled()));
+
+  // --- push notification opt-in ---
+  check('the opt-in card renders, not-yet-subscribed state, got: ' +
+      await page.textContent('#push-optin-msg'),
+    (await page.textContent('#push-optin-msg')).includes('Clique aqui para ser notificado'));
+  check('the button offers to activate, not deactivate',
+    (await page.textContent('#push-optin-btn')).trim() === 'Ativar notificações');
+
+  await page.click('#push-optin-btn');
+  await page.waitForFunction(
+    () => (document.getElementById('push-optin-btn') || {}).textContent?.trim() === 'Desativar',
+    null, { timeout: 6000 });
+  check('subscribing actually called pushManager.subscribe() once',
+    (await page.evaluate(() => window.__pushCalls.subscribe)) === 1);
+  check('subscribing posted push_subscribe to maga-api with the endpoint+keys shape',
+    pushActionCalls.some(c => c.action === 'push_subscribe' &&
+      c.endpoint === 'https://fake.push.example/ep1' &&
+      c.keys && c.keys.p256dh === 'fake-p256dh' && c.keys.auth === 'fake-auth'));
+  check('the card now shows the activated state, got: ' +
+      await page.textContent('#push-optin-msg'),
+    (await page.textContent('#push-optin-msg')).includes('ativadas'));
+
+  await page.click('#push-optin-btn');
+  await page.waitForFunction(
+    () => (document.getElementById('push-optin-btn') || {}).textContent?.trim() === 'Ativar notificações',
+    null, { timeout: 6000 });
+  check('unsubscribing actually called subscription.unsubscribe() once',
+    (await page.evaluate(() => window.__pushCalls.unsubscribe)) === 1);
+  check('unsubscribing posted push_unsubscribe with the same endpoint',
+    pushActionCalls.some(c => c.action === 'push_unsubscribe' && c.endpoint === 'https://fake.push.example/ep1'));
+  check('the card reverts to the not-yet-subscribed message',
+    (await page.textContent('#push-optin-msg')).includes('Clique aqui para ser notificado'));
 
   await page.screenshot({ path: path.join(SHOTS, 'hoje.png'), fullPage: true });
   await browser.close();

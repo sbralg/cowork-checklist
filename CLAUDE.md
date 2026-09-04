@@ -9,6 +9,57 @@ Context file for Claude Code / Claude sessions working on this repo.
 > the names were `checklist-api` / `cowork-checklist` /
 > `cowork-assistant-backend`.**
 
+## Status (2026-09-04): `hoje.html` gets a Web Push opt-in — "🔔 Clique aqui para ser notificado quando um novo resumo for publicado"
+
+Backend half (schema, the new `push` domain, VAPID keys, the DB webhook
+trigger) is in `sbralg/maga-api`'s own CLAUDE.md entry — this one is the
+front-end half, riding on the PWA work from the entries below (manifest +
+`sw.js`, already shipped).
+
+- **New `shared-push.js`**: `subscribeToPush()` / `unsubscribeFromPush()` /
+  `getPushSubscription()`, plus a `VAPID_PUBLIC_KEYS` lookup keyed by the
+  resolved OAuth environment id (`ENV_ID_KEY` — dev and prod are separate
+  Supabase projects with **separate** VAPID key pairs, see the backend
+  repo's entry for why) with a same-two-projects host-matching fallback
+  for the manual-passphrase "Opções avançadas" login path, which never
+  sets an env id. A push subscription is permanently bound to whichever
+  public key was active when it was created, so handing the wrong one to
+  `pushManager.subscribe()` would silently orphan the subscription later.
+- **`sw.js` gained `push` and `notificationclick` handlers** — without
+  them the browser receives the push but shows nothing at all, since a
+  service worker has to explicitly call `showNotification()`. Also added
+  to `SHELL_FILES` so it's cached offline like every other shared script.
+- **`hoje.html`**: a card at the bottom of the page in BOTH the normal
+  report view and the "nenhum resumo ainda" empty state — arguably more
+  useful in the empty state ("tell me the moment the first one lands"),
+  so it wasn't limited to the populated view. Reflects live state
+  (not-yet-subscribed / activated / unsupported / permission-denied) and
+  toggles in place, no page reload.
+- **Deliberately does NOT prompt for permission on page load.**
+  `Notification.requestPermission()` only fires from the button's own
+  click handler. An unprompted ask is a real anti-pattern, not just a
+  style preference: Chrome's own per-site heuristics can silently
+  downgrade an unprompted prompt to the barely-visible "quiet" permission
+  UI, and a reflexive denial burns the one native ask with no way to
+  retry short of the person digging through their phone's site settings.
+- **`test/hoje.test.js` extended**: stubs `navigator.serviceWorker`/
+  `PushManager`/`Notification` (same "stub only what the platform/
+  hardware demands" convention as `compras.test.js`'s camera/
+  `BarcodeDetector` stubs — a REAL `pushManager.subscribe()` would try to
+  reach an actual push service over the network, which has no place in a
+  hermetic test) and asserts the actual `push_subscribe`/
+  `push_unsubscribe` calls reach `maga-api` with the right
+  `endpoint`+`keys` shape, not just that the button's text changed.
+- **Full 12-suite run green**, except a pre-existing, unrelated
+  `stock.test.js` failure ("and the sheet redraws with it") — confirmed
+  via `git stash` to already fail on the pre-change baseline, so not
+  caused here; worth its own pass another time.
+- **Depends on the `maga-api` side being redeployed** — `push_subscribe`
+  won't actually work against the live endpoint until that Edge Function
+  ships the new `push` domain and both Supabase projects have
+  `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` secrets set. See the backend
+  repo's entry for exactly what's still pending there.
+
 ## Status (2026-09-01, even later): the add-row calendar icon never actually grayed out — 📅 is a color emoji, and `color:` cannot touch one
 
 Reported directly: "the calendar icon that allows users to set a date...

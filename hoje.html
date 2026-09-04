@@ -142,6 +142,7 @@ const PAGE_LOGIN = {
 };
 </script>
 <script src="shared-api.js"></script>
+<script src="shared-push.js"></script>
 <script src="shared-menu.js"></script>
 <script src="shared-ui.js"></script>
 <script src="shared-format.js"></script>
@@ -370,14 +371,91 @@ function triagemHtml(p){
   return section("Triagem", inner);
 }
 
+// The opt-in card at the bottom of the page — shown in BOTH render()
+// branches (including "no report yet"), since "tell me when the next one
+// is published" is if anything MORE useful while there's nothing to read
+// yet. wirePushOptIn() below fills in the real state async after this
+// static shell renders, same pattern as the rest of this page's
+// server-driven cards being replaced by render().
+function pushOptInHtml(){
+  return '<div class="sect"><div class="card pad" id="push-optin">' +
+    '<p class="msg" id="push-optin-msg">🔔 Clique aqui para ser notificado quando um novo resumo for publicado.</p>' +
+    '<button class="primary small" id="push-optin-btn">Ativar notificações</button>' +
+    '</div></div>';
+}
+
+// Fills in the opt-in card's real state (unsupported / off / on / denied)
+// and wires the button — called after render() puts the static shell above
+// into the DOM. Notification permission is asked ONLY from the click
+// handler below, never here on load — see shared-push.js's own comment on
+// why an unprompted ask gets silently downgraded by Chrome.
+async function wirePushOptIn(){
+  const box = document.getElementById("push-optin");
+  const msg = document.getElementById("push-optin-msg");
+  const btn = document.getElementById("push-optin-btn");
+  if(!box || !msg || !btn) return;
+
+  if(!("serviceWorker" in navigator) || !("PushManager" in window)){
+    msg.textContent = "Notificações não são compatíveis com este navegador.";
+    btn.hidden = true;
+    return;
+  }
+  if(typeof Notification !== "undefined" && Notification.permission === "denied"){
+    msg.textContent = "Notificações foram bloqueadas para este site — ative nas configurações do navegador para receber avisos.";
+    btn.hidden = true;
+    return;
+  }
+
+  const sub = await getPushSubscription().catch(() => null);
+  const setSubscribedState = () => {
+    msg.textContent = "🔔 Notificações ativadas.";
+    btn.textContent = "Desativar";
+    btn.classList.add("alt");
+  };
+  const setUnsubscribedState = () => {
+    msg.textContent = "🔔 Clique aqui para ser notificado quando um novo resumo for publicado.";
+    btn.textContent = "Ativar notificações";
+    btn.classList.remove("alt");
+  };
+  if(sub) setSubscribedState(); else setUnsubscribedState();
+
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try{
+      const nowSubscribed = !!(await getPushSubscription().catch(() => null));
+      if(nowSubscribed){
+        await unsubscribeFromPush();
+        setUnsubscribedState();
+      }else{
+        await subscribeToPush();
+        setSubscribedState();
+      }
+    }catch(e){
+      if(e.message === "denied"){
+        msg.textContent = "Permissão negada — ative nas configurações do navegador para receber avisos.";
+        btn.hidden = true;
+      }else if(e.message === "unsupported"){
+        msg.textContent = "Notificações não são compatíveis com este navegador.";
+        btn.hidden = true;
+      }else{
+        alert("Não foi possível ativar as notificações agora.");
+      }
+    }finally{
+      btn.disabled = false;
+    }
+  });
+}
+
 function render(data){
   const report = data.report;
   if(!report){
     root.innerHTML = headerHtml() +
       greetingHtml(null) +
       '<p class="msg">Nenhum resumo disponível ainda.</p>' +
-      '<p class="msg">O resumo é gerado todo dia às 07:00.</p>';
+      '<p class="msg">O resumo é gerado todo dia às 07:00.</p>' +
+      pushOptInHtml();
     wireMenuButton();
+    wirePushOptIn();
     return;
   }
   const p = report.payload || {};
@@ -391,9 +469,11 @@ function render(data){
     amanhaHtml(p) +
     instrucoesHtml(p) +
     watchlistHtml(p) +
-    triagemHtml(p);
+    triagemHtml(p) +
+    pushOptInHtml();
 
   wireMenuButton();
+  wirePushOptIn();
   const prev = document.getElementById("prev-day");
   const next = document.getElementById("next-day");
   if(prev && data.prev_date) prev.addEventListener("click", () => { currentDate = data.prev_date; load(); });
