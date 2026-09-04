@@ -43,6 +43,7 @@ const SHELL_FILES = [
   "manifest.json",
   "assets/icon-192.png",
   "assets/icon-512.png",
+  "assets/badge-96.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -115,17 +116,28 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(data.title, {
       body: data.body,
       icon: "assets/icon-192.png",
-      badge: "assets/icon-192.png",
+      // The status-bar icon is NOT a shrunk `icon` — Android keeps only its
+      // ALPHA channel and renders that as a small monochrome silhouette, OS-
+      // tinted. The full detailed circular logo collapses into an unreadable
+      // blob at that size; badge-96.png is a purpose-built bold "M", solid
+      // white on transparent, plain enough to survive being shrunk to ~24dp.
+      badge: "assets/badge-96.png",
       data: { url: data.url || "hoje.html" },
     })
   );
 });
 
-// Tapping the notification focuses an already-open tab on this origin if
-// one exists, otherwise opens a new one at the URL the push carried.
+// Tapping the notification focuses an already-open tab on this app if one
+// exists, otherwise opens a new one at the URL the push carried. Resolved
+// against self.registration.scope, NOT self.location.origin — this app is
+// served from a GitHub Pages PROJECT site (…/maga-web/, not the domain
+// root), so origin alone drops that path prefix. That was a real bug: the
+// resulting off-scope URL couldn't be matched to the installed WebAPK
+// either, so Android opened it as a plain browser tab instead of routing
+// it into the installed app's own window.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = new URL(event.notification.data && event.notification.data.url || "hoje.html", self.location.origin).href;
+  const targetUrl = new URL(event.notification.data && event.notification.data.url || "hoje.html", self.registration.scope).href;
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
       for (const client of list) {

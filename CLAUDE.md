@@ -60,6 +60,44 @@ front-end half, riding on the PWA work from the entries below (manifest +
   `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` secrets set. See the backend
   repo's entry for exactly what's still pending there.
 
+### Follow-up the same day: two real bugs from the first live notification, both fixed
+
+The user enabled notifications, triggered a real daily-summary run, and got
+a real push — which surfaced two bugs no amount of the earlier fake-backend
+testing could have caught, plus a design gap in the status-bar icon.
+
+- **Tapping the notification opened a plain browser tab at the WRONG URL**
+  (`https://sbralg.github.io/hoje.html` — missing the `/maga-web/` prefix
+  entirely) **instead of routing into the installed app's own window.**
+  `notificationclick`'s `new URL(url, self.location.origin)` was the bug —
+  `.origin` is just `https://sbralg.github.io`, dropping the path prefix
+  a GitHub Pages **project** site (as opposed to a user/org site or a
+  custom domain) always carries. Fixed to resolve against
+  `self.registration.scope` instead, which correctly includes it.
+  **The two symptoms were the same bug, not two**: Android matches a
+  clicked URL against an installed WebAPK by checking whether it falls
+  inside that app's registered scope; a URL outside `maga-web`'s scope
+  can't be matched to anything, so Chrome fell back to an ordinary tab.
+  Fixing the URL should fix the open-in-app behavior as a side effect,
+  not as a separate change. **Verified directly** (not just reasoned
+  about): a throwaway test served the repo under a real `/maga-web/`
+  prefix (the existing test server serves at root, which would never
+  have exercised this), confirming `self.registration.scope` resolves to
+  `.../maga-web/` and `new URL("hoje.html", scope)` lands on
+  `.../maga-web/hoje.html`.
+- **The Android status-bar icon looked like a muddy blob of the full
+  logo, not something anyone would have chosen on purpose.** The `badge`
+  option in `showNotification()` is NOT a shrunk version of `icon` —
+  Android keeps only its ALPHA channel and renders that as a small
+  monochrome, OS-tinted silhouette. `sw.js` was reusing the same detailed
+  circular badge (dashed ring, banner, wordmark) for both, and that much
+  fine detail cannot survive being flattened to a ~24dp silhouette.
+  **New `assets/badge-96.png`** — a single bold "M", solid white on
+  transparent, rendered the same Playwright-SVG-to-PNG way the app icons
+  were — is simple and high-contrast enough to actually read at that
+  size. `icon-192.png` is unchanged and still used for `icon` (the
+  full-color image inside the expanded notification).
+
 ## Status (2026-09-01, even later): the add-row calendar icon never actually grayed out — 📅 is a color emoji, and `color:` cannot touch one
 
 Reported directly: "the calendar icon that allows users to set a date...
