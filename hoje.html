@@ -46,17 +46,16 @@
      a short, day-aware line. The text is payload.saudacao, written by the
      morning report generator; a static line stands in when the field is
      absent (old reports, or a partial payload).
-     assets/avatar-maga.png is the full-size portrait (~2.4 MB) framed to
-     the face here with object-fit/position — a pre-cropped square headshot
-     dropped in at that path will just work too, only faster to load. */
+     assets/avatar-maga.webp is a pre-cropped square headshot (232x232px,
+     ~15 KB) — replaced the earlier full-size portrait (1024x1536, 2.4 MB)
+     that needed a background-size zoom + position offset to frame the
+     face; this file is already framed, so cover/center (from the
+     shorthand above) is all it needs. */
   .greeting{display:flex;align-items:center;gap:12px;margin:2px 0 16px}
   .greeting .av{
     width:58px;height:58px;border-radius:50%;flex:none;
     border:2px solid var(--accent);background:var(--card) center/cover no-repeat;
-    /* the source is the full portrait — zoom + offset to frame the face */
-    background-image:url(assets/avatar-maga.png);
-    background-size:230%;
-    background-position:40% 17%;
+    background-image:url(assets/avatar-maga.webp);
   }
   .greeting p{margin:0;font-size:14px;line-height:1.45;color:var(--text)}
 
