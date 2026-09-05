@@ -573,7 +573,16 @@ function handleMove(body) {
   await page.fill('#pe-net-qty', '1,5');
   await page.selectOption('#pe-net-unit', 'kg');
   await page.click('#pe-ok');
-  await page.waitForSelector('.ins-head', { timeout: 6000 });
+  // .ins-head is already on the page from before this edit (the modal is
+  // an overlay, not a replacement of the sheet underneath), so waiting on
+  // its mere presence can resolve before insumo_upsert even returns —
+  // this raced under real network latency (a slow insumo_upsert) even
+  // though it never did against this fake's near-instant responses. Wait
+  // for the redrawn name itself, the same "wait for the state to settle"
+  // rule as waitQty()/the movement-delete fix above.
+  await page.waitForFunction(
+    () => document.querySelector('.ins-title .name')?.textContent === 'Leite Condensado Moça',
+    null, { timeout: 6000 });
 
   const upsert = state.calls.filter(c => c.action === 'insumo_upsert').pop();
   check('the edit reaches the catalogue', !!upsert);

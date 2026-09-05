@@ -9,6 +9,41 @@ Context file for Claude Code / Claude sessions working on this repo.
 > the names were `checklist-api` / `cowork-checklist` /
 > `cowork-assistant-backend`.**
 
+## Status (2026-09-05): the "worth its own pass" `stock.test.js` flake — a test race, not an app bug
+
+Follow-up on the 2026-09-04 entry's loose end: "and the sheet redraws with
+it" (the insumo name after an `insumos.html` metadata edit) failed
+intermittently. `insumos.html`'s own redraw logic turned out correct —
+`openInsumo(p.gtin)` really is called after a successful `insumo_upsert`
+and really does show the fresh name — so the fix landed in the test, not
+the page.
+
+- **Root cause: `.ins-head` is not a reliable "the redraw happened"
+  signal, because it's already on the page from BEFORE the edit.** The
+  metadata editor is a modal overlay appended to `document.body`, not a
+  replacement of the sheet underneath, so `.ins-head` (with the STALE,
+  pre-edit name still inside it) stays in the DOM the whole time the modal
+  is open. `await page.waitForSelector('.ins-head', {timeout:6000})`
+  right after clicking Salvar can therefore resolve **immediately**,
+  before `insumo_upsert` has even returned — and the very next line then
+  reads the old name straight out of that stale element.
+- **Why it never failed against this repo's own fake, only for real:**
+  the fake's `route.fulfill` responds essentially synchronously, so by the
+  time the test's next `await page.*()` call round-trips over CDP, the
+  real (fast) save-and-redraw chain has usually already landed — masking
+  the race locally. Reproduced on demand by adding an artificial delay to
+  the fake's `insumo_upsert` response (the call gating whether
+  `openInsumo()` even runs yet): with the delay, the unpatched test failed
+  every time with exactly the reported message; against a live Supabase
+  Edge Function, that delay is just ordinary network latency, which is
+  presumably why it surfaced there but not here.
+- **Fix, `test/stock.test.js`**: swapped the `.ins-head` presence check
+  for a `waitForFunction` on the actual redrawn name text — the same
+  "wait for the state to actually settle" rule this file already applies
+  elsewhere (`waitQty()`, and the 2026-08-27 movement-delete redraw fix
+  right above this one in the file). Confirmed the fix holds under the
+  same artificial-delay repro before removing it. Full 12-suite run green.
+
 ## Status (2026-09-04): `hoje.html` gets a Web Push opt-in — "🔔 Clique aqui para ser notificado quando um novo resumo for publicado"
 
 Backend half (schema, the new `push` domain, VAPID keys, the DB webhook
